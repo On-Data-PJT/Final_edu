@@ -16,6 +16,7 @@ Last Updated: 2026-04-07
   - `AGENTS.md`: 운영 계약 문서
   - `STATUS.md`: 현재 상태 스냅샷 + 최근 변경
   - `DEBUG.md`: 해결된 오류와 재발 방지 규칙
+  - 협업 규칙 문서는 `AGENTS.md` 중심으로 단일화됨
 - 현재 브랜치 상태: `feat/mvp-curriculum-coverage...origin/feat/mvp-curriculum-coverage`
 - 현재 작업 트리 상태: 현재 브랜치 기준 clean 상태
 
@@ -128,3 +129,5 @@ Last Updated: 2026-04-07
 - 기능 브랜치 `feat/mvp-curriculum-coverage` 생성
 - 커밋 `836c53d` (`feat: add curriculum coverage MVP`) 생성
 - 원격 `origin/feat/mvp-curriculum-coverage`로 푸시 및 추적 브랜치 설정 완료
+- 중복 역할의 `CONTRIBUTING.md` 삭제
+- 협업/운영 규칙 문서를 `AGENTS.md` 중심으로 정리
