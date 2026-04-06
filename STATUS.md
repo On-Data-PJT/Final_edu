@@ -16,8 +16,8 @@ Last Updated: 2026-04-07
   - `AGENTS.md`: 운영 계약 문서
   - `STATUS.md`: 현재 상태 스냅샷 + 최근 변경
   - `DEBUG.md`: 해결된 오류와 재발 방지 규칙
-- 현재 브랜치 상태: `main...origin/main`
-- 현재 작업 트리 상태: MVP 구현 변경이 아직 커밋되지 않은 상태
+- 현재 브랜치 상태: `feat/mvp-curriculum-coverage...origin/feat/mvp-curriculum-coverage`
+- 현재 작업 트리 상태: 현재 브랜치 기준 clean 상태
 
 ## Current Goal
 
@@ -26,7 +26,7 @@ Last Updated: 2026-04-07
   - 실제 데모용 강의자료 2~3세트 확보
   - Render 실배포 검증
   - 결과 해석 문구와 경고 메시지 튜닝
-  - 미커밋 변경 정리 및 의도된 커밋 단위 분리
+  - 데모 안정화용 후속 작업을 기능별로 다시 분리
 
 ## Current Parallel Lanes
 
@@ -93,13 +93,13 @@ Last Updated: 2026-04-07
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
-- 현재 worktree 가 dirty 상태이므로 다음 작업자는 기존 변경을 되돌리지 말 것
+- 현재 브랜치는 clean 상태지만, 이후 작업은 이 브랜치에서 의도된 단위로 이어갈 것
 
 ## Working Tree Notes
 
-- 현재 미커밋 변경은 의도된 진행 중 구현이다
+- 현재 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 다른 사람이 만든 변경처럼 보여도 현재 turn 에서 생성된 유효한 MVP 구현이 포함되어 있으므로 함부로 정리하거나 삭제하지 말 것
+- 이후 변경도 dirty worktree 전제를 유지해 신중히 다루되, 현재 기준점은 clean 이다
 
 ## Recent Updates
 
@@ -125,3 +125,6 @@ Last Updated: 2026-04-07
 - 중대한 변경사항 발생 시 `AGENTS.md`까지 함께 수정하는 규칙 추가
 - subagent 병렬 작업 규칙 구체화
 - dispatch matrix, 병렬 수 제한, handoff/integration gate, stable parallel lane 개념 추가
+- 기능 브랜치 `feat/mvp-curriculum-coverage` 생성
+- 커밋 `836c53d` (`feat: add curriculum coverage MVP`) 생성
+- 원격 `origin/feat/mvp-curriculum-coverage`로 푸시 및 추적 브랜치 설정 완료
