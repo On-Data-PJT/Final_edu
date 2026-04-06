@@ -1,0 +1,147 @@
+# DEBUG
+
+Last Updated: 2026-04-07
+
+이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.  
+각 항목은 다음 에이전트가 같은 실수를 반복하지 않도록 하기 위한 재발 방지 규칙까지 포함해야 합니다.
+
+앞으로 모든 오류 항목에는 가능하면 `Agent / Lane` 도 함께 기록합니다.
+
+---
+
+## 1. `uv_build + src layout` editable import 실패
+
+### Date
+
+2026-04-06
+
+### Agent / Lane
+
+Lead / Integration
+
+### Symptom
+
+- `uv sync` 후 패키지는 설치된 것처럼 보이는데 `uv run final-edu` 또는 `import final_edu`에서 `ModuleNotFoundError` 발생
+
+### Where
+
+- 초기 프로젝트 레이아웃이 `src/final_edu`였던 시점
+
+### Root Cause
+
+- 현재 워크스페이스 환경에서 `uv_build` editable install 이 `src layout`과 안정적으로 맞물리지 않았음
+
+### Resolution
+
+- 패키지 레이아웃을 루트 패키지 방식으로 전환
+- 실행 기준을 `uv run python -m final_edu`로 통일
+- `pyproject.toml`의 `module-root`를 `""`로 정리
+
+### Prevention Rule
+
+- 현재 저장소에서는 `src layout`을 기본값으로 다시 도입하지 말 것
+- 패키지 실행은 콘솔 스크립트보다 `python -m final_edu`를 우선 검증할 것
+
+---
+
+## 2. FastAPI `Annotated + Form default` 선언 오류
+
+### Date
+
+2026-04-06
+
+### Agent / Lane
+
+Web / Demo Agent
+
+### Symptom
+
+- 앱 생성 시 route registration 단계에서 assertion 발생
+- 에러 메시지: `Form default value cannot be set in Annotated`
+
+### Where
+
+- `final_edu/app.py`
+
+### Root Cause
+
+- `Annotated[str, Form("")]`처럼 `Form()` 안에 default 값을 넣어 선언했음
+
+### Resolution
+
+- `Annotated[str, Form()] = ""` 형태로 수정
+- dependency marker 와 Python default 값을 분리
+
+### Prevention Rule
+
+- FastAPI에서 `Annotated`를 사용할 때 `Form()` / `File()` / `Query()` 안에 default 값을 넣지 말 것
+- 기본값은 파라미터의 `=` 오른쪽에 둘 것
+
+---
+
+## 3. `TemplateResponse` 시그니처 차이로 인한 렌더링 오류
+
+### Date
+
+2026-04-06
+
+### Agent / Lane
+
+Web / Demo Agent
+
+### Symptom
+
+- 템플릿 렌더링 시 `TypeError: unhashable type: 'dict'` 발생
+
+### Where
+
+- `final_edu/app.py`
+- `templates.TemplateResponse(...)` 호출부
+
+### Root Cause
+
+- 현재 FastAPI / Starlette 버전의 `TemplateResponse` 시그니처는 `(request, name, context)`인데,
+  예전 방식처럼 `(name, context)` 형태로 호출했음
+
+### Resolution
+
+- `templates.TemplateResponse(request, "index.html", context)`로 수정
+
+### Prevention Rule
+
+- FastAPI/Starlette 버전을 올리거나 새 프로젝트를 붙일 때는 `inspect.signature(...)`로 런타임 시그니처를 먼저 확인할 것
+- 템플릿 예제 코드를 그대로 복사하지 말고 현재 설치 버전에 맞출 것
+
+---
+
+## 4. Jinja 템플릿에서 `row.items` 충돌
+
+### Date
+
+2026-04-06
+
+### Agent / Lane
+
+Web / Demo Agent
+
+### Symptom
+
+- 결과 페이지 렌더링 시 `TypeError: 'builtin_function_or_method' object is not iterable` 발생
+
+### Where
+
+- `final_edu/templates/index.html`
+- 비교 결과 루프
+
+### Root Cause
+
+- 템플릿 context 딕셔너리 키 이름을 `items`로 사용해 Jinja가 `dict.items` 메서드와 충돌함
+
+### Resolution
+
+- 템플릿 데이터 키를 `items`에서 `entries`로 변경
+
+### Prevention Rule
+
+- Jinja context 에는 `items`, `keys`, `values`, `get`처럼 dict 메서드와 겹치는 키 이름을 피할 것
+- 템플릿 전용 데이터 구조는 메서드명 충돌 가능성을 먼저 점검할 것

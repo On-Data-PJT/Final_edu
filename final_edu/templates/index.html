@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Final Edu | Curriculum Coverage{% endblock %}
+
+{% block content %}
+  <section class="hero panel">
+    <div class="hero-copy">
+      <p class="eyebrow">Curriculum Coverage Standardization</p>
+      <h1>강사별 커리큘럼 편차를<br />자료 기반으로 비교합니다.</h1>
+      <p class="hero-text">
+        표준 커리큘럼과 강의 자료를 입력하면, 자료를 텍스트 청크로 정규화한 뒤
+        대단원 기준 비중을 계산하고 대표 근거 스니펫까지 함께 보여줍니다.
+      </p>
+      <div class="badge-row">
+        {% for badge in method_badges %}
+          <span class="badge">{{ badge }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="hero-metric">
+      <div class="metric-card">
+        <span class="metric-label">지원 포맷</span>
+        <strong>{{ supported_formats | join(", ") }}</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">분석 기준</span>
+        <strong>운영자 정의 대단원</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">분류 엔진</span>
+        <strong>OpenAI optional / lexical fallback</strong>
+      </div>
+    </div>
+  </section>
+
+  {% if error %}
+    <section class="notice error">{{ error }}</section>
+  {% endif %}
+
+  <section class="panel">
+    <div class="section-heading">
+      <h2>분석 입력</h2>
+      <p>대단원 커리큘럼과 강사별 자료를 넣으면 즉시 비교 결과를 생성합니다.</p>
+    </div>
+    <form class="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
+      <label class="field">
+        <span>표준 커리큘럼</span>
+        <textarea
+          name="curriculum_text"
+          rows="8"
+          placeholder="1. 문제 정의 | 학습 목표, 배경, 문제 맥락&#10;2. 핵심 개념 | 주요 개념, 용어, 원리&#10;3. 실습과 적용 | 예제, 코드, 실습 과정"
+        >{{ form_values.curriculum_text }}</textarea>
+      </label>
+
+      <div class="instructor-grid">
+        {% for instructor in form_values.instructors %}
+          <article class="panel instructor-input">
+            <h3>강사 {{ loop.index }}</h3>
+            <label class="field">
+              <span>강사명</span>
+              <input
+                type="text"
+                name="instructor_{{ loop.index }}_name"
+                value="{{ instructor.name }}"
+                placeholder="예: 김강사"
+              />
+            </label>
+            <label class="field">
+              <span>YouTube URL</span>
+              <textarea
+                name="instructor_{{ loop.index }}_youtube_urls"
+                rows="4"
+                placeholder="한 줄에 하나씩 입력"
+              >{{ instructor.youtube_urls }}</textarea>
+            </label>
+            <label class="field">
+              <span>자료 파일</span>
+              <input
+                type="file"
+                name="instructor_{{ loop.index }}_files"
+                multiple
+                accept=".pdf,.pptx,.txt,.md"
+              />
+            </label>
+          </article>
+        {% endfor %}
+      </div>
+
+      <div class="form-actions">
+        <button class="primary-button" type="submit">강의 비중 분석 시작</button>
+        <p class="hint">
+          텍스트형 PDF/PPTX와 자막이 있는 YouTube URL에서 가장 안정적으로 동작합니다.
+        </p>
+      </div>
+    </form>
+  </section>
+
+  {% if result %}
+    <section class="results-grid">
+      <article class="panel summary-panel">
+        <div class="section-heading">
+          <h2>분석 요약</h2>
+          <p>이번 실행에서 사용된 분석 모드와 결과 개요입니다.</p>
+        </div>
+        <div class="summary-cards">
+          <div class="metric-card">
+            <span class="metric-label">분석 시간</span>
+            <strong>{{ result.duration_ms }}ms</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">분류 모드</span>
+            <strong>{{ result.scorer_mode }}</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">강사 수</span>
+            <strong>{{ result.instructors | length }}</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">대단원 수</span>
+            <strong>{{ result.sections | length }}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel comparison-panel">
+        <div class="section-heading">
+          <h2>대단원별 비중 비교</h2>
+          <p>각 행은 하나의 대단원이며, 막대 길이는 강사별 비중을 의미합니다.</p>
+        </div>
+        <div class="comparison-rows">
+          {% for row in comparison_rows %}
+            <div class="comparison-row">
+              <div class="comparison-title">{{ row.title }}</div>
+              <div class="comparison-bars">
+                {% for item in row.entries %}
+                  <div class="bar-line">
+                    <div class="bar-meta">
+                      <span>{{ item.name }}</span>
+                      <span>{{ "%.1f"|format(item.share * 100) }}%</span>
+                    </div>
+                    <div class="bar-track">
+                      <div class="bar-fill fill-{{ loop.index0 }}" style="width: {{ "%.1f"|format(item.share * 100) }}%"></div>
+                    </div>
+                    {% if item.deviation %}
+                      <span class="deviation {% if item.deviation > 0 %}positive{% else %}negative{% endif %}">
+                        평균 대비 {{ "%+.1f"|format(item.deviation * 100) }}%
+                      </span>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    {% if result.warnings %}
+      <section class="panel">
+        <div class="section-heading">
+          <h2>처리 경고</h2>
+          <p>지원 범위 밖이거나 품질 저하 가능성이 있는 항목들입니다.</p>
+        </div>
+        <ul class="warning-list">
+          {% for warning in result.warnings %}
+            <li>{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    <section class="instructor-results">
+      {% for instructor in result.instructors %}
+        <article class="panel instructor-result-card">
+          <div class="section-heading">
+            <h2>{{ instructor.name }}</h2>
+            <p>총 {{ instructor.asset_count }}개 소스, 추출 토큰 {{ instructor.total_tokens }}개</p>
+          </div>
+          <div class="instructor-meta">
+            <span class="meta-chip">Other / Unmapped {{ "%.1f"|format(instructor.unmapped_share * 100) }}%</span>
+            {% if instructor.warnings %}
+              <span class="meta-chip warning-chip">경고 {{ instructor.warnings | length }}건</span>
+            {% endif %}
+          </div>
+          <table class="coverage-table">
+            <thead>
+              <tr>
+                <th>대단원</th>
+                <th>비중</th>
+                <th>평균 대비</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for coverage in instructor.section_coverages %}
+                <tr>
+                  <td>{{ coverage.section_title }}</td>
+                  <td>{{ "%.1f"|format(coverage.token_share * 100) }}%</td>
+                  <td class="{% if coverage.deviation_from_average > 0 %}positive{% elif coverage.deviation_from_average < 0 %}negative{% endif %}">
+                    {{ "%+.1f"|format(coverage.deviation_from_average * 100) }}%
+                  </td>
+                </tr>
+              {% endfor %}
+              <tr>
+                <td>Other / Unmapped</td>
+                <td>{{ "%.1f"|format(instructor.unmapped_share * 100) }}%</td>
+                <td>-</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {% for coverage in instructor.section_coverages %}
+            <details class="evidence-block">
+              <summary>{{ coverage.section_title }} 근거 보기</summary>
+              {% if coverage.evidence_snippets %}
+                <div class="evidence-list">
+                  {% for snippet in coverage.evidence_snippets %}
+                    <article class="evidence-item">
+                      <div class="evidence-meta">
+                        <span>{{ snippet.source_label }}</span>
+                        <span>{{ snippet.locator }}</span>
+                        <span>score {{ "%.2f"|format(snippet.score) }}</span>
+                      </div>
+                      <p>{{ snippet.text }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="hint">대표 근거를 충분히 확보하지 못했습니다.</p>
+              {% endif %}
+            </details>
+          {% endfor %}
+
+          {% if instructor.warnings %}
+            <details class="evidence-block">
+              <summary>이 강사의 처리 경고 보기</summary>
+              <ul class="warning-list">
+                {% for warning in instructor.warnings %}
+                  <li>{{ warning }}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+{% endblock %}

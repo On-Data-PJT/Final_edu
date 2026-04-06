@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: final-edu
+    env: python
+    plan: free
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run python -m final_edu --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12

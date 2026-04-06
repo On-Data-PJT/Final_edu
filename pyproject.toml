@@ -1,10 +1,19 @@
 [project]
 name = "final-edu"
 version = "0.1.0"
-description = "KIT 바이브코딩 공모전 협업용 초기 프로젝트"
+description = "Curriculum coverage standardization MVP for the KIT vibe coding contest"
 readme = "README.md"
 requires-python = "==3.12.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.116.0",
+    "jinja2>=3.1.0",
+    "openai>=1.0.0",
+    "pypdf>=5.0.0",
+    "python-multipart>=0.0.20",
+    "python-pptx>=1.0.0",
+    "uvicorn>=0.35.0",
+    "youtube-transcript-api>=1.2.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.6,<0.10.0"]
