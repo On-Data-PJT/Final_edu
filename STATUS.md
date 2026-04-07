@@ -28,7 +28,7 @@ Last Updated: 2026-04-07
   - `DEBUG.md`: 해결된 오류와 재발 방지 규칙
   - 협업 규칙 문서는 `AGENTS.md` 중심으로 단일화됨
 - 현재 브랜치 상태: `feat/mvp-curriculum-coverage...origin/feat/mvp-curriculum-coverage`
-- 현재 작업 트리 상태: `.env` 자동 로딩 및 문서 갱신 변경으로 dirty 상태
+- 현재 작업 트리 상태: clean 상태
 
 ## Current Goal
 
@@ -126,8 +126,8 @@ Last Updated: 2026-04-07
 
 - 기존 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 현재 기준점은 `.env` 자동 로딩 및 문서 갱신 변경이 반영된 dirty 상태다
-- 다음 작업자는 시작 전에 이 변경이 커밋되었는지 먼저 확인하고 이어가면 된다
+- 현재 기준점은 `.env` 자동 로딩과 문서 반영이 커밋되어 원격 브랜치까지 푸시된 clean 상태다
+- 다음 작업자는 이 브랜치 기준으로 바로 후속 작업을 이어가면 된다
 - `STATUS.md`는 현재 사실을 기록하는 문서이며, 방금 만든 모든 커밋 해시를 계속 덧붙이는 용도로 쓰지 않는다
 
 ## Recent Updates
@@ -173,3 +173,4 @@ Last Updated: 2026-04-07
 - 커밋/푸시 후 `STATUS.md`가 무한히 다시 수정되지 않도록 close-out 규칙을 현재 사실 중심으로 정리
 - 저장소 루트 `.env` 자동 로딩 추가
 - 로컬 개발에서 OpenAI 키를 `.env`에만 두고도 앱이 설정을 읽도록 정리
+- `.env` 자동 로딩 변경을 `feat/mvp-curriculum-coverage` 브랜치에 커밋 및 푸시 완료
