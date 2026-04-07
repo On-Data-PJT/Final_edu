@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DOTENV_PATH = PROJECT_ROOT / ".env"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -46,8 +49,30 @@ class Settings:
         return "r2" if all(required) else "local"
 
 
+def _load_dotenv(dotenv_path: Path = DOTENV_PATH) -> None:
+    if not dotenv_path.exists():
+        return
+
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", maxsplit=1)
+        normalized_key = key.strip()
+        if not normalized_key or normalized_key in os.environ:
+            continue
+
+        normalized_value = value.strip()
+        if normalized_value and normalized_value[0] == normalized_value[-1] and normalized_value[0] in {'"', "'"}:
+            normalized_value = normalized_value[1:-1]
+
+        os.environ[normalized_key] = normalized_value
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    _load_dotenv()
     max_upload_mb = int(os.getenv("FINAL_EDU_MAX_UPLOAD_MB", "20"))
     return Settings(
         app_name="Final Edu",

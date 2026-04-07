@@ -112,6 +112,7 @@
 - 커리큘럼 기준: 운영자가 직접 입력한 대단원
 - 분석 방식: 업로드/URL 등록 → Job enqueue → 배경 분석 → 결과 조회
 - 임베딩: `OPENAI_API_KEY`가 있으면 OpenAI 사용, 없으면 lexical fallback
+- 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
 - 저장소:
   - 프로덕션: `Render Web + Worker + Key Value + Cloudflare R2`
   - 로컬 개발: `inline/local` fallback 허용

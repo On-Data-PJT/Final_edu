@@ -80,6 +80,9 @@ FINAL_EDU_PORT=8000
 FINAL_EDU_MAX_UPLOAD_MB=100
 ```
 
+저장소 루트의 `.env`는 앱 시작 시 자동으로 읽습니다.  
+단, 이미 셸이나 배포 환경에 export 된 값이 있으면 그 값이 `.env`보다 우선합니다.
+
 ### 5. 로컬 서버 실행
 
 ```bash
