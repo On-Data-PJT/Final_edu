@@ -117,14 +117,14 @@ Last Updated: 2026-04-07
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
-- 배치 아키텍처 전환은 커밋 `71082c8`로 브랜치에 반영되어 원격까지 푸시된 상태다
+- 배치 아키텍처 전환과 운영 문서 보강은 현재 브랜치에 반영되어 있다
 
 ## Working Tree Notes
 
 - 기존 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
 - 현재 기준점은 clean 이며, 다음 작업은 이 브랜치에서 의도된 단위로 이어가면 된다
-- 배치 아키텍처 전환 이후에는 커밋/푸시 뒤 `STATUS.md`가 최신 상태인지 한 번 더 확인해야 한다
+- `STATUS.md`는 현재 사실을 기록하는 문서이며, 방금 만든 모든 커밋 해시를 계속 덧붙이는 용도로 쓰지 않는다
 
 ## Recent Updates
 
@@ -164,9 +164,6 @@ Last Updated: 2026-04-07
 - 로컬 TestClient 기준 Job 생성/상태/결과 검증 통과
 - 샌드박스 밖 실행으로 `uv.lock` 갱신 완료
 - `uv sync` 완료 및 새 의존성(`boto3`, `redis`, `rq`) 설치 반영
-- 커밋 `71082c8` (`feat: add batch curriculum analysis workflow`) 생성
-- 원격 `origin/feat/mvp-curriculum-coverage`로 배치 아키텍처 전환 변경 푸시 완료
 - `STATUS.md`의 작업 트리 상태를 실제 clean 상태로 정정
 - `AGENTS.md`에 커밋/푸시 후 `STATUS.md` 재검증 규칙 추가
-- 커밋 `9011f3b` (`docs: tighten status close-out workflow`) 생성
-- 원격 `origin/feat/mvp-curriculum-coverage`에 문서 정합성 보강 반영 완료
+- 커밋/푸시 후 `STATUS.md`가 무한히 다시 수정되지 않도록 close-out 규칙을 현재 사실 중심으로 정리

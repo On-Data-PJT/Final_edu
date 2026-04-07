@@ -35,10 +35,11 @@
 2. 작업 중 발생했고 해결한 오류가 있으면 `DEBUG.md`에 반영
 3. 아래의 `Major Change Triggers` 중 하나에 해당하면 `AGENTS.md`도 반영
 4. 커밋이나 푸시를 했다면 `git status --short --branch`를 다시 확인
-5. 커밋/푸시 이후 상태가 `STATUS.md`와 달라졌다면 `STATUS.md`를 한 번 더 갱신
+5. 커밋/푸시 이후 브랜치명, clean/dirty 여부, 원격 동기화 상태처럼 **현재 사실**이 `STATUS.md`와 달라졌다면 `STATUS.md`를 한 번 더 갱신
 6. 최종적으로 작업 트리 상태를 확인
 
 `STATUS.md` 또는 `DEBUG.md`를 반영하지 않고 작업을 끝낸 것으로 간주하지 않습니다.
+단, 방금 만든 문서 커밋의 해시까지 `STATUS.md`에 다시 적기 위해 후속 커밋을 만드는 것은 금지합니다.
 
 ## Document Responsibilities
 
@@ -69,6 +70,8 @@
 - 방금 끝낸 작업으로 무엇이 바뀌었는가
 
 다음 에이전트가 1분 안에 “지금 어디까지 왔는지”를 파악할 수 있어야 합니다.
+
+`STATUS.md`는 현재 스냅샷 문서이므로, 모든 최신 커밋 해시를 추적하는 changelog로 쓰지 않습니다.
 
 ### `DEBUG.md`
 
