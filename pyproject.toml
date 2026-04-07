@@ -5,12 +5,15 @@ description = "Curriculum coverage standardization MVP for the KIT vibe coding c
 readme = "README.md"
 requires-python = "==3.12.12"
 dependencies = [
+    "boto3>=1.40.0",
     "fastapi>=0.116.0",
     "jinja2>=3.1.0",
     "openai>=1.0.0",
     "pypdf>=5.0.0",
     "python-multipart>=0.0.20",
     "python-pptx>=1.0.0",
+    "redis>=6.0.0",
+    "rq>=2.0.0",
     "uvicorn>=0.35.0",
     "youtube-transcript-api>=1.2.0",
 ]

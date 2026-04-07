@@ -13,3 +13,4 @@ htmlcov/
 !.env.example
 .idea/
 .vscode/
+.final_edu_runtime/

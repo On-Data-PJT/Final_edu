@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}Final Edu | Job {{ job.id }}{% endblock %}
+
+{% block content %}
+  <section class="hero panel compact-hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Batch Analysis Job</p>
+      <h1>분석 작업 {{ job.id }}</h1>
+      <p class="hero-text">
+        전체 커리큘럼 자료를 배치 처리하는 작업 상세 화면입니다.
+        작업 상태와 처리 규모를 먼저 확인하고, 완료되면 결과 비교 화면이 이어집니다.
+      </p>
+    </div>
+    <div class="hero-metric">
+      <div class="metric-card">
+        <span class="metric-label">작업 상태</span>
+        <strong>{{ job.status_label }}</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">생성 시각</span>
+        <strong>{{ job.created_at_label }}</strong>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">마지막 갱신</span>
+        <strong id="job-updated">{{ job.updated_at_label }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="results-grid">
+    <article class="panel summary-panel">
+      <div class="section-heading">
+        <h2>작업 요약</h2>
+        <p>이번 작업에 등록된 자료 규모와 실행 구성을 보여줍니다.</p>
+      </div>
+      <div class="summary-cards">
+        <div class="metric-card">
+          <span class="metric-label">강사 수</span>
+          <strong>{{ job.instructor_count }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">파일 수</span>
+          <strong>{{ job.asset_count }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">YouTube URL 수</span>
+          <strong>{{ job.youtube_url_count }}</strong>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">대단원 수</span>
+          <strong>{{ job.section_count }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel comparison-panel">
+      <div class="section-heading">
+        <h2>진행 상태</h2>
+        <p>큐 대기, 분석 진행, 완료, 실패 중 현재 상태를 보여줍니다.</p>
+      </div>
+      <div class="job-status-panel">
+        <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
+        {% if job.is_active %}
+          <p class="hint">이 화면은 자동으로 상태를 갱신합니다.</p>
+        {% elif job.is_failed %}
+          <p class="hint">작업이 실패했습니다. 아래 오류 내용을 확인해 주세요.</p>
+        {% else %}
+          <p class="hint">작업이 완료되어 결과를 확인할 수 있습니다.</p>
+        {% endif %}
+      </div>
+      {% if job.error %}
+        <div class="notice error">{{ job.error }}</div>
+      {% endif %}
+    </article>
+  </section>
+
+  {% if result %}
+    <section class="results-grid">
+      <article class="panel summary-panel">
+        <div class="section-heading">
+          <h2>분석 요약</h2>
+          <p>완료된 작업의 실행 정보와 결과 개요입니다.</p>
+        </div>
+        <div class="summary-cards">
+          <div class="metric-card">
+            <span class="metric-label">분석 시간</span>
+            <strong>{{ result.duration_ms }}ms</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">분류 모드</span>
+            <strong>{{ result.scorer_mode }}</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">강사 수</span>
+            <strong>{{ result.instructors | length }}</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">경고 수</span>
+            <strong>{{ result.warnings | length }}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel comparison-panel">
+        <div class="section-heading">
+          <h2>대단원별 비중 비교</h2>
+          <p>각 행은 하나의 대단원이며, 막대 길이는 강사별 비중을 의미합니다.</p>
+        </div>
+        <div class="comparison-rows">
+          {% for row in comparison_rows %}
+            <div class="comparison-row">
+              <div class="comparison-title">{{ row.title }}</div>
+              <div class="comparison-bars">
+                {% for item in row.entries %}
+                  <div class="bar-line">
+                    <div class="bar-meta">
+                      <span>{{ item.name }}</span>
+                      <span>{{ "%.1f"|format(item.share * 100) }}%</span>
+                    </div>
+                    <div class="bar-track">
+                      <div class="bar-fill fill-{{ loop.index0 }}" style="width: {{ "%.1f"|format(item.share * 100) }}%"></div>
+                    </div>
+                    {% if item.deviation %}
+                      <span class="deviation {% if item.deviation > 0 %}positive{% else %}negative{% endif %}">
+                        평균 대비 {{ "%+.1f"|format(item.deviation * 100) }}%
+                      </span>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    {% if result.warnings %}
+      <section class="panel">
+        <div class="section-heading">
+          <h2>처리 경고</h2>
+          <p>지원 범위 밖이거나 품질 저하 가능성이 있는 항목들입니다.</p>
+        </div>
+        <ul class="warning-list">
+          {% for warning in result.warnings %}
+            <li>{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    <section class="instructor-results">
+      {% for instructor in result.instructors %}
+        <article class="panel instructor-result-card">
+          <div class="section-heading">
+            <h2>{{ instructor.name }}</h2>
+            <p>총 {{ instructor.asset_count }}개 소스, 추출 토큰 {{ instructor.total_tokens }}개</p>
+          </div>
+          <div class="instructor-meta">
+            <span class="meta-chip">Other / Unmapped {{ "%.1f"|format(instructor.unmapped_share * 100) }}%</span>
+            {% if instructor.warnings %}
+              <span class="meta-chip warning-chip">경고 {{ instructor.warnings | length }}건</span>
+            {% endif %}
+          </div>
+          <table class="coverage-table">
+            <thead>
+              <tr>
+                <th>대단원</th>
+                <th>비중</th>
+                <th>평균 대비</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for coverage in instructor.section_coverages %}
+                <tr>
+                  <td>{{ coverage.section_title }}</td>
+                  <td>{{ "%.1f"|format(coverage.token_share * 100) }}%</td>
+                  <td class="{% if coverage.deviation_from_average > 0 %}positive{% elif coverage.deviation_from_average < 0 %}negative{% endif %}">
+                    {{ "%+.1f"|format(coverage.deviation_from_average * 100) }}%
+                  </td>
+                </tr>
+              {% endfor %}
+              <tr>
+                <td>Other / Unmapped</td>
+                <td>{{ "%.1f"|format(instructor.unmapped_share * 100) }}%</td>
+                <td>-</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {% for coverage in instructor.section_coverages %}
+            <details class="evidence-block">
+              <summary>{{ coverage.section_title }} 근거 보기</summary>
+              {% if coverage.evidence_snippets %}
+                <div class="evidence-list">
+                  {% for snippet in coverage.evidence_snippets %}
+                    <article class="evidence-item">
+                      <div class="evidence-meta">
+                        <span>{{ snippet.source_label }}</span>
+                        <span>{{ snippet.locator }}</span>
+                        <span>score {{ "%.2f"|format(snippet.score) }}</span>
+                      </div>
+                      <p>{{ snippet.text }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="hint">대표 근거를 충분히 확보하지 못했습니다.</p>
+              {% endif %}
+            </details>
+          {% endfor %}
+
+          {% if instructor.warnings %}
+            <details class="evidence-block">
+              <summary>이 강사의 처리 경고 보기</summary>
+              <ul class="warning-list">
+                {% for warning in instructor.warnings %}
+                  <li>{{ warning }}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if job.is_active %}
+    <script>
+      const statusUrl = "{{ request.url_for('job_status', job_id=job.id) }}";
+      const statusPill = document.getElementById("job-status-pill");
+      const updatedLabel = document.getElementById("job-updated");
+
+      async function pollJob() {
+        const response = await fetch(statusUrl, { headers: { Accept: "application/json" } });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (statusPill) {
+          statusPill.textContent = payload.status_label;
+          statusPill.className = `status-pill status-${payload.status}`;
+        }
+        if (updatedLabel) {
+          updatedLabel.textContent = payload.updated_at_label;
+        }
+        if (payload.status === "completed" || payload.status === "failed") {
+          window.location.reload();
+        }
+      }
+
+      window.setInterval(pollJob, 3000);
+    </script>
+  {% endif %}
+{% endblock %}

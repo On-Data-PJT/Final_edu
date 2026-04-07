@@ -145,3 +145,42 @@ Web / Demo Agent
 
 - Jinja context 에는 `items`, `keys`, `values`, `get`처럼 dict 메서드와 겹치는 키 이름을 피할 것
 - 템플릿 전용 데이터 구조는 메서드명 충돌 가능성을 먼저 점검할 것
+
+---
+
+## 5. 이 세션에서 `uv lock` 실행 시 Rust panic 발생
+
+### Date
+
+2026-04-07
+
+### Agent / Lane
+
+Lead / Integration
+
+### Symptom
+
+- 샌드박스 내부에서 `source ~/.zshrc; UV_CACHE_DIR=/tmp/uv-cache uv lock` 실행 시 `system-configuration` 관련 panic 발생
+- 메시지 요약: `Attempted to create a NULL object`, `Tokio executor failed`
+
+### Where
+
+- 현재 Codex 세션의 `uv` CLI 실행 경로
+
+### Root Cause
+
+- 저장소 코드 문제가 아니라 현재 세션의 macOS / `uv` 런타임 조합에서 발생하는 환경 의존 panic 으로 보임
+
+### Resolution
+
+- 저장소 코드는 `py_compile`과 `.venv/bin/python` 기반 TestClient 검증으로 먼저 진행
+- 새 배치 아키텍처는 `REDIS_URL` / R2 설정이 없을 때도 `inline/local` fallback 으로 로컬 검증 가능하게 구현
+- `uv lock`은 샌드박스 밖 실행으로 재시도해 정상 완료
+- 이어서 `uv sync`도 샌드박스 밖 실행으로 정상 완료
+
+### Prevention Rule
+
+- 이 세션에서 `uv lock`, `uv sync`가 sandbox 안에서 panic 나면 앱 자체 문제로 단정하지 말 것
+- 먼저 `.venv/bin/python` 기반 import / TestClient 검증으로 코드 경로를 확인할 것
+- 필요하면 샌드박스 밖에서 같은 `uv` 명령을 다시 시도할 것
+- 의존성 추가 작업은 가능하면 `local fallback` 을 함께 두어 `uv` 문제와 앱 문제를 분리할 것

@@ -1,10 +1,77 @@
 services:
   - type: web
-    name: final-edu
-    env: python
-    plan: free
+    name: final-edu-web
+    runtime: python
+    plan: starter
     buildCommand: pip install uv && uv sync
     startCommand: uv run python -m final_edu --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.12
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: FINAL_EDU_MAX_UPLOAD_MB
+        value: "100"
+      - key: FINAL_EDU_JOB_TTL_DAYS
+        value: "7"
+      - key: FINAL_EDU_MAX_SAVED_JOBS
+        value: "20"
+      - key: FINAL_EDU_JOB_TIMEOUT_SECONDS
+        value: "7200"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: final-edu-kv
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_REGION
+        value: auto
+  - type: worker
+    name: final-edu-worker
+    runtime: python
+    plan: standard
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run python -m final_edu.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: FINAL_EDU_MAX_UPLOAD_MB
+        value: "100"
+      - key: FINAL_EDU_JOB_TTL_DAYS
+        value: "7"
+      - key: FINAL_EDU_MAX_SAVED_JOBS
+        value: "20"
+      - key: FINAL_EDU_JOB_TIMEOUT_SECONDS
+        value: "7200"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: final-edu-kv
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_REGION
+        value: auto
+  - type: keyvalue
+    name: final-edu-kv
+    plan: starter

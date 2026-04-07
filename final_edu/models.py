@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 
@@ -111,3 +111,122 @@ class AnalysisRun:
     warnings: list[str]
     scorer_mode: str
     duration_ms: int
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class StoredUploadRef:
+    storage_key: str
+    original_name: str
+
+    def to_dict(self) -> dict:
+        return {
+            "storage_key": self.storage_key,
+            "original_name": self.original_name,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "StoredUploadRef":
+        return cls(
+            storage_key=payload["storage_key"],
+            original_name=payload["original_name"],
+        )
+
+
+@dataclass(slots=True)
+class JobInstructorInput:
+    name: str
+    files: list[StoredUploadRef] = field(default_factory=list)
+    youtube_urls: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "files": [file_ref.to_dict() for file_ref in self.files],
+            "youtube_urls": list(self.youtube_urls),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "JobInstructorInput":
+        return cls(
+            name=payload["name"],
+            files=[StoredUploadRef.from_dict(item) for item in payload.get("files", [])],
+            youtube_urls=list(payload.get("youtube_urls", [])),
+        )
+
+
+@dataclass(slots=True)
+class AnalysisJobPayload:
+    job_id: str
+    curriculum_text: str
+    instructors: list[JobInstructorInput]
+    submitted_at: str
+
+    def to_dict(self) -> dict:
+        return {
+            "job_id": self.job_id,
+            "curriculum_text": self.curriculum_text,
+            "submitted_at": self.submitted_at,
+            "instructors": [instructor.to_dict() for instructor in self.instructors],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "AnalysisJobPayload":
+        return cls(
+            job_id=payload["job_id"],
+            curriculum_text=payload["curriculum_text"],
+            submitted_at=payload["submitted_at"],
+            instructors=[JobInstructorInput.from_dict(item) for item in payload.get("instructors", [])],
+        )
+
+
+@dataclass(slots=True)
+class AnalysisJobRecord:
+    id: str
+    status: str
+    created_at: str
+    updated_at: str
+    created_at_ts: float
+    updated_at_ts: float
+    payload_key: str
+    result_key: str | None = None
+    error: str | None = None
+    scorer_mode: str | None = None
+    duration_ms: int | None = None
+    instructor_names: list[str] = field(default_factory=list)
+    instructor_count: int = 0
+    asset_count: int = 0
+    youtube_url_count: int = 0
+    section_count: int = 0
+    warning_count: int = 0
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in {"completed", "failed"}
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "AnalysisJobRecord":
+        return cls(
+            id=payload["id"],
+            status=payload["status"],
+            created_at=payload["created_at"],
+            updated_at=payload["updated_at"],
+            created_at_ts=float(payload["created_at_ts"]),
+            updated_at_ts=float(payload["updated_at_ts"]),
+            payload_key=payload["payload_key"],
+            result_key=payload.get("result_key"),
+            error=payload.get("error"),
+            scorer_mode=payload.get("scorer_mode"),
+            duration_ms=payload.get("duration_ms"),
+            instructor_names=list(payload.get("instructor_names", [])),
+            instructor_count=int(payload.get("instructor_count", 0)),
+            asset_count=int(payload.get("asset_count", 0)),
+            youtube_url_count=int(payload.get("youtube_url_count", 0)),
+            section_count=int(payload.get("section_count", 0)),
+            warning_count=int(payload.get("warning_count", 0)),
+        )

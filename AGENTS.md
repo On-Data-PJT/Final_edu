@@ -98,14 +98,19 @@
 
 ## Current Architecture Contract
 
-- 앱 스택: `FastAPI + Jinja + CSS`
-- 실행 명령: `uv run python -m final_edu --reload`
-- 핵심 엔드포인트: `GET /`, `POST /analyze`, `GET /health`
+- 앱 스택: `FastAPI + Jinja + CSS + RQ worker`
+- 실행 명령:
+  - Web: `uv run python -m final_edu --reload`
+  - Worker: `uv run python -m final_edu.worker`
+- 핵심 엔드포인트: `GET /`, `POST /analyze`, `GET /jobs/{job_id}`, `GET /jobs/{job_id}/status`, `GET /health`
 - 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
 - 커리큘럼 기준: 운영자가 직접 입력한 대단원
-- 분석 방식: 텍스트 청크 정규화 → 대단원 매핑 → 비중 계산 → 근거 스니펫 표시
+- 분석 방식: 업로드/URL 등록 → Job enqueue → 배경 분석 → 결과 조회
 - 임베딩: `OPENAI_API_KEY`가 있으면 OpenAI 사용, 없으면 lexical fallback
-- 의도적 비기능 범위: 자막 없는 영상 STT fallback 미구현, 스캔 PDF OCR 미구현
+- 저장소:
+  - 프로덕션: `Render Web + Worker + Key Value + Cloudflare R2`
+  - 로컬 개발: `inline/local` fallback 허용
+- 의도적 비기능 범위: 자막 없는 영상 STT fallback 미구현, 스캔 PDF OCR 미구현, 영구 이력 보관 미구현
 
 이 계약이 바뀌면 `AGENTS.md` 수정 대상입니다.
 
@@ -121,7 +126,7 @@
 ### 1. Lead / Integration
 
 - 책임: 제품 정의, 공통 타입, 문서 계약, 결과 해석, PR 리뷰
-- 주 소유 파일: `README.md`, `AGENTS.md`, `STATUS.md`, `DEBUG.md`, `final_edu/models.py`, `final_edu/config.py`
+- 주 소유 파일: `README.md`, `AGENTS.md`, `STATUS.md`, `DEBUG.md`, `final_edu/models.py`, `final_edu/config.py`, `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/worker.py`
 - 타 역할의 인터페이스 변경은 이 역할이 먼저 확인
 
 ### 2. Extraction Agent
@@ -178,7 +183,7 @@ worker 는 자신의 write scope 밖 파일 수정 금지입니다.
 
 ## Stable Parallel Lanes
 
-현재 MVP에서 안정적으로 병렬화 가능한 lane 은 아래 3개입니다.
+현재 MVP에서 안정적으로 병렬화 가능한 lane 은 아래 4개입니다.
 
 ### Lane 1. Extraction Hardening
 
@@ -207,11 +212,21 @@ worker 는 자신의 write scope 밖 파일 수정 금지입니다.
   - 빈 상태 / 오류 상태 UI 개선
   - 배포 동선 정리
 
+### Lane 4. Queue / Storage Integration
+
+- 소유 agent: `Lead / Integration`
+- write scope: `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/worker.py`, `final_edu/config.py`
+- 예시 작업:
+  - RQ / Redis 연결 안정화
+  - R2 저장소 연동
+  - Job 상태 저장 구조 조정
+  - 로컬 fallback 과 프로덕션 경로 간 계약 유지
+
 ### Sidecar Explorer
 
 - write scope 없음
 - 예시 작업:
-  - Render 무료 플랜 제약 조사
+  - Render worker / KV / R2 배포 제약 조사
   - YouTube transcript 라이브러리 실패 원인 조사
   - 데모용 자료셋 적합성 조사
 

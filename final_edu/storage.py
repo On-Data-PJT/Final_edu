@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+try:
+    import boto3
+except ImportError:  # pragma: no cover - production installs boto3, local fallback does not need it.
+    boto3 = None
+
+from final_edu.config import Settings, get_settings
+
+
+class ObjectStorage:
+    def put_file(self, key: str, source_path: Path, content_type: str | None = None) -> None:
+        raise NotImplementedError
+
+    def put_json(self, key: str, payload: dict) -> None:
+        raise NotImplementedError
+
+    def get_json(self, key: str) -> dict:
+        raise NotImplementedError
+
+    def download_to_path(self, key: str, destination: Path) -> Path:
+        raise NotImplementedError
+
+
+class LocalObjectStorage(ObjectStorage):
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def put_file(self, key: str, source_path: Path, content_type: str | None = None) -> None:
+        target = self._resolve(key)
+        shutil.copyfile(source_path, target)
+
+    def put_json(self, key: str, payload: dict) -> None:
+        target = self._resolve(key)
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def get_json(self, key: str) -> dict:
+        target = self._resolve(key)
+        return json.loads(target.read_text(encoding="utf-8"))
+
+    def download_to_path(self, key: str, destination: Path) -> Path:
+        target = self._resolve(key)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(target, destination)
+        return destination
+
+    def _resolve(self, key: str) -> Path:
+        destination = self.root / key
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return destination
+
+
+class R2ObjectStorage(ObjectStorage):
+    def __init__(self, settings: Settings) -> None:
+        if boto3 is None:
+            raise RuntimeError("R2 스토리지를 사용하려면 boto3가 필요합니다.")
+        self.bucket = settings.r2_bucket or ""
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=settings.r2_endpoint_url,
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            region_name=settings.r2_region,
+        )
+
+    def put_file(self, key: str, source_path: Path, content_type: str | None = None) -> None:
+        extra_args = {"ContentType": content_type} if content_type else None
+        if extra_args:
+            self.client.upload_file(str(source_path), self.bucket, key, ExtraArgs=extra_args)
+            return
+        self.client.upload_file(str(source_path), self.bucket, key)
+
+    def put_json(self, key: str, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json; charset=utf-8",
+        )
+
+    def get_json(self, key: str) -> dict:
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return json.loads(response["Body"].read().decode("utf-8"))
+
+    def download_to_path(self, key: str, destination: Path) -> Path:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self.client.download_file(self.bucket, key, str(destination))
+        return destination
+
+
+def create_object_storage(settings: Settings | None = None) -> ObjectStorage:
+    active_settings = settings or get_settings()
+    if active_settings.storage_mode == "r2":
+        return R2ObjectStorage(active_settings)
+    return LocalObjectStorage(active_settings.runtime_dir / "object_store")

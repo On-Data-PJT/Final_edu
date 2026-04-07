@@ -5,29 +5,36 @@ Last Updated: 2026-04-07
 ## Current Snapshot
 
 - 저장소 목적: 강의 자료를 표준 커리큘럼 기준으로 정규화해 강사별 커리큘럼 커버리지 편차를 시각화하는 공모전용 MVP
-- 현재 앱 스택: `FastAPI + Jinja + CSS + uv`
+- 현재 앱 스택: `FastAPI + Jinja + CSS + uv + RQ`
 - 현재 실행 명령: `uv run python -m final_edu --reload`
+- 현재 worker 실행 명령: `uv run python -m final_edu.worker`
 - 현재 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
 - 현재 분류 기준: 운영자가 직접 입력한 대단원 커리큘럼
 - 현재 분석 모드:
   - `OPENAI_API_KEY`가 있으면 OpenAI embedding 사용
   - 키가 없거나 실패하면 lexical similarity fallback
+- 현재 작업 방식:
+  - `POST /analyze`는 즉시 결과를 반환하지 않음
+  - 분석 Job을 생성하고 `/jobs/{job_id}`에서 상태/결과를 확인함
+- 현재 배포 전제:
+  - 프로덕션: `Render Web + Worker + Key Value + R2`
+  - 로컬: `inline/local` fallback
 - 현재 운영 문서 체계:
   - `AGENTS.md`: 운영 계약 문서
   - `STATUS.md`: 현재 상태 스냅샷 + 최근 변경
   - `DEBUG.md`: 해결된 오류와 재발 방지 규칙
   - 협업 규칙 문서는 `AGENTS.md` 중심으로 단일화됨
 - 현재 브랜치 상태: `feat/mvp-curriculum-coverage...origin/feat/mvp-curriculum-coverage`
-- 현재 작업 트리 상태: 현재 브랜치 기준 clean 상태
+- 현재 작업 트리 상태: 배치 아키텍처 전환 변경으로 dirty 상태
 
 ## Current Goal
 
-- 현재 목표는 **웹 MVP를 데모 가능한 수준으로 안정화**하는 것
+- 현재 목표는 **전체 커리큘럼 배치 분석 MVP를 안정화**하는 것
 - 지금 시점에서 가장 중요한 다음 단계:
   - 실제 데모용 강의자료 2~3세트 확보
   - Render 실배포 검증
+  - R2 / Render KV 연결 후 worker 실운영 경로 검증
   - 결과 해석 문구와 경고 메시지 튜닝
-  - 데모 안정화용 후속 작업을 기능별로 다시 분리
 
 ## Current Parallel Lanes
 
@@ -39,9 +46,12 @@ Last Updated: 2026-04-07
   - 목적: threshold, evidence 선택, `Other / Unmapped` 해석 개선
 - Lane 3. Web / Demo Polish
   - 대상: `final_edu/app.py`, `final_edu/templates/*`, `final_edu/static/*`, `render.yaml`
-  - 목적: UX 문구, 결과 화면 가독성, 배포 동선 정리
+  - 목적: Job 상태 UX, 결과 화면 가독성, 배포 동선 정리
+- Lane 4. Queue / Storage Integration
+  - 대상: `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/worker.py`, `final_edu/config.py`
+  - 목적: RQ, Redis/KV, R2 연결 안정화
 - Sidecar Explorer
-  - 목적: Render 제약, YouTube transcript 실패 유형, 데모 데이터 적합성 조사
+  - 목적: Render worker/R2 실배포 제약, YouTube transcript 실패 유형, 데모 데이터 적합성 조사
 
 현재 lane 들은 파일 충돌이 적어서 병렬 subagent 작업 대상으로 적합합니다.
 
@@ -54,8 +64,15 @@ Last Updated: 2026-04-07
 - IDE 실행 환경 정리 완료
   - `.vscode` 설정으로 워크스페이스 루트 기준 실행 가능
 - 웹 MVP 골격 구현 완료
-  - `GET /`, `POST /analyze`, `GET /health`
+  - `GET /`, `POST /analyze`, `GET /jobs/{job_id}`, `GET /jobs/{job_id}/status`, `GET /health`
   - FastAPI 앱 팩토리 및 CLI 실행 경로 구현
+- 배치 처리 인프라 골격 구현 완료
+  - Job payload / Job metadata 모델 추가
+  - 로컬 파일 기반 Job 저장소 추가
+  - Redis/RQ 기반 Job 저장소 및 큐 어댑터 추가
+  - 로컬 inline queue fallback 추가
+  - Local object storage / R2 object storage 어댑터 추가
+  - worker 실행 엔트리포인트 추가
 - 추출 파이프라인 구현 완료
   - PDF 텍스트 추출
   - PPTX 슬라이드 텍스트 추출
@@ -70,10 +87,12 @@ Last Updated: 2026-04-07
   - `Other / Unmapped` 처리
   - 근거 스니펫 추출
 - 결과 UI 구현 완료
+  - Job 상태 화면
   - 강사별 비교 바
   - 평균 대비 편차 표시
   - 근거 스니펫 표시
   - 경고 메시지 표시
+  - 최근 작업 목록
 - 배포 준비 파일 추가 완료
   - `.env.example`
   - `render.yaml`
@@ -83,24 +102,29 @@ Last Updated: 2026-04-07
 - `uv sync` 성공
 - 앱 팩토리 import 및 route 등록 성공
 - `GET /health` 정상 응답
-- 샘플 텍스트 자산 2개 기준 분석 파이프라인 성공
-- FastAPI `TestClient` 기준 `POST /analyze` 렌더링 성공
+- 루트 화면 렌더링 성공
+- 샘플 텍스트 자산 2개 기준 Job 생성 -> 상세 화면 -> 결과 렌더링 성공
+- `GET /jobs/{job_id}/status` 정상 응답
+- 최근 작업 목록에 새 Job 반영 성공
+- 잘못된 커리큘럼 입력 시 `400` 에러 렌더링 확인
 - `uv run python -m final_edu --help` 정상 응답
 
 ## Known Gaps / Next Priorities
 
 - 실제 교육용 데모 데이터셋이 아직 없음
 - Render 실배포 검증은 아직 하지 않음
+- R2와 Render KV를 실제로 연결한 worker 경로는 아직 검증하지 않음
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
-- 현재 브랜치는 clean 상태지만, 이후 작업은 이 브랜치에서 의도된 단위로 이어갈 것
+- 현재 브랜치는 dirty 상태이며, 배치 아키텍처 전환 변경이 아직 커밋되지 않았다
 
 ## Working Tree Notes
 
-- 현재 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
+- 기존 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 이후 변경도 dirty worktree 전제를 유지해 신중히 다루되, 현재 기준점은 clean 이다
+- 현재 작업 트리에는 배치 아키텍처 전환 변경이 쌓여 있으므로 함부로 되돌리지 말 것
+- 배치 아키텍처 전환 작업으로 인해 현재 turn 의 변경은 대규모이며, 문서와 실행 계약을 함께 검토해야 한다
 
 ## Recent Updates
 
@@ -131,3 +155,12 @@ Last Updated: 2026-04-07
 - 원격 `origin/feat/mvp-curriculum-coverage`로 푸시 및 추적 브랜치 설정 완료
 - 중복 역할의 `CONTRIBUTING.md` 삭제
 - 협업/운영 규칙 문서를 `AGENTS.md` 중심으로 정리
+- 즉시 분석 구조를 Job 기반 배치 아키텍처로 전환 시작
+- `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/worker.py` 추가
+- `POST /analyze`를 Job enqueue 방식으로 변경
+- `/jobs/{job_id}`, `/jobs/{job_id}/status` 추가
+- 로컬 개발용 `inline/local` fallback 추가
+- `.env.example`, `README.md`, `render.yaml`을 Web + Worker + KV + R2 기준으로 갱신
+- 로컬 TestClient 기준 Job 생성/상태/결과 검증 통과
+- 샌드박스 밖 실행으로 `uv.lock` 갱신 완료
+- `uv sync` 완료 및 새 의존성(`boto3`, `redis`, `rq`) 설치 반영
