@@ -168,3 +168,5 @@ Last Updated: 2026-04-07
 - 원격 `origin/feat/mvp-curriculum-coverage`로 배치 아키텍처 전환 변경 푸시 완료
 - `STATUS.md`의 작업 트리 상태를 실제 clean 상태로 정정
 - `AGENTS.md`에 커밋/푸시 후 `STATUS.md` 재검증 규칙 추가
+- 커밋 `9011f3b` (`docs: tighten status close-out workflow`) 생성
+- 원격 `origin/feat/mvp-curriculum-coverage`에 문서 정합성 보강 반영 완료
