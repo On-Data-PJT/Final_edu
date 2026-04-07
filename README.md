@@ -91,6 +91,9 @@ uv run python -m final_edu --reload
 
 기본 주소는 `http://127.0.0.1:8000`입니다.
 
+로컬 웹 실행은 `REDIS_URL`이 비어 있으면 `inline/local` fallback 경로를 사용하므로 별도 worker 없이 동작합니다.
+Windows 개발 환경에서도 이 웹 실행 경로는 RQ worker import 없이 시작되도록 맞춰져 있습니다.
+
 ## Worker 실행
 
 Redis와 R2까지 붙인 프로덕션 구조에서는 별도 worker가 필요합니다.
@@ -100,6 +103,7 @@ uv run python -m final_edu.worker
 ```
 
 `REDIS_URL`이 없으면 로컬 fallback 경로를 사용하므로 worker는 필수가 아닙니다.
+현재 설치된 `rq` 버전 기준으로 Windows의 별도 worker 실행은 제약이 있을 수 있으므로, worker는 WSL/Linux 또는 배포 환경에서 실행하는 쪽을 권장합니다.
 
 ## 환경 변수
 

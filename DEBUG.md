@@ -184,3 +184,45 @@ Lead / Integration
 - 먼저 `.venv/bin/python` 기반 import / TestClient 검증으로 코드 경로를 확인할 것
 - 필요하면 샌드박스 밖에서 같은 `uv` 명령을 다시 시도할 것
 - 의존성 추가 작업은 가능하면 `local fallback` 을 함께 두어 `uv` 문제와 앱 문제를 분리할 것
+
+---
+
+## 6. Windows에서 `uv run python -m final_edu --reload` 시 `fork` context import 실패
+
+### Date
+
+2026-04-07
+
+### Agent / Lane
+
+Lead / Integration
+
+### Symptom
+
+- Windows에서 `uv run python -m final_edu --reload` 실행 시 reloader child process 가 startup 중 즉시 종료
+- 핵심 에러 메시지: `ValueError: cannot find context for 'fork'`
+
+### Where
+
+- `final_edu/app.py` import 과정
+- `final_edu/jobs.py` 의 module-level `from rq import Queue`
+- 내부적으로 `rq.scheduler`
+
+### Root Cause
+
+- 로컬 웹 실행은 `REDIS_URL`이 없으면 `inline/local` fallback 을 써야 하지만, 앱 import 시점에 `final_edu/jobs.py`가 `rq`를 top-level 에서 먼저 import 했음
+- 현재 설치된 `rq 2.7.0`은 top-level import 중 worker/scheduler 모듈을 함께 로드하며, 그 과정에서 `multiprocessing.get_context('fork')`를 호출함
+- Windows에는 `fork` context 가 없어 웹 앱 startup 자체가 실패했음
+
+### Resolution
+
+- `final_edu/jobs.py`에서 Redis/RQ import 를 module-level 에서 제거
+- Redis/RQ 경로가 실제로 필요한 시점에만 lazy import 하도록 변경
+- `rq`는 top-level 대신 `rq.queue.Queue`만 직접 import 하도록 바꿔 web startup 경로에서 worker/scheduler import 를 피함
+- `final_edu/worker.py`는 `REDIS_URL`을 먼저 검사하고, Windows `fork` 제약이 다시 나오면 더 명확한 RuntimeError 를 주도록 정리
+
+### Prevention Rule
+
+- optional backend dependency 를 웹 앱 import 경로에서 top-level 로 가져오지 말 것
+- `inline/local` fallback 이 있는 기능은 fallback 선택 전에 Redis/RQ 같은 외부 큐 모듈을 import 하지 말 것
+- Windows 호환성이 필요한 개발 명령은 `--reload` 실제 기동까지 확인할 것

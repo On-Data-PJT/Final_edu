@@ -8,16 +8,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-try:
-    from redis import Redis
-except ImportError:  # pragma: no cover - dependency is installed in the app environment.
-    Redis = None
-
-try:
-    from rq import Queue
-except ImportError:  # pragma: no cover - dependency is installed in the app environment.
-    Queue = None
-
 from final_edu.analysis import analyze_submissions
 from final_edu.config import Settings, get_settings
 from final_edu.models import (
@@ -96,8 +86,7 @@ class LocalJobRepository(JobRepository):
 
 class RedisJobRepository(JobRepository):
     def __init__(self, settings: Settings) -> None:
-        if Redis is None:
-            raise RuntimeError("redis 패키지가 없어 Redis JobRepository를 초기화할 수 없습니다.")
+        Redis = _import_redis()
         self.redis = Redis.from_url(settings.redis_url or "", decode_responses=True)
         self.ttl_seconds = settings.job_ttl_days * 86400
         self.max_saved_jobs = settings.max_saved_jobs
@@ -172,8 +161,8 @@ class InlineJobQueue(JobQueue):
 
 class RQJobQueue(JobQueue):
     def __init__(self, settings: Settings) -> None:
-        if Redis is None or Queue is None:
-            raise RuntimeError("rq 또는 redis 패키지가 없어 RQ Queue를 초기화할 수 없습니다.")
+        Redis = _import_redis()
+        Queue = _import_rq_queue()
         connection = Redis.from_url(settings.redis_url or "")
         self.queue = Queue(
             settings.queue_name,
@@ -360,3 +349,24 @@ def _safe_name(original_name: str) -> str:
 def _now() -> tuple[str, float]:
     current = datetime.now(UTC)
     return current.isoformat(), current.timestamp()
+
+
+def _import_redis():
+    try:
+        from redis import Redis
+    except ImportError as exc:  # pragma: no cover - dependency is installed in the app environment.
+        raise RuntimeError("redis 패키지가 없어 Redis 기반 저장소를 초기화할 수 없습니다.") from exc
+    return Redis
+
+
+def _import_rq_queue():
+    try:
+        # Avoid importing `rq` top-level here because it eagerly loads worker/scheduler modules.
+        from rq.queue import Queue
+    except ImportError as exc:  # pragma: no cover - dependency is installed in the app environment.
+        raise RuntimeError("rq 패키지가 없어 RQ Queue를 초기화할 수 없습니다.") from exc
+    except Exception as exc:  # pragma: no cover - platform-specific import failures.
+        raise RuntimeError(
+            "RQ Queue 초기화에 실패했습니다. Redis 기반 큐를 쓰는 경우 현재 OS/패키지 조합을 확인해 주세요."
+        ) from exc
+    return Queue
