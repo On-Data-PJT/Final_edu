@@ -34,7 +34,9 @@
 1. 자신이 처리한 변경 내용을 `STATUS.md`에 반영
 2. 작업 중 발생했고 해결한 오류가 있으면 `DEBUG.md`에 반영
 3. 아래의 `Major Change Triggers` 중 하나에 해당하면 `AGENTS.md`도 반영
-4. 최종적으로 작업 트리 상태를 확인
+4. 커밋이나 푸시를 했다면 `git status --short --branch`를 다시 확인
+5. 커밋/푸시 이후 상태가 `STATUS.md`와 달라졌다면 `STATUS.md`를 한 번 더 갱신
+6. 최종적으로 작업 트리 상태를 확인
 
 `STATUS.md` 또는 `DEBUG.md`를 반영하지 않고 작업을 끝낸 것으로 간주하지 않습니다.
 

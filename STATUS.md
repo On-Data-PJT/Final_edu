@@ -25,7 +25,7 @@ Last Updated: 2026-04-07
   - `DEBUG.md`: 해결된 오류와 재발 방지 규칙
   - 협업 규칙 문서는 `AGENTS.md` 중심으로 단일화됨
 - 현재 브랜치 상태: `feat/mvp-curriculum-coverage...origin/feat/mvp-curriculum-coverage`
-- 현재 작업 트리 상태: 배치 아키텍처 전환 변경으로 dirty 상태
+- 현재 작업 트리 상태: clean 상태
 
 ## Current Goal
 
@@ -117,14 +117,14 @@ Last Updated: 2026-04-07
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
-- 현재 브랜치는 dirty 상태이며, 배치 아키텍처 전환 변경이 아직 커밋되지 않았다
+- 배치 아키텍처 전환은 커밋 `71082c8`로 브랜치에 반영되어 원격까지 푸시된 상태다
 
 ## Working Tree Notes
 
 - 기존 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 현재 작업 트리에는 배치 아키텍처 전환 변경이 쌓여 있으므로 함부로 되돌리지 말 것
-- 배치 아키텍처 전환 작업으로 인해 현재 turn 의 변경은 대규모이며, 문서와 실행 계약을 함께 검토해야 한다
+- 현재 기준점은 clean 이며, 다음 작업은 이 브랜치에서 의도된 단위로 이어가면 된다
+- 배치 아키텍처 전환 이후에는 커밋/푸시 뒤 `STATUS.md`가 최신 상태인지 한 번 더 확인해야 한다
 
 ## Recent Updates
 
@@ -164,3 +164,7 @@ Last Updated: 2026-04-07
 - 로컬 TestClient 기준 Job 생성/상태/결과 검증 통과
 - 샌드박스 밖 실행으로 `uv.lock` 갱신 완료
 - `uv sync` 완료 및 새 의존성(`boto3`, `redis`, `rq`) 설치 반영
+- 커밋 `71082c8` (`feat: add batch curriculum analysis workflow`) 생성
+- 원격 `origin/feat/mvp-curriculum-coverage`로 배치 아키텍처 전환 변경 푸시 완료
+- `STATUS.md`의 작업 트리 상태를 실제 clean 상태로 정정
+- `AGENTS.md`에 커밋/푸시 후 `STATUS.md` 재검증 규칙 추가
