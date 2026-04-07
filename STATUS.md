@@ -22,6 +22,9 @@ Last Updated: 2026-04-07
 - 현재 환경 변수 로딩:
   - 저장소 루트 `.env` 자동 로드
   - 이미 export 된 환경 변수가 있으면 `.env`보다 우선
+- 현재 로컬 startup 호환성:
+  - `REDIS_URL`이 없으면 웹 앱 import 경로에서 `rq`를 지연 로드해 `inline/local` fallback 으로 시작
+  - Windows에서도 `uv run python -m final_edu --reload` 웹 실행 경로가 `rq`의 `fork` import 에 막히지 않도록 보강됨
 - 현재 운영 문서 체계:
   - `AGENTS.md`: 운영 계약 문서
   - `STATUS.md`: 현재 상태 스냅샷 + 최근 변경
@@ -74,6 +77,7 @@ Last Updated: 2026-04-07
   - 로컬 파일 기반 Job 저장소 추가
   - Redis/RQ 기반 Job 저장소 및 큐 어댑터 추가
   - 로컬 inline queue fallback 추가
+  - inline/local 모드에서 Redis/RQ import 지연 로드로 Windows 웹 startup 호환성 보강
   - Local object storage / R2 object storage 어댑터 추가
   - worker 실행 엔트리포인트 추가
 - 추출 파이프라인 구현 완료
@@ -111,12 +115,15 @@ Last Updated: 2026-04-07
 - 최근 작업 목록에 새 Job 반영 성공
 - 잘못된 커리큘럼 입력 시 `400` 에러 렌더링 확인
 - `uv run python -m final_edu --help` 정상 응답
+- inline 모드에서 `final_edu.jobs.create_job_services()` import / 생성 성공
+- `uv run python -m final_edu --reload --port 8011` 정상 기동 및 종료 확인
 
 ## Known Gaps / Next Priorities
 
 - 실제 교육용 데모 데이터셋이 아직 없음
 - Render 실배포 검증은 아직 하지 않음
 - R2와 Render KV를 실제로 연결한 worker 경로는 아직 검증하지 않음
+- 현재 `rq 2.7.0` 기준 Windows의 별도 worker 실행은 `fork` 컨텍스트 제약 가능성이 있어 WSL/Linux 또는 배포 환경 검증이 더 적합함
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
@@ -126,7 +133,7 @@ Last Updated: 2026-04-07
 
 - 기존 MVP 구현은 `feat/mvp-curriculum-coverage` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 현재 기준점은 `.env` 자동 로딩과 문서 반영이 커밋되어 원격 브랜치까지 푸시된 clean 상태다
+- 현재 기준점은 Windows 로컬 startup 호환성 패치와 문서 반영이 커밋되어 원격 브랜치까지 푸시된 clean 상태다
 - 다음 작업자는 이 브랜치 기준으로 바로 후속 작업을 이어가면 된다
 - `STATUS.md`는 현재 사실을 기록하는 문서이며, 방금 만든 모든 커밋 해시를 계속 덧붙이는 용도로 쓰지 않는다
 
@@ -174,3 +181,9 @@ Last Updated: 2026-04-07
 - 저장소 루트 `.env` 자동 로딩 추가
 - 로컬 개발에서 OpenAI 키를 `.env`에만 두고도 앱이 설정을 읽도록 정리
 - `.env` 자동 로딩 변경을 `feat/mvp-curriculum-coverage` 브랜치에 커밋 및 푸시 완료
+- Windows에서 `uv run python -m final_edu --reload` 실행 시 `rq`의 `fork` import 로 깨지던 문제 원인 확인
+- `final_edu/jobs.py`에서 Redis/RQ import 를 지연 로드로 변경해 inline/local 웹 startup 경로에서 `rq` top-level import 제거
+- `final_edu/worker.py`에서 `REDIS_URL` 선검사와 Windows `fork` 제약 안내 메시지 추가
+- `README.md`에 Windows 로컬 웹 실행과 worker 제약 메모 반영
+- inline 모드 서비스 생성, `/health`, 샘플 job 생성, 실제 `--reload` 기동까지 재검증 완료
+- Windows 로컬 startup 호환성 패치 커밋을 `feat/mvp-curriculum-coverage` 브랜치에 푸시 완료
