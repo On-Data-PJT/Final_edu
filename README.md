@@ -204,7 +204,7 @@ uv run python -m final_edu --help
 - `main` 직접 개발은 초기 세팅까지만 허용
 - 이후 작업은 `feat/*`, `fix/*`, `docs/*` 브랜치에서 진행
 - PR 기준으로만 머지
-- 운영 규칙과 subagent 규칙은 `AGENTS.md` 참조
+- 운영 규칙과 subagent 규칙은 `.agent/AGENTS.md` 참조
 
 ## 제출 문서
 

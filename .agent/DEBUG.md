@@ -1,6 +1,6 @@
 # DEBUG
 
-Last Updated: 2026-04-07
+Last Updated: 2026-04-08
 
 이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.  
 각 항목은 다음 에이전트가 같은 실수를 반복하지 않도록 하기 위한 재발 방지 규칙까지 포함해야 합니다.
@@ -226,3 +226,41 @@ Lead / Integration
 - optional backend dependency 를 웹 앱 import 경로에서 top-level 로 가져오지 말 것
 - `inline/local` fallback 이 있는 기능은 fallback 선택 전에 Redis/RQ 같은 외부 큐 모듈을 import 하지 말 것
 - Windows 호환성이 필요한 개발 명령은 `--reload` 실제 기동까지 확인할 것
+
+---
+
+## 7. `skill-creator`의 `quick_validate.py` 실행 시 `PyYAML` 누락
+
+### Date
+
+2026-04-08
+
+### Agent / Lane
+
+Lead / Integration
+
+### Symptom
+
+- `python3 /Users/wowjd/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-dir>` 실행 시 즉시 실패
+- 핵심 에러 메시지: `ModuleNotFoundError: No module named 'yaml'`
+
+### Where
+
+- `skill-creator` 시스템 스킬의 `scripts/quick_validate.py`
+
+### Root Cause
+
+- 검증 스크립트가 `yaml.safe_load`를 사용하지만, 현재 세션의 기본 `python3`와 프로젝트 `.venv`에는 `PyYAML`이 설치되어 있지 않음
+
+### Resolution
+
+- 이번 라운드에서는 `quick_validate.py`를 직접 돌리지 않고 아래 대체 검증을 수행
+  - `SKILL.md` frontmatter 키 수동 검증
+  - `agents/openai.yaml` 기본 프롬프트 확인
+  - `capture_pages.py` 문법 검증
+- 이후 `quick_validate.py`가 꼭 필요하면 `PyYAML`이 있는 환경에서 실행하거나 임시 의존성으로 실행
+
+### Prevention Rule
+
+- repo-local skill을 만들 때 `quick_validate.py`를 바로 실행하기 전에 현재 Python 환경에 `yaml` 모듈이 있는지 먼저 확인할 것
+- `quick_validate.py`가 막히면 스킬 메타데이터 수동 검증과 스크립트 문법 검증으로 최소 검증을 먼저 완료할 것
