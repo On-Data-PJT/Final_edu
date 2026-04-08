@@ -1,15 +1,28 @@
 {% extends "base.html" %}
 
+{% block page_name %}page2{% endblock %}
 {% block title %}Final Edu | Job {{ job.id }}{% endblock %}
 
+{% block header_actions %}
+  <a class="icon-button" href="/" aria-label="돌아가기">
+    <span class="icon-button-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" role="img" focusable="false">
+        <path d="M12 5 5 12l7 7 1.5-1.5L9 13h10v-2H9l4.5-4.5z" />
+      </svg>
+    </span>
+  </a>
+{% endblock %}
+
 {% block content %}
-  <section class="hero panel compact-hero">
+  <script id="page2-result-data" type="application/json" hidden>{{ result_json | safe }}</script>
+
+  <section class="hero panel page-hero page-hero-page2">
     <div class="hero-copy">
-      <p class="eyebrow">Batch Analysis Job</p>
-      <h1>분석 작업 {{ job.id }}</h1>
+      <p class="eyebrow">Curriculum Coverage Report</p>
+      <h1>결과 리포트<br />작업 {{ job.id }}</h1>
       <p class="hero-text">
-        전체 커리큘럼 자료를 배치 처리하는 작업 상세 화면입니다.
-        작업 상태와 처리 규모를 먼저 확인하고, 완료되면 결과 비교 화면이 이어집니다.
+        선택된 과정 기준으로 강사별 커리큘럼 커버리지, 비중 편차, 워드클라우드,
+        목표 대비 비교를 한 화면에 스크롤로 이어서 보여줍니다.
       </p>
     </div>
     <div class="hero-metric">
@@ -18,212 +31,222 @@
         <strong>{{ job.status_label }}</strong>
       </div>
       <div class="metric-card">
-        <span class="metric-label">생성 시각</span>
-        <strong>{{ job.created_at_label }}</strong>
+        <span class="metric-label">과정</span>
+        <strong>{{ job.course_name }}</strong>
       </div>
       <div class="metric-card">
         <span class="metric-label">마지막 갱신</span>
         <strong id="job-updated">{{ job.updated_at_label }}</strong>
       </div>
+      <div class="metric-card">
+        <span class="metric-label">선택 강사</span>
+        <strong data-page2-selected-instructor="summary">{{ result.instructors[0].name if result and result.instructors else '미선택' }}</strong>
+      </div>
     </div>
   </section>
 
-  <section class="results-grid">
-    <article class="panel summary-panel">
-      <div class="section-heading">
-        <h2>작업 요약</h2>
-        <p>이번 작업에 등록된 자료 규모와 실행 구성을 보여줍니다.</p>
+  <section class="result-view-shell panel">
+    <div class="result-toolbar">
+      <div class="course-summary-chip">
+        <span>{{ job.course_name }}</span>
+        <span>{{ job.section_count }}개 대주제</span>
       </div>
-      <div class="summary-cards">
-        <div class="metric-card">
-          <span class="metric-label">강사 수</span>
-          <strong>{{ job.instructor_count }}</strong>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">파일 수</span>
-          <strong>{{ job.asset_count }}</strong>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">YouTube URL 수</span>
-          <strong>{{ job.youtube_url_count }}</strong>
-        </div>
-        <div class="metric-card">
-          <span class="metric-label">대단원 수</span>
-          <strong>{{ job.section_count }}</strong>
-        </div>
+      <div class="mode-toggle-group" aria-label="view mode">
+        <button type="button" class="icon-button" data-view-mode="speech" aria-label="only발화">
+          <span class="icon-button-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <path d="M9 2a7 7 0 0 0-2 13.7V20l3-1.7c.3.05.7.08 1 .08a7 7 0 0 0 0-14Zm-1 7.5h2v2H8v-2Zm4 0h2v2h-2v-2Z" />
+            </svg>
+          </span>
+        </button>
+        <button type="button" class="icon-button" data-view-mode="material" aria-label="only자료">
+          <span class="icon-button-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <path d="M4 5h8l2 2h6v12H4V5zm3 3v2h10V8H7zm0 4v2h6v-2H7z" />
+            </svg>
+          </span>
+        </button>
+        <button type="button" class="icon-button is-active" data-view-mode="combined" aria-label="발화+자료">
+          <span class="icon-button-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <path d="M7 4h7l2 2h4v8h-2V8H9V6H7v14H5V6a2 2 0 0 1 2-2zm1 7 4-4 3 3 4-4 1.5 1.5-5.5 5.5-3-3L9.5 13.5 8 12z" />
+            </svg>
+          </span>
+        </button>
       </div>
-    </article>
+    </div>
 
-    <article class="panel comparison-panel">
-      <div class="section-heading">
-        <h2>진행 상태</h2>
-        <p>큐 대기, 분석 진행, 완료, 실패 중 현재 상태를 보여줍니다.</p>
-      </div>
-      <div class="job-status-panel">
-        <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
-        {% if job.is_active %}
-          <p class="hint">이 화면은 자동으로 상태를 갱신합니다.</p>
-        {% elif job.is_failed %}
-          <p class="hint">작업이 실패했습니다. 아래 오류 내용을 확인해 주세요.</p>
-        {% else %}
-          <p class="hint">작업이 완료되어 결과를 확인할 수 있습니다.</p>
-        {% endif %}
-      </div>
-      {% if job.error %}
-        <div class="notice error">{{ job.error }}</div>
-      {% endif %}
-    </article>
-  </section>
-
-  {% if result %}
-    <section class="results-grid">
-      <article class="panel summary-panel">
+    {% if job.is_active %}
+      <section class="panel status-panel">
         <div class="section-heading">
-          <h2>분석 요약</h2>
-          <p>완료된 작업의 실행 정보와 결과 개요입니다.</p>
+          <h2>분석 진행 중</h2>
+          <p>작업이 완료되면 아래 결과 카드가 자동으로 갱신됩니다.</p>
         </div>
-        <div class="summary-cards">
-          <div class="metric-card">
-            <span class="metric-label">분석 시간</span>
-            <strong>{{ result.duration_ms }}ms</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">분류 모드</span>
-            <strong>{{ result.scorer_mode }}</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">강사 수</span>
-            <strong>{{ result.instructors | length }}</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">경고 수</span>
-            <strong>{{ result.warnings | length }}</strong>
-          </div>
+        <div class="job-status-panel">
+          <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
+          <p class="hint">현재 상태: {{ job.status_label }}</p>
         </div>
-      </article>
-
-      <article class="panel comparison-panel">
+      </section>
+    {% elif result %}
+      <section class="report-section report-section-1">
         <div class="section-heading">
-          <h2>대단원별 비중 비교</h2>
-          <p>각 행은 하나의 대단원이며, 막대 길이는 강사별 비중을 의미합니다.</p>
+          <h2>1. 커리큘럼 목표와 실제 강의 비중</h2>
+          <p>좌측은 커리큘럼 기준표, 우측은 선택 강사의 나이팅게일 로즈 차트입니다.</p>
         </div>
-        <div class="comparison-rows">
-          {% for row in comparison_rows %}
-            <div class="comparison-row">
-              <div class="comparison-title">{{ row.title }}</div>
-              <div class="comparison-bars">
-                {% for item in row.entries %}
-                  <div class="bar-line">
-                    <div class="bar-meta">
-                      <span>{{ item.name }}</span>
-                      <span>{{ "%.1f"|format(item.share * 100) }}%</span>
-                    </div>
-                    <div class="bar-track">
-                      <div class="bar-fill fill-{{ loop.index0 }}" style="width: {{ "%.1f"|format(item.share * 100) }}%"></div>
-                    </div>
-                    {% if item.deviation %}
-                      <span class="deviation {% if item.deviation > 0 %}positive{% else %}negative{% endif %}">
-                        평균 대비 {{ "%+.1f"|format(item.deviation * 100) }}%
-                      </span>
-                    {% endif %}
-                  </div>
+        <div class="two-column-grid">
+          <article class="panel inner-panel">
+            <table class="coverage-table target-table">
+              <thead>
+                <tr>
+                  <th>대주제</th>
+                  <th>구성 비율</th>
+                  <th>목표 비중</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for section in result.course.sections %}
+                  <tr>
+                    <td>{{ section.title }}</td>
+                    <td>
+                      <div class="target-share-copy">전체 커리큘럼 대비 {{ "%.1f"|format(section.target_weight) }}%</div>
+                    </td>
+                    <td>{{ "%.1f"|format(section.target_weight) }}%</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </article>
+
+          <article class="panel inner-panel">
+            <div class="selector-head">
+              <div class="selector-row" aria-label="강사 선택">
+                {% for instructor in result.instructors %}
+                  <button
+                    type="button"
+                    class="instructor-selector {% if loop.first %}is-active{% endif %}"
+                    data-instructor-selector
+                    data-instructor-name="{{ instructor.name }}"
+                    data-instructor-index="{{ loop.index0 }}"
+                  >
+                    <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
+                    <span>{{ instructor.name }}</span>
+                  </button>
                 {% endfor %}
               </div>
+              <div class="instructor-nav" aria-label="강사 이동">
+                <button type="button" data-instructor-nav="prev" aria-label="이전 강사">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path d="m14 6-6 6 6 6" />
+                  </svg>
+                </button>
+                <button type="button" data-instructor-nav="next" aria-label="다음 강사">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path d="m10 6 6 6-6 6" />
+                  </svg>
+                </button>
+              </div>
             </div>
-          {% endfor %}
+            <div class="meta-chip" data-page2-selected-instructor="detail">{{ selected_instructor }}</div>
+            <div id="page2-rose-chart" class="chart-shell chart-rose" data-chart="rose"></div>
+          </article>
         </div>
-      </article>
-    </section>
+      </section>
 
-    {% if result.warnings %}
-      <section class="panel">
+      <section class="report-section report-section-2">
         <div class="section-heading">
-          <h2>처리 경고</h2>
-          <p>지원 범위 밖이거나 품질 저하 가능성이 있는 항목들입니다.</p>
+          <h2>2. 강사별 강조 키워드</h2>
+          <p>선택한 강사에 따라 워드클라우드가 바뀌며, 강사가 자주 강조하는 개념을 보여줍니다.</p>
         </div>
-        <ul class="warning-list">
-          {% for warning in result.warnings %}
-            <li>{{ warning }}</li>
-          {% endfor %}
-        </ul>
+        <article class="panel inner-panel">
+          <div class="word-cloud-toolbar">
+            {% for instructor in result.instructors %}
+              <button
+                type="button"
+                class="instructor-selector {% if loop.first %}is-active{% endif %}"
+                data-wordcloud-selector
+                data-instructor-name="{{ instructor.name }}"
+                data-instructor-index="{{ loop.index0 }}"
+              >
+                <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
+                <span>{{ instructor.name }}</span>
+              </button>
+            {% endfor %}
+          </div>
+          <div id="page2-wordcloud-chart" class="chart-shell chart-wordcloud" data-chart="wordcloud"></div>
+        </article>
+      </section>
+
+      <section class="report-section report-section-3">
+        <div class="section-heading">
+          <h2>3. 전체 평균과 강사별 구성 비중</h2>
+          <p>위쪽은 전체 강사 평균, 아래쪽은 각 강사별 구성 비중입니다.</p>
+        </div>
+        <div class="chart-stack">
+          <article class="panel inner-panel">
+            <h3>전체 강사 평균</h3>
+            <div id="page2-average-bar-chart" class="chart-shell chart-bars" data-chart="average-bar"></div>
+          </article>
+          <article class="panel inner-panel">
+            <h3>강사별 구성 비중</h3>
+            <div id="page2-instructor-bar-chart" class="chart-shell chart-bars" data-chart="instructor-bar"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="report-section report-section-4">
+        <div class="section-heading">
+          <h2>4. 목표 대비 실제 강의 흐름</h2>
+          <p>목표 라인과 강사별 라인을 비교해 과하거나 부족한 구간을 확인합니다.</p>
+        </div>
+        <article class="panel inner-panel">
+          <div class="selector-head selector-head-right">
+            <div class="selector-row selector-row-right">
+              {% for instructor in result.instructors %}
+                <button
+                  type="button"
+                  class="instructor-selector {% if loop.first %}is-active{% endif %}"
+                  data-line-selector
+                  data-instructor-name="{{ instructor.name }}"
+                  data-instructor-index="{{ loop.index0 }}"
+                >
+                  <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
+                  <span>{{ instructor.name }}</span>
+                </button>
+              {% endfor %}
+            </div>
+            <div class="instructor-nav" aria-label="강사 이동">
+              <button type="button" data-instructor-nav="prev" aria-label="이전 강사">
+                <svg viewBox="0 0 24 24" role="img" focusable="false">
+                  <path d="m14 6-6 6 6 6" />
+                </svg>
+              </button>
+              <button type="button" data-instructor-nav="next" aria-label="다음 강사">
+                <svg viewBox="0 0 24 24" role="img" focusable="false">
+                  <path d="m10 6 6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div id="page2-line-chart" class="chart-shell chart-line" data-chart="line"></div>
+        </article>
+        <div class="page-navigation">
+          <a class="primary-button secondary-button" href="{{ request.url_for('job_solutions', job_id=job.id) }}">솔루션 보기</a>
+        </div>
+      </section>
+    {% else %}
+      <section class="panel status-panel">
+        <div class="section-heading">
+          <h2>결과를 준비 중입니다</h2>
+          <p>작업이 완료되면 분석 결과 카드가 이 자리로 표시됩니다.</p>
+        </div>
+        {% if job.is_failed %}
+          <div class="notice error">{{ job.error or '작업이 실패했습니다.' }}</div>
+        {% else %}
+          <div class="notice">결과를 불러오는 중입니다.</div>
+        {% endif %}
       </section>
     {% endif %}
-
-    <section class="instructor-results">
-      {% for instructor in result.instructors %}
-        <article class="panel instructor-result-card">
-          <div class="section-heading">
-            <h2>{{ instructor.name }}</h2>
-            <p>총 {{ instructor.asset_count }}개 소스, 추출 토큰 {{ instructor.total_tokens }}개</p>
-          </div>
-          <div class="instructor-meta">
-            <span class="meta-chip">Other / Unmapped {{ "%.1f"|format(instructor.unmapped_share * 100) }}%</span>
-            {% if instructor.warnings %}
-              <span class="meta-chip warning-chip">경고 {{ instructor.warnings | length }}건</span>
-            {% endif %}
-          </div>
-          <table class="coverage-table">
-            <thead>
-              <tr>
-                <th>대단원</th>
-                <th>비중</th>
-                <th>평균 대비</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for coverage in instructor.section_coverages %}
-                <tr>
-                  <td>{{ coverage.section_title }}</td>
-                  <td>{{ "%.1f"|format(coverage.token_share * 100) }}%</td>
-                  <td class="{% if coverage.deviation_from_average > 0 %}positive{% elif coverage.deviation_from_average < 0 %}negative{% endif %}">
-                    {{ "%+.1f"|format(coverage.deviation_from_average * 100) }}%
-                  </td>
-                </tr>
-              {% endfor %}
-              <tr>
-                <td>Other / Unmapped</td>
-                <td>{{ "%.1f"|format(instructor.unmapped_share * 100) }}%</td>
-                <td>-</td>
-              </tr>
-            </tbody>
-          </table>
-
-          {% for coverage in instructor.section_coverages %}
-            <details class="evidence-block">
-              <summary>{{ coverage.section_title }} 근거 보기</summary>
-              {% if coverage.evidence_snippets %}
-                <div class="evidence-list">
-                  {% for snippet in coverage.evidence_snippets %}
-                    <article class="evidence-item">
-                      <div class="evidence-meta">
-                        <span>{{ snippet.source_label }}</span>
-                        <span>{{ snippet.locator }}</span>
-                        <span>score {{ "%.2f"|format(snippet.score) }}</span>
-                      </div>
-                      <p>{{ snippet.text }}</p>
-                    </article>
-                  {% endfor %}
-                </div>
-              {% else %}
-                <p class="hint">대표 근거를 충분히 확보하지 못했습니다.</p>
-              {% endif %}
-            </details>
-          {% endfor %}
-
-          {% if instructor.warnings %}
-            <details class="evidence-block">
-              <summary>이 강사의 처리 경고 보기</summary>
-              <ul class="warning-list">
-                {% for warning in instructor.warnings %}
-                  <li>{{ warning }}</li>
-                {% endfor %}
-              </ul>
-            </details>
-          {% endif %}
-        </article>
-      {% endfor %}
-    </section>
-  {% endif %}
+  </section>
 
   {% if job.is_active %}
     <script>

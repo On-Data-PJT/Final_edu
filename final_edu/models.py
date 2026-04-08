@@ -9,6 +9,7 @@ class CurriculumSection:
     id: str
     title: str
     description: str
+    target_weight: float = 0.0
 
     @property
     def search_text(self) -> str:
@@ -111,9 +112,44 @@ class AnalysisRun:
     warnings: list[str]
     scorer_mode: str
     duration_ms: int
+    course: dict = field(default_factory=dict)
+    mode_series: dict = field(default_factory=dict)
+    average_series_by_mode: dict = field(default_factory=dict)
+    keywords_by_instructor: dict = field(default_factory=dict)
+    rose_series_by_instructor: dict = field(default_factory=dict)
+    line_series_by_mode: dict = field(default_factory=dict)
+    insights: list[dict] = field(default_factory=list)
+    insight_generation_mode: str = "deterministic-fallback"
+    external_trends_status: str = "planned"
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class CourseRecord:
+    id: str
+    name: str
+    curriculum_pdf_key: str
+    sections: list[CurriculumSection]
+    raw_curriculum_text: str
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "CourseRecord":
+        return cls(
+            id=payload["id"],
+            name=payload["name"],
+            curriculum_pdf_key=payload["curriculum_pdf_key"],
+            sections=[CurriculumSection(**item) for item in payload.get("sections", [])],
+            raw_curriculum_text=payload.get("raw_curriculum_text", ""),
+            created_at=payload["created_at"],
+            updated_at=payload["updated_at"],
+        )
 
 
 @dataclass(slots=True)
@@ -160,6 +196,9 @@ class JobInstructorInput:
 @dataclass(slots=True)
 class AnalysisJobPayload:
     job_id: str
+    course_id: str
+    course_name: str
+    course_sections: list[CurriculumSection]
     curriculum_text: str
     instructors: list[JobInstructorInput]
     submitted_at: str
@@ -167,6 +206,9 @@ class AnalysisJobPayload:
     def to_dict(self) -> dict:
         return {
             "job_id": self.job_id,
+            "course_id": self.course_id,
+            "course_name": self.course_name,
+            "course_sections": [asdict(section) for section in self.course_sections],
             "curriculum_text": self.curriculum_text,
             "submitted_at": self.submitted_at,
             "instructors": [instructor.to_dict() for instructor in self.instructors],
@@ -176,6 +218,9 @@ class AnalysisJobPayload:
     def from_dict(cls, payload: dict) -> "AnalysisJobPayload":
         return cls(
             job_id=payload["job_id"],
+            course_id=payload.get("course_id", "legacy-course"),
+            course_name=payload.get("course_name", "Legacy Course"),
+            course_sections=[CurriculumSection(**item) for item in payload.get("course_sections", [])],
             curriculum_text=payload["curriculum_text"],
             submitted_at=payload["submitted_at"],
             instructors=[JobInstructorInput.from_dict(item) for item in payload.get("instructors", [])],
@@ -185,6 +230,8 @@ class AnalysisJobPayload:
 @dataclass(slots=True)
 class AnalysisJobRecord:
     id: str
+    course_id: str
+    course_name: str
     status: str
     created_at: str
     updated_at: str
@@ -213,6 +260,8 @@ class AnalysisJobRecord:
     def from_dict(cls, payload: dict) -> "AnalysisJobRecord":
         return cls(
             id=payload["id"],
+            course_id=payload.get("course_id", "legacy-course"),
+            course_name=payload.get("course_name", "Legacy Course"),
             status=payload["status"],
             created_at=payload["created_at"],
             updated_at=payload["updated_at"],

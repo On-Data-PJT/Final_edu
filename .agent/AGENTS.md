@@ -155,20 +155,45 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 
 ## Current Architecture Contract
 
-- 앱 스택: `FastAPI + Jinja + CSS + RQ worker`
+- 앱 스택: `FastAPI + Jinja + CSS + Vanilla JS + RQ worker`
 - 실행 명령:
   - Web: `uv run python -m final_edu --reload`
   - Worker: `uv run python -m final_edu.worker`
-- 핵심 엔드포인트: `GET /`, `POST /analyze`, `GET /jobs/{job_id}`, `GET /jobs/{job_id}/status`, `GET /health`
+- 핵심 엔드포인트:
+  - `GET /`
+  - `POST /courses/preview`
+  - `POST /courses`
+  - `GET /courses`
+  - `GET /courses/{course_id}`
+  - `POST /analyze`
+  - `GET /jobs/{job_id}`
+  - `GET /jobs/{job_id}/solutions`
+  - `GET /jobs/{job_id}/status`
+  - `GET /health`
 - 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
-- 커리큘럼 기준: 운영자가 직접 입력한 대단원
-- 분석 방식: 업로드/URL 등록 → Job enqueue → 배경 분석 → 결과 조회
-- 임베딩: `OPENAI_API_KEY`가 있으면 OpenAI 사용, 없으면 lexical fallback
+- 커리큘럼 기준:
+  - `Page 1`에서 과정명 + 커리큘럼 PDF를 등록
+  - PDF에서 대주제/목표 비중 초안을 추출
+  - 사용자가 수정/저장한 목표 비중이 canonical course contract 가 됨
+- 분석 방식:
+  - `Page 1`: 과정 선택 + 강사 자료 등록
+  - Job enqueue
+  - 배경 분석
+  - `Page 2`: 4단 결과 페이지
+  - `Page 3`: 솔루션 인사이트 페이지
+- 분석 모드:
+  - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
+  - 솔루션 인사이트는 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
+  - 현재 기본 insight model 은 `gpt-5.4-mini`
 - 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
 - 저장소:
   - 프로덕션: `Render Web + Worker + Key Value + Cloudflare R2`
   - 로컬 개발: `inline/local` fallback 허용
-- 의도적 비기능 범위: 자막 없는 영상 STT fallback 미구현, 스캔 PDF OCR 미구현, 영구 이력 보관 미구현
+- 의도적 비기능 범위:
+  - 자막 없는 영상 STT fallback 미구현
+  - 스캔 PDF OCR 미구현
+  - 외부 동향 인사이트 6 실구현 미완료
+  - 영구 이력 보관 미구현
 
 이 계약이 바뀌면 `.agent/AGENTS.md` 수정 대상입니다.
 

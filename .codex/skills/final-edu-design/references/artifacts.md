@@ -81,6 +81,8 @@ uv run --with playwright python ./.codex/skills/final-edu-design/scripts/capture
 - `press`
 - `wait_for`
 - `wait_ms`
+- `scroll_to`
+- `scroll_selector`
 - `goto`
 
 ## Fallback Rule

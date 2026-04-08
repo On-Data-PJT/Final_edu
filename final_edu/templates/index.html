@@ -1,35 +1,48 @@
 {% extends "base.html" %}
 
-{% block title %}Final Edu | Batch Analysis{% endblock %}
+{% block page_name %}page1{% endblock %}
+{% block title %}Final Edu | 과정 관리{% endblock %}
+{% block header_actions %}
+  <button type="button" class="icon-button" data-open-course-modal aria-controls="course-modal" aria-expanded="false" aria-label="과정 추가">
+    <span class="icon-button-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" role="img" focusable="false">
+        <path d="M4 6h7l2 2h7v10a2 2 0 0 1-2 2H4V6zm6 4v2H8v2h2v2h2v-2h2v-2h-2v-2h-2zm-6-6h8l2 2H4V4z" />
+      </svg>
+    </span>
+  </button>
+  <button type="button" class="icon-button" data-open-course-list aria-controls="course-list-panel" aria-expanded="false" aria-label="과정 목록">
+    <span class="icon-button-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" role="img" focusable="false">
+        <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
+      </svg>
+    </span>
+  </button>
+{% endblock %}
 
 {% block content %}
-  <section class="hero panel">
+  <script id="page1-courses-data" type="application/json" hidden>{{ courses_json | safe }}</script>
+
+  <section class="hero panel page-hero page-hero-page1">
     <div class="hero-copy">
-      <p class="eyebrow">Curriculum Coverage Standardization</p>
-      <h1>전체 커리큘럼 자료를<br />배치 작업으로 분석합니다.</h1>
+      <p class="eyebrow">Course Driven Workspace</p>
+      <h1>과정을 먼저 만들고,<br />그 과정 기준으로 강사 자료를 모읍니다.</h1>
       <p class="hero-text">
-        강사별 PDF, PPTX, 텍스트 자료와 YouTube URL을 한 번에 등록하면
-        작업 큐에 넣고 배경에서 분석을 수행합니다. 완료 후에는 대단원별 비중, 편차,
-        근거 스니펫을 같은 화면 흐름으로 확인할 수 있습니다.
+        커리큘럼 PDF에서 목표 비중을 추출해 과정으로 저장한 뒤, 선택된 과정 기준으로 강사별 자료를
+        정리하는 시작 화면입니다.
       </p>
-      <div class="badge-row">
-        {% for badge in method_badges %}
-          <span class="badge">{{ badge }}</span>
-        {% endfor %}
-      </div>
     </div>
     <div class="hero-metric">
       <div class="metric-card">
-        <span class="metric-label">지원 포맷</span>
-        <strong>{{ supported_formats | join(", ") }}</strong>
+        <span class="metric-label">과정 수</span>
+        <strong>{{ courses | length }}</strong>
       </div>
       <div class="metric-card">
-        <span class="metric-label">분석 방식</span>
-        <strong>작업 큐 + 배치 처리</strong>
+        <span class="metric-label">최근 작업</span>
+        <strong>{{ recent_jobs | length }}</strong>
       </div>
       <div class="metric-card">
-        <span class="metric-label">현재 실행 모드</span>
-        <strong>{{ settings.queue_mode }} / {{ settings.storage_mode }}</strong>
+        <span class="metric-label">선택 과정</span>
+        <strong id="selected-course-name">{{ selected_course_name or '미선택' }}</strong>
       </div>
     </div>
   </section>
@@ -38,85 +51,166 @@
     <section class="notice error">{{ error }}</section>
   {% endif %}
 
-  <section class="panel">
+  <section class="panel course-toolbar">
     <div class="section-heading">
-      <h2>분석 작업 생성</h2>
-      <p>한 번 제출하면 즉시 결과를 기다리지 않고 작업 페이지로 이동합니다.</p>
+      <h2>과정 선택</h2>
+      <p>우측 상단 아이콘으로 과정을 추가하거나 목록을 열어 활성 과정을 바꿉니다.</p>
     </div>
-    <form class="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
-      <label class="field">
-        <span>표준 커리큘럼</span>
-        <textarea
-          name="curriculum_text"
-          rows="8"
-          placeholder="1. 문제 정의 | 학습 목표, 배경, 문제 맥락&#10;2. 핵심 개념 | 주요 개념, 용어, 원리&#10;3. 실습과 적용 | 예제, 코드, 실습 과정"
-        >{{ form_values.curriculum_text }}</textarea>
-      </label>
+    <div class="course-toolbar-grid">
+      {% for course in courses %}
+        <button
+          type="button"
+          class="course-card {% if course.id == selected_course_id %}is-active{% endif %}"
+          data-course-card
+          data-course-select="{{ course.id }}"
+          data-course-id="{{ course.id }}"
+          data-course-name="{{ course.name }}"
+        >
+          <strong>{{ course.name }}</strong>
+          <span>{{ course.section_count }}개 대주제</span>
+          <small>목표 비중 합계 {{ "%.1f"|format(course.sections | sum(attribute='target_weight')) }}%</small>
+        </button>
+      {% else %}
+        <div class="empty-state">
+          <strong>등록된 과정이 없습니다.</strong>
+          <p>책+ 아이콘으로 새 과정을 추가해 주세요.</p>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
 
-      <div class="instructor-grid">
-        {% for instructor in form_values.instructors %}
-          <article class="panel instructor-input">
-            <h3>강사 {{ loop.index }}</h3>
-            <label class="field">
-              <span>강사명</span>
-              <input
-                type="text"
-                name="instructor_{{ loop.index }}_name"
-                value="{{ instructor.name }}"
-                placeholder="예: 김강사"
-              />
-            </label>
-            <label class="field">
-              <span>YouTube URL</span>
-              <textarea
-                name="instructor_{{ loop.index }}_youtube_urls"
-                rows="5"
-                placeholder="한 줄에 하나씩 입력"
-              >{{ instructor.youtube_urls }}</textarea>
-            </label>
-            <label class="field">
-              <span>자료 파일</span>
-              <input
-                type="file"
-                name="instructor_{{ loop.index }}_files"
-                multiple
-                accept=".pdf,.pptx,.txt,.md"
-              />
-            </label>
-          </article>
-        {% endfor %}
+  <section class="panel page1-workspace" id="page1-workspace" data-has-course="{% if selected_course_id %}true{% else %}false{% endif %}">
+    <div class="section-heading">
+      <h2>강사 자료 등록</h2>
+      <p>과정이 선택되면 강사별 자료 블록을 추가하고, 완료 버튼으로 다음 화면으로 이동합니다.</p>
+    </div>
+    <form id="page1-form" class="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
+      <input type="hidden" id="selected-course-id" name="course_id" value="{{ selected_course_id }}" />
+      <input type="hidden" name="instructor_manifest" id="instructor-manifest" value="[]" />
+      <div class="workspace-empty-state {% if selected_course_id %}is-hidden{% endif %}" data-workspace-disabled>
+        <strong>과정을 선택하거나 새로 추가하세요</strong>
+        <p>과정이 선택되면 강사 자료를 등록할 수 있습니다.</p>
       </div>
 
-      <div class="form-actions">
-        <button class="primary-button" type="submit">배치 분석 작업 생성</button>
-        <p class="hint">
-          대용량 코스 분석을 위해 작업이 큐에 등록됩니다. 텍스트형 PDF/PPTX와 자막이 있는 YouTube URL에서 가장 안정적으로 동작합니다.
-        </p>
+      <div id="instructor-blocks" class="instructor-blocks" data-blocks-enabled="{% if selected_course_id %}true{% else %}false{% endif %}">
+        <article class="instructor-block" data-instructor-block data-block-id="primary">
+          <div class="instructor-block__header">
+            <label class="field instructor-block__name">
+              <span>강사명</span>
+              <input type="text" name="instructor_name__primary" data-role="instructor-name" placeholder="예: 김강사" />
+            </label>
+            <span class="instructor-block__status" data-role="block-status">자료 없음</span>
+          </div>
+          <div class="dropzone instructor-dropzone">
+            <p>강의 자료를 여기에 등록하세요</p>
+            <small>PDF, PPTX, TXT, MD, YouTube URL</small>
+          </div>
+          <div class="block-actions">
+            <button type="button" class="icon-action-button" data-action="toggle-files" aria-label="파일 업로드">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M6 12.5 12 6.5l6 6m-6-6v11" />
+              </svg>
+              <span>파일 업로드</span>
+            </button>
+            <button type="button" class="icon-action-button" data-action="toggle-youtube" aria-label="YouTube 링크 업로드">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M10 15.5v-7l6 3.5-6 3.5Zm10-8.5c0-1.1-.9-2-2-2H6C4.9 5 4 5.9 4 7v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7Z" />
+              </svg>
+              <span>YouTube 링크</span>
+            </button>
+          </div>
+          <div class="instructor-block__panels">
+            <section class="instructor-block__panel" data-role="files-panel" hidden>
+              <label class="field">
+                <span>강의 자료 파일</span>
+                <input type="file" name="instructor_files__primary" data-role="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
+              </label>
+            </section>
+            <section class="instructor-block__panel" data-role="youtube-panel" hidden>
+              <label class="field">
+                <span>YouTube URL</span>
+                <textarea name="instructor_youtube_urls__primary" data-role="instructor-youtube" rows="4" placeholder="한 줄에 하나씩 입력"></textarea>
+              </label>
+            </section>
+          </div>
+        </article>
+      </div>
+
+      <template id="instructor-block-template">
+        <article class="instructor-block" data-instructor-block>
+          <div class="instructor-block__header">
+            <label class="field instructor-block__name">
+              <span>강사명</span>
+              <input type="text" data-role="instructor-name" />
+            </label>
+            <span class="instructor-block__status" data-role="block-status">자료 없음</span>
+          </div>
+          <div class="dropzone instructor-dropzone">
+            <p>강의 자료를 여기에 등록하세요</p>
+            <small>파일 또는 링크를 추가하면 이 블록이 분석됩니다.</small>
+          </div>
+          <div class="block-actions">
+            <button type="button" class="icon-action-button" data-action="toggle-files" aria-label="파일 업로드">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M6 12.5 12 6.5l6 6m-6-6v11" />
+              </svg>
+              <span>파일 업로드</span>
+            </button>
+            <button type="button" class="icon-action-button" data-action="toggle-youtube" aria-label="YouTube 링크 업로드">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path d="M10 15.5v-7l6 3.5-6 3.5Zm10-8.5c0-1.1-.9-2-2-2H6C4.9 5 4 5.9 4 7v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7Z" />
+              </svg>
+              <span>YouTube 링크</span>
+            </button>
+          </div>
+          <div class="instructor-block__panels">
+            <section class="instructor-block__panel" data-role="files-panel" hidden>
+              <label class="field">
+                <span>강의 자료 파일</span>
+                <input type="file" data-role="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
+              </label>
+            </section>
+            <section class="instructor-block__panel" data-role="youtube-panel" hidden>
+              <label class="field">
+                <span>YouTube URL</span>
+                <textarea data-role="instructor-youtube" rows="4" placeholder="한 줄에 하나씩 입력"></textarea>
+              </label>
+            </section>
+          </div>
+        </article>
+      </template>
+
+      <div class="submission-controls">
+        <button type="button" id="add-instructor-block" class="secondary-button" data-add-instructor disabled aria-label="강사 블록 추가">+</button>
+        <button type="submit" id="submit-analysis" class="primary-button enter-button" disabled aria-label="다음 단계로 이동">
+          <span>다음</span>
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="M14 6l6 6-6 6M4 6v6h16" />
+          </svg>
+        </button>
       </div>
     </form>
   </section>
 
-  <section class="panel">
+  <section class="panel recent-panel">
     <div class="section-heading">
       <h2>최근 작업</h2>
-      <p>최근 생성한 분석 작업의 상태와 요약 정보를 확인할 수 있습니다.</p>
+      <p>직전 분석 작업의 상태와 요약 정보를 확인할 수 있습니다.</p>
     </div>
     {% if recent_jobs %}
       <div class="job-list">
         {% for job in recent_jobs %}
           <a class="job-card" href="{{ job.url }}">
             <div class="job-card-head">
-              <strong>{{ job.id }}</strong>
+              <strong>{{ job.course_name }}</strong>
               <span class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
             </div>
             <p class="job-summary">
               강사 {{ job.instructor_count }}명, 파일 {{ job.asset_count }}개, YouTube {{ job.youtube_url_count }}개, 대단원 {{ job.section_count }}개
             </p>
             <div class="job-meta">
+              <span>{{ job.id }}</span>
               <span>업데이트 {{ job.updated_at_label }}</span>
-              {% if job.instructor_names %}
-                <span>{{ job.instructor_names | join(", ") }}</span>
-              {% endif %}
             </div>
           </a>
         {% endfor %}
@@ -124,5 +218,97 @@
     {% else %}
       <p class="hint">아직 생성된 작업이 없습니다.</p>
     {% endif %}
+  </section>
+
+  <section id="course-modal" class="floating-panel modal-shell" aria-hidden="true" hidden>
+    <div class="panel course-modal-card">
+      <div class="block-header">
+        <div class="section-heading">
+          <h2>과정 추가</h2>
+          <p>과정명과 커리큘럼 PDF를 등록하면 대주제와 목표 비중 초안을 생성합니다.</p>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="m7 7 10 10M17 7 7 17" />
+          </svg>
+        </button>
+      </div>
+      <form id="course-modal-form" class="course-modal-form" action="/courses" method="post" enctype="multipart/form-data">
+        <label class="field">
+          <span>과정명</span>
+          <input type="text" name="course_name" placeholder="예: Python 기초 과정" />
+        </label>
+        <div class="field">
+          <span>커리큘럼 PDF</span>
+          <label class="dropzone course-upload-zone">
+            <input class="sr-only" type="file" name="curriculum_pdf" accept=".pdf" />
+            <strong>PDF를 드롭하거나 선택하세요</strong>
+            <small>과정별 강의 시간, 기간, 비중 표현을 우선 추출합니다.</small>
+          </label>
+        </div>
+        <input type="hidden" name="sections_json" id="course-sections-json" value="[]" />
+        <input type="hidden" name="raw_curriculum_text" id="course-raw-curriculum-text" value="" />
+        <div id="course-preview-state" class="preview-state">
+          <strong>PDF를 업로드하면 커리큘럼 초안을 확인할 수 있습니다.</strong>
+        </div>
+        <div id="course-preview-table" class="preview-table-wrap">
+          <div class="preview-empty-state">
+            <strong>아직 미리보기 결과가 없습니다.</strong>
+          </div>
+        </div>
+        <template id="course-preview-row-template">
+          <tr data-course-preview-row>
+            <td><input type="text" data-course-section-title placeholder="대주제" /></td>
+            <td><input type="text" data-course-section-description placeholder="설명" /></td>
+            <td><input type="number" data-course-section-weight min="0" step="0.1" placeholder="비중" /></td>
+          </tr>
+        </template>
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" data-close-dialog data-close="course-modal">취소</button>
+          <button type="submit" id="course-save-button" class="primary-button" disabled>저장</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section id="course-list-panel" class="floating-panel drawer-shell course-list-panel" aria-hidden="true" hidden>
+    <div class="panel">
+      <div class="block-header">
+        <div class="section-heading">
+          <h2>과정 목록</h2>
+          <p>기존에 저장한 과정과 활성 과정을 확인합니다.</p>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="m7 7 10 10M17 7 7 17" />
+          </svg>
+        </button>
+      </div>
+      <div class="course-list" data-role="course-list-items">
+        {% for course in courses %}
+          <button
+            type="button"
+            class="course-list-item {% if course.id == selected_course_id %}is-active{% endif %}"
+            data-course-list-item
+            data-course-select="{{ course.id }}"
+            data-course-item="true"
+            data-course-id="{{ course.id }}"
+            data-course-name="{{ course.name }}"
+          >
+            <div class="course-list-item-head">
+              <strong>{{ course.name }}</strong>
+              <span class="course-state-chip is-sage">목표 비중 추출 완료</span>
+            </div>
+            <span>{{ course.section_count }}개 대주제</span>
+            <small>목표 비중 합계 {{ "%.1f"|format(course.sections | sum(attribute='target_weight')) }}%</small>
+          </button>
+        {% else %}
+          <div class="empty-state">
+            <strong>아직 과정이 없습니다.</strong>
+            <p>새 과정을 추가해 주세요.</p>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
   </section>
 {% endblock %}

@@ -5,18 +5,26 @@ Last Updated: 2026-04-08
 ## Current Snapshot
 
 - 저장소 목적: 강의 자료를 표준 커리큘럼 기준으로 정규화해 강사별 커리큘럼 커버리지 편차를 시각화하는 공모전용 MVP
-- 현재 앱 스택: `FastAPI + Jinja + CSS + uv + RQ`
+- 현재 앱 스택: `FastAPI + Jinja + CSS + Vanilla JS + uv + RQ`
 - 현재 실행 명령: `uv run python -m final_edu --reload`
 - 현재 worker 실행 명령: `uv run python -m final_edu.worker`
 - 현재 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
   - 현재 YouTube 입력은 개별 영상 URL 기준이며, 재생목록 URL의 내부 영상 자동 확장은 아직 미구현
-- 현재 분류 기준: 운영자가 직접 입력한 대단원 커리큘럼
+- 현재 과정 기준:
+  - `Page 1`에서 과정명과 커리큘럼 PDF를 등록
+  - PDF에서 대주제/목표 비중 초안을 추출
+  - 사용자가 수정해 저장한 목표 비중이 분석 기준이 됨
 - 현재 분석 모드:
   - `OPENAI_API_KEY`가 있으면 OpenAI embedding 사용
   - 키가 없거나 실패하면 lexical similarity fallback
+  - 솔루션 인사이트는 `OPENAI_INSIGHT_MODEL` 사용
+  - 현재 기본 insight model: `gpt-5.4-mini`
+  - insight model 실패 시 deterministic fallback 카드 사용
 - 현재 작업 방식:
+  - `Page 1`: 과정 추가/선택 + 강사 자료 등록
   - `POST /analyze`는 즉시 결과를 반환하지 않음
-  - 분석 Job을 생성하고 `/jobs/{job_id}`에서 상태/결과를 확인함
+  - 분석 Job을 생성하고 `/jobs/{job_id}`에서 첫 번째 결과 페이지를 확인함
+  - `/jobs/{job_id}/solutions`에서 솔루션 인사이트 페이지를 확인함
 - 현재 배포 전제:
   - 프로덕션: `Render Web + Worker + Key Value + R2`
   - 로컬: `inline/local` fallback
@@ -40,12 +48,14 @@ Last Updated: 2026-04-08
 
 ## Current Goal
 
-- 현재 목표는 **전체 커리큘럼 배치 분석 MVP를 안정화**하는 것
+- 현재 목표는 **3페이지 데모 UI와 과정 기반 분석 흐름을 안정화**하는 것
 - 지금 시점에서 가장 중요한 다음 단계:
+  - 현재 UI/분석 확장 변경을 정리하고 커밋 가능한 상태로 마감
   - 실제 데모용 강의자료 2~3세트 확보
   - Render 실배포 검증
   - R2 / Render KV 연결 후 worker 실운영 경로 검증
   - 결과 해석 문구와 경고 메시지 튜닝
+  - 외부 동향 슬롯과 모바일 압축에 대한 선택적 polish 판단
 
 ## Current Parallel Lanes
 
@@ -75,8 +85,11 @@ Last Updated: 2026-04-08
 - IDE 실행 환경 정리 완료
   - `.vscode` 설정으로 워크스페이스 루트 기준 실행 가능
 - 웹 MVP 골격 구현 완료
-  - `GET /`, `POST /analyze`, `GET /jobs/{job_id}`, `GET /jobs/{job_id}/status`, `GET /health`
+  - `GET /`, `POST /analyze`, `GET /jobs/{job_id}`, `GET /jobs/{job_id}/solutions`, `GET /jobs/{job_id}/status`, `GET /health`
   - FastAPI 앱 팩토리 및 CLI 실행 경로 구현
+- 과정 저장/선택 흐름 구현 완료
+  - `POST /courses/preview`, `POST /courses`, `GET /courses`, `GET /courses/{course_id}` 추가
+  - 커리큘럼 PDF preview, 목표 비중 editable table, 과정 저장, 과정 목록/선택 구현
 - 배치 처리 인프라 골격 구현 완료
   - Job payload / Job metadata 모델 추가
   - 로컬 파일 기반 Job 저장소 추가
@@ -98,13 +111,17 @@ Last Updated: 2026-04-08
   - 강사별 비중 계산
   - `Other / Unmapped` 처리
   - 근거 스니펫 추출
-- 결과 UI 구현 완료
-  - Job 상태 화면
-  - 강사별 비교 바
-  - 평균 대비 편차 표시
-  - 근거 스니펫 표시
-  - 경고 메시지 표시
-  - 최근 작업 목록
+- 분석 결과 확장 구현 완료
+  - `material / speech / combined` mode series 계산
+  - 강사별 keyword cloud 데이터 계산
+  - rose / bar / line chart 시리즈 계산
+  - 솔루션 인사이트 1~5용 deterministic metrics 계산
+  - `gpt-5.4-mini` 기반 insight 생성 + 실패 시 deterministic fallback 구현
+- 3페이지 UI 구현 완료
+  - `Page 1`: 과정 생성/목록/선택, 동적 강사 블록, 파일/YouTube 입력, 완료 버튼
+  - `Page 2`: 4단 스크롤 결과 페이지, mode toggle, rose chart, wordcloud, 평균/강사별 bar, 목표 대비 line
+  - `Page 3`: 솔루션 인사이트 페이지, 외부 동향 슬롯 placeholder
+  - 최근 작업 목록과 상태 칩 정리
 - 배포 준비 파일 추가 완료
   - `.env.example`
   - `render.yaml`
@@ -116,6 +133,8 @@ Last Updated: 2026-04-08
   - `final-edu-design` 스킬 생성
   - scored reviewer loop, subagent workflow, screenshot capture script, review rubric 문서화
   - Page 1, Page 2/3 기준 forward-test 로 workflow 전달력 점검
+  - 실제 UI 구현 라운드에서 subagent reviewer loop 사용
+  - 최신 reviewer pass 점수: `93/100`
 
 ## Verified Working
 
@@ -130,9 +149,17 @@ Last Updated: 2026-04-08
 - `uv run python -m final_edu --help` 정상 응답
 - inline 모드에서 `final_edu.jobs.create_job_services()` import / 생성 성공
 - `uv run python -m final_edu --reload --port 8011` 정상 기동 및 종료 확인
+- `POST /courses/preview`, `POST /courses`, `GET /courses` 흐름 정상
+- `/jobs/{job_id}`와 `/jobs/{job_id}/solutions` 렌더링 정상
+- `node --check final_edu/static/app.js` 통과
+- `python3 -m py_compile final_edu/*.py` 통과
 - `final-edu-design` 스킬 `SKILL.md` frontmatter / `agents/openai.yaml` 메타데이터 수동 검증 완료
 - `final-edu-design`의 `capture_pages.py` 문법 검증 완료
 - `final-edu-design` 스킬을 사용한 subagent forward-test 2건 통과
+- `final-edu-design` 스킬을 사용한 실제 screenshot + reviewer loop 완료
+- design-review 스크린샷 세트 생성 완료
+  - 경로: `.final_edu_runtime/design-review/three-page-ui/`
+- 최종 reviewer 결과: `93/100`, hard-fail 없음, pass
 
 ## Known Gaps / Next Priorities
 
@@ -142,20 +169,20 @@ Last Updated: 2026-04-08
 - 현재 `rq 2.7.0` 기준 Windows의 별도 worker 실행은 `fork` 컨텍스트 제약 가능성이 있어 WSL/Linux 또는 배포 환경 검증이 더 적합함
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
 - YouTube 재생목록 URL을 내부 영상 URL들로 펼쳐 분석하는 기능은 아직 없음
-- `.agent/Components.md`는 3페이지 구조까지 정리됐지만, 아직 실제 템플릿/CSS에는 반영되지 않았다
+- 외부 동향 슬롯은 현재 placeholder 수준이며 실검색/실반영은 미구현
+- captionless YouTube STT 파이프라인은 아직 없음
+- `Page 2`/`Page 3` 모바일 밀도와 `Page 1` vertical breathing room 은 선택적 polish 여지가 남아 있음
 - 결과 페이지에서 요구하는 `only발화` 모드는 자막 없는 영상까지 포함하려면 STT 파이프라인이 추가로 필요하다
 - 솔루션 페이지의 외부 조사 기반 인사이트는 고위험 확장 기능이며 아직 구현되지 않았다
-- `.agent/DESIGN.md`는 작성되지만 아직 실제 템플릿/CSS에 전면 반영되지는 않은 상태다
 - 자막 없는 영상 STT fallback 은 아직 미구현
 - 스캔 PDF / 이미지 기반 PPTX는 정확도가 낮음
-- 배치 아키텍처 전환과 운영 문서 보강은 현재 브랜치에 반영되어 있다
-- `final-edu-design` 스킬은 생성되었고 forward-test 는 통과했지만, 아직 실제 UI 코드 변경 라운드에서 full loop 로 사용되지는 않았다
 
 ## Working Tree Notes
 
 - 기존 MVP 구현은 현재 `dev` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
-- 현재 기준점은 Windows 로컬 startup 호환성 패치, repo-local 디자인 스킬, `.agent/` 문서 체계 전환이 `dev` 브랜치에 반영된 상태다
+- 현재 기준점은 과정 저장/선택, 3페이지 UI, mode별 결과 계산, insight fallback, reviewer pass까지 로컬에서 구현된 상태다
+- 현재 라운드 변경은 `dev` 브랜치에 정리해 원격과 동기화하는 것을 기준으로 마감한다
 - 루트 `AGENTS.md`는 bootstrap entrypoint 로 유지되고, canonical 운영 문서는 `.agent/` 아래에서 관리된다
 - 다음 작업자는 이 브랜치 기준으로 바로 후속 작업을 이어가면 된다
 - `.agent/STATUS.md`는 현재 사실을 기록하는 문서이며, 방금 만든 모든 커밋 해시를 계속 덧붙이는 용도로 쓰지 않는다
@@ -235,3 +262,11 @@ Last Updated: 2026-04-08
 - 운영 문서 5종을 `.agent/` 폴더 아래로 이동
 - 루트 `AGENTS.md`는 다음 에이전트 자동 진입을 위한 bootstrap 파일로 축소
 - 디자인 스킬과 README의 문서 참조 경로를 `.agent/` 기준으로 갱신
+- 과정 저장/선택을 위한 `courses` 저장소와 preview/save/list/get 라우트 구현
+- `Page 1` 메인 입력 화면을 과정 선택형 워크스페이스로 재구성
+- `Page 2` 4단 스크롤 결과 페이지 구현
+- `Page 3` 솔루션 인사이트 페이지 구현
+- 분석 결과에 `material / speech / combined` mode series, keyword cloud, rose/bar/line 시리즈 추가
+- 솔루션 인사이트 1~5에 대해 `gpt-5.4-mini` 기반 생성 + deterministic fallback 구현
+- `final-edu-design` 스킬 workflow 로 screenshot artifact 세트 생성
+- reviewer loop 최종 결과 `93/100` pass 확보

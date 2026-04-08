@@ -73,6 +73,17 @@ def run_action(page, base_url: str | None, action: dict) -> None:  # noqa: ANN00
     if action_type == "wait_ms":
         page.wait_for_timeout(int(action.get("ms", 250)))
         return
+    if action_type == "scroll_to":
+        x = int(action.get("x", 0))
+        y = int(action.get("y", 0))
+        page.evaluate(
+            "(coords) => window.scrollTo(coords.x, coords.y)",
+            {"x": x, "y": y},
+        )
+        return
+    if action_type == "scroll_selector":
+        page.locator(action["selector"]).scroll_into_view_if_needed()
+        return
     if action_type == "goto":
         page.goto(resolve_url(base_url, action["url"]), wait_until="networkidle")
         return

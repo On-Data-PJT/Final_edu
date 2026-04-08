@@ -16,6 +16,7 @@ class Settings:
     port: int
     openai_api_key: str | None
     openai_embedding_model: str
+    openai_insight_model: str
     max_sections: int
     max_instructors: int
     max_upload_bytes: int
@@ -83,6 +84,7 @@ def get_settings() -> Settings:
             "OPENAI_EMBEDDING_MODEL",
             "text-embedding-3-small",
         ),
+        openai_insight_model=os.getenv("OPENAI_INSIGHT_MODEL", "gpt-5.4-mini"),
         max_sections=8,
         max_instructors=3,
         max_upload_bytes=max_upload_mb * 1024 * 1024,

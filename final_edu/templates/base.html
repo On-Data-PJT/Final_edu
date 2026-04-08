@@ -6,16 +6,19 @@
     <title>{% block title %}Final Edu{% endblock %}</title>
     <link rel="stylesheet" href="{{ request.url_for('static', path='styles.css') }}" />
   </head>
-  <body>
+  <body data-page="{% block page_name %}generic{% endblock %}">
     <div class="page-shell">
       <header class="site-header">
-        <a class="brand" href="/">Final Edu</a>
-        <nav class="site-nav">
-          <span class="nav-pill">강의 품질 표준화</span>
-          <span class="nav-pill">커리큘럼 커버리지 MVP</span>
-        </nav>
+        <a class="brand" href="/" aria-label="Final Edu 홈">Final_Edu</a>
+        <div class="site-header-actions" aria-label="페이지 도구">
+          {% block header_actions %}{% endblock %}
+        </div>
       </header>
-      <main>{% block content %}{% endblock %}</main>
+      <main id="page-root">{% block content %}{% endblock %}</main>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js" defer></script>
+    <script src="{{ request.url_for('static', path='app.js') }}" defer></script>
+    {% block body_end %}{% endblock %}
   </body>
 </html>

@@ -230,6 +230,8 @@ def create_job_record(
     youtube_url_count = sum(len(item.youtube_urls) for item in payload.instructors)
     return AnalysisJobRecord(
         id=payload.job_id,
+        course_id=payload.course_id,
+        course_name=payload.course_name,
         status="queued",
         created_at=created_at,
         updated_at=created_at,
@@ -329,7 +331,18 @@ def _execute_analysis(payload: AnalysisJobPayload, storage: ObjectStorage, setti
                 )
             )
 
-        result = analyze_submissions(payload.curriculum_text, submissions, settings)
+        sections = payload.course_sections
+        if not sections:
+            from final_edu.analysis import parse_curriculum_sections
+
+            sections = parse_curriculum_sections(payload.curriculum_text, settings.max_sections)
+        result = analyze_submissions(
+            course_id=payload.course_id,
+            course_name=payload.course_name,
+            sections=sections,
+            submissions=submissions,
+            settings=settings,
+        )
         return result.to_dict()
 
 

@@ -258,6 +258,49 @@ Lead / Integration
   - `SKILL.md` frontmatter 키 수동 검증
   - `agents/openai.yaml` 기본 프롬프트 확인
   - `capture_pages.py` 문법 검증
+
+### Prevention Rule
+
+- `skill-creator` 검증 스크립트를 바로 실행하기 전에 현재 Python 환경에 `PyYAML`이 있는지 먼저 확인할 것
+- 스크립트 의존성이 빠져 있으면 구조적 수동 검증으로 먼저 진행하고, 필요할 때만 의존성을 보강할 것
+
+---
+
+## 8. JSON 데이터 스크립트가 페이지에 그대로 노출됨
+
+### Date
+
+2026-04-08
+
+### Agent / Lane
+
+Web / Demo Agent
+
+### Symptom
+
+- Chromium 스크린샷에서 `type="application/json"` 스크립트의 JSON payload가 페이지 하단 텍스트처럼 그대로 노출됨
+- `Page 1`, `Page 2`, `Page 3` 모두 시각 결과가 깨져 reviewer 점수에 직접 영향이 있었음
+
+### Where
+
+- `final_edu/templates/index.html`
+- `final_edu/templates/job.html`
+- `final_edu/templates/solutions.html`
+
+### Root Cause
+
+- 데이터 전달용 `<script type="application/json">` 태그를 DOM에 넣었지만 `hidden` 속성이 없었음
+- 브라우저별 렌더링/스크린샷 경로에서 이 노드가 레이아웃에 잡히며 텍스트가 그대로 표시됨
+
+### Resolution
+
+- 세 템플릿의 JSON 스크립트 태그에 `hidden` 속성을 추가
+- 이후 Playwright 스크린샷을 다시 생성해 노출이 사라진 것을 확인
+
+### Prevention Rule
+
+- 템플릿에 JSON payload를 심을 때는 `type="application/json"`만 믿지 말고 `hidden` 또는 명시적 `display:none` 처리까지 함께 넣을 것
+- reviewer용 스크린샷을 찍기 전에 raw JSON, raw token, debug text가 화면에 보이지 않는지 먼저 점검할 것
 - 이후 `quick_validate.py`가 꼭 필요하면 `PyYAML`이 있는 환경에서 실행하거나 임시 의존성으로 실행
 
 ### Prevention Rule
