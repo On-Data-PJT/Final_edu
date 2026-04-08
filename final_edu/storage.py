@@ -50,9 +50,20 @@ class LocalObjectStorage(ObjectStorage):
         return destination
 
     def _resolve(self, key: str) -> Path:
-        destination = self.root / key
+        relative_key = Path(key)
+        self._validate_relative_key(relative_key)
+        destination = self.root / relative_key
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination
+
+    def _validate_relative_key(self, key: Path) -> None:
+        if key.is_absolute():
+            raise ValueError("스토리지 키는 절대 경로일 수 없습니다.")
+        for component in key.parts:
+            if component in {"", ".", ".."}:
+                raise ValueError(f"스토리지 키 구성요소가 올바르지 않습니다. ({component!r})")
+            if len(component.encode("utf-8")) > 240:
+                raise ValueError(f"스토리지 키 구성요소가 너무 깁니다. ({component[:48]}...)")
 
 
 class R2ObjectStorage(ObjectStorage):

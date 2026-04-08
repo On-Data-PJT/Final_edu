@@ -10,10 +10,12 @@ Final_Edu의 웹 UI를 `.agent/Components.md`의 요구사항과 `.agent/DESIGN.
 ## Quick Start
 
 1. 먼저 repo-root `AGENTS.md` bootstrap 과 `.agent/AGENTS.md`, `.agent/STATUS.md`, `.agent/DEBUG.md`, `.agent/Components.md`, `.agent/DESIGN.md`를 읽는다.
-2. 이번 작업이 `small`, `medium`, `large` 중 어느 크기인지 정한다.
-3. 구조와 acceptance 기준을 먼저 잠그고 나서 UI를 수정한다.
-4. 스크린샷과 로컬 렌더 결과를 만든 뒤 최종 리뷰를 돌린다.
-5. 총점 `90점` 이상이 아니면 최대 `3회`까지 재작업 루프를 반복한다.
+2. 필요하면 첨부 이미지와 `.agent/Components.md`를 함께 보고 실제 tone/layout contract 를 확인한다.
+3. 이번 작업이 `small`, `medium`, `large` 중 어느 크기인지 정한다.
+4. 구조와 acceptance 기준을 먼저 잠그고 나서 UI를 수정한다.
+5. 검수 환경을 확인한다. `cmux`가 사용 가능하면 `cmux` 브라우저를 우선 사용하고, 그렇지 않거나 mobile viewport가 필요하면 Playwright를 fallback 으로 사용한다.
+6. 스크린샷과 로컬 렌더 결과를 만든 뒤 최종 리뷰를 돌린다.
+7. 총점 `90점` 이상이 아니면 최대 `3회`까지 재작업 루프를 반복한다.
 
 ## Workflow
 
@@ -30,13 +32,13 @@ Final_Edu의 웹 UI를 `.agent/Components.md`의 요구사항과 `.agent/DESIGN.
   - `Final Reviewer`
 - 현재 세션에서 subagent 사용이 허용되지 않으면 같은 역할을 메인 에이전트가 순차적으로 수행한다.
 - 최종 reviewer는 코드 수정 금지다.
-- reviewer에게는 구현 의도나 예상 정답을 넘기지 말고, `코드 + 로컬 렌더 결과 + 스크린샷 + .agent/Components.md + .agent/DESIGN.md`만 넘긴다.
+- reviewer에게는 구현 의도나 예상 정답을 넘기지 말고, `코드 + 로컬 렌더 결과 + 스크린샷/스냅샷 + .agent/Components.md + .agent/DESIGN.md`만 넘긴다.
 
 ## Output Requirements
 
 - 어떤 `.agent/Components.md` 섹션을 구현했는지 남긴다.
 - 어떤 `.agent/DESIGN.md` 규칙을 적용했는지 남긴다.
-- 스크린샷 저장 경로를 남긴다.
+- 스크린샷 저장 경로와 사용한 capture backend(`cmux` 또는 `playwright`)를 남긴다.
 - 최종 reviewer 점수와 pass/fail 여부를 남긴다.
 - `90점 미만`이면 반드시 must-fix 목록과 남은 리스크를 남긴다.
 
@@ -47,6 +49,6 @@ Final_Edu의 웹 UI를 `.agent/Components.md`의 요구사항과 `.agent/DESIGN.
 - `references/review-rubric.md`
   - reviewer prompt, 점수표, hard-fail 기준이 필요할 때 읽는다.
 - `references/artifacts.md`
-  - 로컬 렌더, 스크린샷, Playwright manifest 예시가 필요할 때 읽는다.
+  - 로컬 렌더, `cmux`/Playwright 캡처 방식, manifest 예시가 필요할 때 읽는다.
 - `scripts/capture_pages.py`
-  - 스크린샷을 자동 생성할 때 사용한다.
+  - `auto`, `cmux`, `playwright` backend 로 스크린샷을 자동 생성할 때 사용한다.

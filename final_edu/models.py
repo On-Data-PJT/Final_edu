@@ -132,6 +132,7 @@ class CourseRecord:
     name: str
     curriculum_pdf_key: str
     sections: list[CurriculumSection]
+    instructor_names: list[str]
     raw_curriculum_text: str
     created_at: str
     updated_at: str
@@ -146,6 +147,7 @@ class CourseRecord:
             name=payload["name"],
             curriculum_pdf_key=payload["curriculum_pdf_key"],
             sections=[CurriculumSection(**item) for item in payload.get("sections", [])],
+            instructor_names=list(payload.get("instructor_names", [])),
             raw_curriculum_text=payload.get("raw_curriculum_text", ""),
             created_at=payload["created_at"],
             updated_at=payload["updated_at"],

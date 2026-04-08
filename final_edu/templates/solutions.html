@@ -86,94 +86,85 @@
 {% endblock %}
 
 {% block content %}
-  <script id="page3-result-data" type="application/json" hidden>{{ result_json | safe }}</script>
+  <script id="page3-result-data" type="application/json" data-testid="page3-result-data" hidden>{{ result_json | safe }}</script>
 
-  <section class="hero panel page-hero page-hero-page3">
-    <div class="hero-copy">
+  <section class="page-intro compact-intro">
+    <div>
       <p class="eyebrow">Solution Insights</p>
-      <h1>순수 인사이트로<br />개선 방향을 정리합니다.</h1>
-      <p class="hero-text">
-        첫 번째 결과 페이지의 지표를 바탕으로, 커리큘럼과 강의 흐름의 간극을 읽기 쉬운 카드로 정리한 페이지입니다.
-      </p>
+      <h1>개선 방향 제안</h1>
+      <p class="page-copy">첫 결과 페이지에서 읽힌 편차를 인사이트 카드로 정리해 다음 액션에 바로 연결합니다.</p>
     </div>
-    <div class="hero-metric">
-      <div class="metric-card">
-        <span class="metric-label">작업</span>
-        <strong>{{ job.id }}</strong>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">인사이트 모드</span>
-        <strong>
-          {% if result.insight_generation_mode == 'llm' %}
-            LLM 생성
-          {% else %}
-            규칙 기반 보조
-          {% endif %}
-        </strong>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">외부 동향</span>
-        <strong>{{ trend_status_label(result.external_trends_status) }}</strong>
-      </div>
+    <div class="meta-row">
+      <span class="meta-chip">작업 {{ job.id }}</span>
+      <span class="meta-chip">
+        {% if result.insight_generation_mode == "llm" %}
+          LLM 생성
+        {% else %}
+          규칙 기반 보조
+        {% endif %}
+      </span>
+      <span class="meta-chip">외부 동향 {{ trend_status_label(result.external_trends_status) }}</span>
     </div>
   </section>
 
-  <section class="report-section">
-    <div class="section-heading">
-      <h2>인사이트 카드</h2>
-      <p>커리큘럼 목표, 평균 편차, 비공통 강조 지점, 커리큘럼 drift, 공통 외부 주제를 바탕으로 정리합니다.</p>
-    </div>
-    <div id="page3-insights" class="insight-grid">
-      {% for insight in result.insights %}
-        <article class="panel insight-card">
-          <div class="insight-card-head">
-            <span class="insight-icon" aria-hidden="true">{{ insight_icon(insight.icon) }}</span>
-            <div>
-              <h3>{{ insight.title }}</h3>
-              <p>{{ insight.category }}</p>
+  <section class="solutions-layout">
+    <section class="panel">
+      <div class="section-heading">
+        <h2>인사이트 카드</h2>
+        <p>커리큘럼 목표, 평균 편차, 비공통 강조 지점, 커리큘럼 drift, 공통 외부 주제를 묶어 읽기 쉬운 카드로 정리합니다.</p>
+      </div>
+      <div id="page3-insights" class="insight-grid" data-testid="page3-insights">
+        {% for insight in result.insights %}
+          <article class="insight-card">
+            <div class="insight-card-head">
+              <span class="insight-icon" aria-hidden="true">{{ insight_icon(insight.icon) }}</span>
+              <div>
+                <h3>{{ insight.title }}</h3>
+                <p>{{ insight.category }}</p>
+              </div>
             </div>
-          </div>
-          <p class="insight-issue">{{ insight.issue }}</p>
-          <p class="insight-evidence">{{ insight.evidence }}</p>
-          <p class="insight-recommendation">{{ insight.recommendation }}</p>
-        </article>
-      {% endfor %}
-    </div>
-  </section>
+            <p class="insight-issue">{{ insight.issue }}</p>
+            <p class="insight-evidence">{{ insight.evidence }}</p>
+            <p class="insight-recommendation">{{ insight.recommendation }}</p>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
 
-  <section class="report-section">
-    <div class="section-heading">
-      <h2>외부 동향 슬롯</h2>
-      <p>이 카드는 이후 최근 동향, 화제 기법, 타 기관 공통 과목을 붙일 때 사용합니다.</p>
-    </div>
-    <article class="panel insight-card trend-placeholder">
-      <div class="insight-card-head">
-        <span class="insight-icon" aria-hidden="true">{{ trend_icon() }}</span>
-        <div>
-          <h3>{{ trend_status_label(result.external_trends_status) }}</h3>
-          <p>외부 동향 인사이트 슬롯</p>
+    <section class="panel">
+      <div class="section-heading">
+        <h2>외부 동향 슬롯</h2>
+        <p>외부 조사 기반 카드가 붙을 때를 대비한 status 중심 placeholder 입니다.</p>
+      </div>
+      <article class="trend-card">
+        <div class="insight-card-head">
+          <span class="insight-icon" aria-hidden="true">{{ trend_icon() }}</span>
+          <div>
+            <h3>{{ trend_status_label(result.external_trends_status) }}</h3>
+            <p>외부 동향 인사이트 슬롯</p>
+          </div>
         </div>
-      </div>
-      <div id="page3-trend-status" class="trend-status {{ trend_status_class(result.external_trends_status) }}" aria-live="polite">
-        {{ trend_status_message(result.external_trends_status) }}
-      </div>
-      {% if result.external_trends_status in ["reflected", "completed", "ready"] %}
-        <p class="insight-issue">외부 동향을 반영할 수 있는 준비 상태입니다.</p>
-        <p class="insight-evidence">향후 검색/리서치 결과가 연결되면 이 카드가 최근 기법과 타 기관 공통 주제를 요약합니다.</p>
-        <p class="insight-recommendation">현재는 내부 분석 지표와 함께 참고용 동향까지 묶어 커리큘럼 개편안을 제시하는 구조로 확장할 수 있습니다.</p>
-      {% elif result.external_trends_status in ["failed", "insufficient", "unavailable"] %}
-        <p class="insight-issue">외부 동향을 충분히 수집하지 못했습니다.</p>
-        <p class="insight-evidence">검색 응답 부족, 소스 불안정, 또는 미연결 상태로 인해 외부 카드 생성을 생략했습니다.</p>
-        <p class="insight-recommendation">현재는 내부 분석 결과만으로도 읽히는 개선 포인트를 먼저 확인하고, 이후 외부 조사 연결 시 이 영역을 보강하세요.</p>
-      {% else %}
-        <p class="insight-issue">외부 동향 인사이트는 아직 준비 중입니다.</p>
-        <p class="insight-evidence">이 영역은 추후 웹 검색 또는 외부 데이터 수집을 붙일 때 확장합니다.</p>
-        <p class="insight-recommendation">현재는 내부 분석 결과만으로도 충분히 읽히는 개선 포인트를 먼저 확인해 주세요.</p>
-      {% endif %}
-    </article>
+        <div id="page3-trend-status" class="trend-status {{ trend_status_class(result.external_trends_status) }}" data-testid="page3-trend-status" aria-live="polite">
+          {{ trend_status_message(result.external_trends_status) }}
+        </div>
+        {% if result.external_trends_status in ["reflected", "completed", "ready"] %}
+          <p class="insight-issue">외부 동향을 반영할 수 있는 준비 상태입니다.</p>
+          <p class="insight-evidence">향후 검색 결과가 연결되면 최근 기법과 타 기관 공통 주제를 이 카드가 요약합니다.</p>
+          <p class="insight-recommendation">현재는 내부 분석 결과와 함께 참고용 확장 영역으로만 남겨 둡니다.</p>
+        {% elif result.external_trends_status in ["failed", "insufficient", "unavailable"] %}
+          <p class="insight-issue">외부 동향을 충분히 수집하지 못했습니다.</p>
+          <p class="insight-evidence">검색 응답 부족 또는 미연결 상태로 인해 외부 카드 생성을 생략했습니다.</p>
+          <p class="insight-recommendation">현재는 내부 분석 결과를 우선 확인하고, 이후 외부 조사 연결 시 이 영역을 보강합니다.</p>
+        {% else %}
+          <p class="insight-issue">외부 동향 인사이트는 아직 준비 중입니다.</p>
+          <p class="insight-evidence">이 영역은 추후 웹 검색 또는 외부 데이터 수집을 붙일 때 확장합니다.</p>
+          <p class="insight-recommendation">현재는 내부 분석 결과만으로도 읽히는 개선 포인트를 먼저 확인해 주세요.</p>
+        {% endif %}
+      </article>
+    </section>
   </section>
 
   <section class="page-navigation">
-    <a class="primary-button secondary-button" href="{{ request.url_for('job_detail', job_id=job.id) }}">첫 번째 결과로 돌아가기</a>
+    <a class="secondary-button" href="{{ request.url_for('job_detail', job_id=job.id) }}">첫 번째 결과로 돌아가기</a>
   </section>
 {% endblock %}

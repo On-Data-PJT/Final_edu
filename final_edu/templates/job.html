@@ -14,245 +14,171 @@
 {% endblock %}
 
 {% block content %}
-  <script id="page2-result-data" type="application/json" hidden>{{ result_json | safe }}</script>
+  <script id="page2-result-data" type="application/json" data-testid="page2-result-data" hidden>{{ result_json | safe }}</script>
 
-  <section class="hero panel page-hero page-hero-page2">
-    <div class="hero-copy">
+  <section class="page-intro compact-intro">
+    <div>
       <p class="eyebrow">Curriculum Coverage Report</p>
-      <h1>결과 리포트<br />작업 {{ job.id }}</h1>
-      <p class="hero-text">
-        선택된 과정 기준으로 강사별 커리큘럼 커버리지, 비중 편차, 워드클라우드,
-        목표 대비 비교를 한 화면에 스크롤로 이어서 보여줍니다.
-      </p>
+      <h1>{{ job.course_name }}</h1>
+      <p class="page-copy">작업 {{ job.id }}의 첫 결과 화면을 네 개의 핵심 패널로 압축해 보여줍니다.</p>
     </div>
-    <div class="hero-metric">
-      <div class="metric-card">
-        <span class="metric-label">작업 상태</span>
-        <strong>{{ job.status_label }}</strong>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">과정</span>
-        <strong>{{ job.course_name }}</strong>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">마지막 갱신</span>
-        <strong id="job-updated">{{ job.updated_at_label }}</strong>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">선택 강사</span>
-        <strong data-page2-selected-instructor="summary">{{ result.instructors[0].name if result and result.instructors else '미선택' }}</strong>
-      </div>
+    <div class="meta-row">
+      <span class="meta-chip">상태 {{ job.status_label }}</span>
+      <span class="meta-chip">{{ job.section_count }}개 대주제</span>
+      <span class="meta-chip">업데이트 {{ job.updated_at_label }}</span>
     </div>
   </section>
 
-  <section class="result-view-shell panel">
-    <div class="result-toolbar">
-      <div class="course-summary-chip">
-        <span>{{ job.course_name }}</span>
-        <span>{{ job.section_count }}개 대주제</span>
-      </div>
-      <div class="mode-toggle-group" aria-label="view mode">
-        <button type="button" class="icon-button" data-view-mode="speech" aria-label="only발화">
-          <span class="icon-button-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" role="img" focusable="false">
-              <path d="M9 2a7 7 0 0 0-2 13.7V20l3-1.7c.3.05.7.08 1 .08a7 7 0 0 0 0-14Zm-1 7.5h2v2H8v-2Zm4 0h2v2h-2v-2Z" />
-            </svg>
-          </span>
-        </button>
-        <button type="button" class="icon-button" data-view-mode="material" aria-label="only자료">
-          <span class="icon-button-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" role="img" focusable="false">
-              <path d="M4 5h8l2 2h6v12H4V5zm3 3v2h10V8H7zm0 4v2h6v-2H7z" />
-            </svg>
-          </span>
-        </button>
-        <button type="button" class="icon-button is-active" data-view-mode="combined" aria-label="발화+자료">
-          <span class="icon-button-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" role="img" focusable="false">
-              <path d="M7 4h7l2 2h4v8h-2V8H9V6H7v14H5V6a2 2 0 0 1 2-2zm1 7 4-4 3 3 4-4 1.5 1.5-5.5 5.5-3-3L9.5 13.5 8 12z" />
-            </svg>
-          </span>
-        </button>
-      </div>
+  <section class="results-toolbar">
+    <div>
+      <span class="meta-label">현재 선택 강사</span>
+      <strong class="toolbar-title"><span data-page2-selected-instructor="summary">{{ result.instructors[0].name if result and result.instructors else "미선택" }}</span></strong>
     </div>
+    <div class="segmented-control mode-toggle-group" aria-label="view mode">
+      <button type="button" class="segmented-control__button" data-view-mode="combined" data-testid="view-mode-combined" aria-label="발화+자료">전체</button>
+      <button type="button" class="segmented-control__button" data-view-mode="material" data-testid="view-mode-material" aria-label="only자료">강의자료</button>
+      <button type="button" class="segmented-control__button" data-view-mode="speech" data-testid="view-mode-speech" aria-label="only발화">강의(발화)</button>
+    </div>
+  </section>
 
-    {% if job.is_active %}
-      <section class="panel status-panel">
-        <div class="section-heading">
-          <h2>분석 진행 중</h2>
-          <p>작업이 완료되면 아래 결과 카드가 자동으로 갱신됩니다.</p>
-        </div>
-        <div class="job-status-panel">
-          <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
-          <p class="hint">현재 상태: {{ job.status_label }}</p>
-        </div>
-      </section>
-    {% elif result %}
-      <section class="report-section report-section-1">
-        <div class="section-heading">
-          <h2>1. 커리큘럼 목표와 실제 강의 비중</h2>
-          <p>좌측은 커리큘럼 기준표, 우측은 선택 강사의 나이팅게일 로즈 차트입니다.</p>
-        </div>
-        <div class="two-column-grid">
-          <article class="panel inner-panel">
-            <table class="coverage-table target-table">
-              <thead>
-                <tr>
-                  <th>대주제</th>
-                  <th>구성 비율</th>
-                  <th>목표 비중</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for section in result.course.sections %}
-                  <tr>
-                    <td>{{ section.title }}</td>
-                    <td>
-                      <div class="target-share-copy">전체 커리큘럼 대비 {{ "%.1f"|format(section.target_weight) }}%</div>
-                    </td>
-                    <td>{{ "%.1f"|format(section.target_weight) }}%</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </article>
-
-          <article class="panel inner-panel">
-            <div class="selector-head">
-              <div class="selector-row" aria-label="강사 선택">
-                {% for instructor in result.instructors %}
-                  <button
-                    type="button"
-                    class="instructor-selector {% if loop.first %}is-active{% endif %}"
-                    data-instructor-selector
-                    data-instructor-name="{{ instructor.name }}"
-                    data-instructor-index="{{ loop.index0 }}"
-                  >
-                    <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
-                    <span>{{ instructor.name }}</span>
-                  </button>
-                {% endfor %}
-              </div>
-              <div class="instructor-nav" aria-label="강사 이동">
-                <button type="button" data-instructor-nav="prev" aria-label="이전 강사">
-                  <svg viewBox="0 0 24 24" role="img" focusable="false">
-                    <path d="m14 6-6 6 6 6" />
-                  </svg>
-                </button>
-                <button type="button" data-instructor-nav="next" aria-label="다음 강사">
-                  <svg viewBox="0 0 24 24" role="img" focusable="false">
-                    <path d="m10 6 6 6-6 6" />
-                  </svg>
-                </button>
-              </div>
+  {% if job.is_active %}
+    <section class="panel status-panel">
+      <div class="section-heading">
+        <h2>분석 진행 중</h2>
+        <p>작업이 완료되면 아래 대시보드가 자동으로 갱신됩니다.</p>
+      </div>
+      <div class="job-status-panel">
+        <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
+        <p class="hint">현재 상태: {{ job.status_label }}</p>
+      </div>
+    </section>
+  {% elif result %}
+    <section class="results-dashboard">
+      <div class="results-dashboard__grid">
+        <article class="panel dashboard-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">강사별 커리큘럼 구성 비중</h2>
+              <p class="panel-copy">선택한 강사의 전체 커리큘럼 커버리지를 compact donut으로 봅니다.</p>
             </div>
-            <div class="meta-chip" data-page2-selected-instructor="detail">{{ selected_instructor }}</div>
-            <div id="page2-rose-chart" class="chart-shell chart-rose" data-chart="rose"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="report-section report-section-2">
-        <div class="section-heading">
-          <h2>2. 강사별 강조 키워드</h2>
-          <p>선택한 강사에 따라 워드클라우드가 바뀌며, 강사가 자주 강조하는 개념을 보여줍니다.</p>
-        </div>
-        <article class="panel inner-panel">
-          <div class="word-cloud-toolbar">
-            {% for instructor in result.instructors %}
-              <button
-                type="button"
-                class="instructor-selector {% if loop.first %}is-active{% endif %}"
-                data-wordcloud-selector
-                data-instructor-name="{{ instructor.name }}"
-                data-instructor-index="{{ loop.index0 }}"
-              >
-                <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
-                <span>{{ instructor.name }}</span>
-              </button>
-            {% endfor %}
           </div>
-          <div id="page2-wordcloud-chart" class="chart-shell chart-wordcloud" data-chart="wordcloud"></div>
-        </article>
-      </section>
-
-      <section class="report-section report-section-3">
-        <div class="section-heading">
-          <h2>3. 전체 평균과 강사별 구성 비중</h2>
-          <p>위쪽은 전체 강사 평균, 아래쪽은 각 강사별 구성 비중입니다.</p>
-        </div>
-        <div class="chart-stack">
-          <article class="panel inner-panel">
-            <h3>전체 강사 평균</h3>
-            <div id="page2-average-bar-chart" class="chart-shell chart-bars" data-chart="average-bar"></div>
-          </article>
-          <article class="panel inner-panel">
-            <h3>강사별 구성 비중</h3>
-            <div id="page2-instructor-bar-chart" class="chart-shell chart-bars" data-chart="instructor-bar"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="report-section report-section-4">
-        <div class="section-heading">
-          <h2>4. 목표 대비 실제 강의 흐름</h2>
-          <p>목표 라인과 강사별 라인을 비교해 과하거나 부족한 구간을 확인합니다.</p>
-        </div>
-        <article class="panel inner-panel">
-          <div class="selector-head selector-head-right">
-            <div class="selector-row selector-row-right">
-              {% for instructor in result.instructors %}
-                <button
-                  type="button"
-                  class="instructor-selector {% if loop.first %}is-active{% endif %}"
-                  data-line-selector
-                  data-instructor-name="{{ instructor.name }}"
-                  data-instructor-index="{{ loop.index0 }}"
-                >
-                  <span class="instructor-avatar">{{ instructor.name[:1] }}</span>
-                  <span>{{ instructor.name }}</span>
-                </button>
-              {% endfor %}
+          <div class="instructor-focus">
+            <div class="instructor-focus__avatar">강</div>
+            <div>
+              <span class="meta-label">현재 선택 강사</span>
+              <strong data-page2-selected-instructor="detail">{{ selected_instructor }}</strong>
             </div>
             <div class="instructor-nav" aria-label="강사 이동">
-              <button type="button" data-instructor-nav="prev" aria-label="이전 강사">
+              <button type="button" class="icon-button" data-instructor-nav="prev" aria-label="이전 강사">
                 <svg viewBox="0 0 24 24" role="img" focusable="false">
                   <path d="m14 6-6 6 6 6" />
                 </svg>
               </button>
-              <button type="button" data-instructor-nav="next" aria-label="다음 강사">
+              <button type="button" class="icon-button" data-instructor-nav="next" aria-label="다음 강사">
                 <svg viewBox="0 0 24 24" role="img" focusable="false">
                   <path d="m10 6 6 6-6 6" />
                 </svg>
               </button>
             </div>
           </div>
-          <div id="page2-line-chart" class="chart-shell chart-line" data-chart="line"></div>
+          <div id="page2-rose-chart" class="chart-shell chart-shell-donut" data-testid="page2-rose-chart" data-chart="rose"></div>
+          <div class="chip-row instructor-chip-row" aria-label="강사 선택">
+            {% for instructor in result.instructors %}
+              <button
+                type="button"
+                class="instructor-selector chip-button {% if loop.first %}is-active{% endif %}"
+                data-instructor-selector
+                data-instructor-name="{{ instructor.name }}"
+                data-instructor-index="{{ loop.index0 }}"
+              >
+                {{ instructor.name }}
+              </button>
+            {% endfor %}
+          </div>
         </article>
+
+        <article class="panel dashboard-panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title"><span data-page2-selected-instructor="wordcloud">{{ selected_instructor }}</span> 주요 수업 키워드</h2>
+              <p class="panel-copy">Panel 1의 강사 선택과 함께 바뀌는 keyword cloud입니다.</p>
+            </div>
+          </div>
+          <div id="page2-wordcloud-chart" class="chart-shell chart-shell-wordcloud" data-testid="page2-wordcloud-chart" data-chart="wordcloud"></div>
+        </article>
+      </div>
+
+      <article class="panel dashboard-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">강사 커리큘럼 구성 비교</h2>
+            <p class="panel-copy">전체 평균과 강사별 stacked bar를 한 카드 안에서 이어서 비교합니다.</p>
+          </div>
+        </div>
+        <div class="bars-stack">
+          <section class="bars-stack__section">
+            <h3>강사 평균 커리큘럼 구성 비중</h3>
+            <div id="page2-average-bar-chart" class="chart-shell chart-shell-bars chart-shell-bars-compact" data-testid="page2-average-bar-chart" data-chart="average-bar"></div>
+          </section>
+          <section class="bars-stack__section">
+            <h3>강사별 커리큘럼 구성 비교</h3>
+            <div id="page2-instructor-bar-chart" class="chart-shell chart-shell-bars" data-testid="page2-instructor-bar-chart" data-chart="instructor-bar"></div>
+          </section>
+        </div>
+      </article>
+
+      <article class="panel dashboard-panel">
+        <div class="panel-head panel-head-spread">
+          <div>
+            <h2 class="panel-title">목표(강의계획서)와의 비교</h2>
+            <p class="panel-copy">
+              {% if result.instructors|length > 1 %}
+                목표 기준과 여러 강사를 함께 비교해 어디가 과하거나 부족한지 봅니다.
+              {% else %}
+                목표 기준과 선택 강사를 비교해 어디가 과하거나 부족한지 봅니다.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        <div class="compare-filters" aria-label="비교 강사 선택">
+          {% if result.instructors|length > 1 %}
+            <label class="checkbox-chip">
+              <input type="checkbox" data-compare-all checked />
+              <span>전체 선택</span>
+            </label>
+          {% endif %}
+          {% for instructor in result.instructors %}
+            <label class="checkbox-chip">
+              <input type="checkbox" data-compare-instructor value="{{ instructor.name }}" checked />
+              <span>{{ instructor.name }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <div id="page2-line-chart" class="chart-shell chart-shell-comparison" data-testid="page2-line-chart" data-chart="line"></div>
         <div class="page-navigation">
-          <a class="primary-button secondary-button" href="{{ request.url_for('job_solutions', job_id=job.id) }}">솔루션 보기</a>
+          <a class="primary-button" href="{{ request.url_for('job_solutions', job_id=job.id) }}">솔루션 보기</a>
         </div>
-      </section>
-    {% else %}
-      <section class="panel status-panel">
-        <div class="section-heading">
-          <h2>결과를 준비 중입니다</h2>
-          <p>작업이 완료되면 분석 결과 카드가 이 자리로 표시됩니다.</p>
-        </div>
-        {% if job.is_failed %}
-          <div class="notice error">{{ job.error or '작업이 실패했습니다.' }}</div>
-        {% else %}
-          <div class="notice">결과를 불러오는 중입니다.</div>
-        {% endif %}
-      </section>
-    {% endif %}
-  </section>
+      </article>
+    </section>
+  {% else %}
+    <section class="panel status-panel">
+      <div class="section-heading">
+        <h2>결과를 준비 중입니다</h2>
+        <p>작업이 완료되면 대시보드가 이 자리에 표시됩니다.</p>
+      </div>
+      {% if job.is_failed %}
+        <div class="notice error">{{ job.error or "작업이 실패했습니다." }}</div>
+      {% else %}
+        <div class="notice">결과를 불러오는 중입니다.</div>
+      {% endif %}
+    </section>
+  {% endif %}
 
   {% if job.is_active %}
     <script>
       const statusUrl = "{{ request.url_for('job_status', job_id=job.id) }}";
       const statusPill = document.getElementById("job-status-pill");
-      const updatedLabel = document.getElementById("job-updated");
+      const updatedLabel = document.querySelector(".meta-row .meta-chip:last-child");
 
       async function pollJob() {
         const response = await fetch(statusUrl, { headers: { Accept: "application/json" } });
@@ -263,7 +189,7 @@
           statusPill.className = `status-pill status-${payload.status}`;
         }
         if (updatedLabel) {
-          updatedLabel.textContent = payload.updated_at_label;
+          updatedLabel.textContent = `업데이트 ${payload.updated_at_label}`;
         }
         if (payload.status === "completed" || payload.status === "failed") {
           window.location.reload();

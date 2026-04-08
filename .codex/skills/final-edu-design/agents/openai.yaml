@@ -1,4 +1,4 @@
 interface:
   display_name: "Final_Edu Design"
-  short_description: "Build Final_Edu UI with scored review loops"
-  default_prompt: "Use $final-edu-design to implement or refine Final_Edu UI from .agent/Components.md and .agent/DESIGN.md, then run the scored final review loop."
+  short_description: "Build Final_Edu UI with cmux-first scored review loops"
+  default_prompt: "Use $final-edu-design to implement or refine Final_Edu UI from .agent/Components.md and .agent/DESIGN.md, prefer cmux-based desktop review with Playwright fallback, then run the scored final review loop."

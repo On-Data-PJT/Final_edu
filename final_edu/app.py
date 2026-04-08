@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -22,11 +24,13 @@ from final_edu.jobs import (
     enqueue_analysis_job,
     get_job,
     list_recent_jobs,
+    load_job_payload,
     load_job_result,
     new_job_id,
 )
 from final_edu.models import AnalysisJobPayload, CourseRecord, JobInstructorInput, StoredUploadRef
 from final_edu.storage import create_object_storage
+from final_edu.utils import build_safe_storage_name
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
@@ -71,7 +75,12 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         _ensure_pdf_upload(curriculum_pdf)
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / (Path(curriculum_pdf.filename or "curriculum.pdf").name)
+            temp_path = Path(temp_dir) / build_safe_storage_name(
+                curriculum_pdf.filename or "curriculum.pdf",
+                default_stem="curriculum-preview",
+                default_ext=".pdf",
+                max_basename_chars=72,
+            )
             await _write_upload_to_path(curriculum_pdf, temp_path, settings.max_upload_bytes)
             preview = preview_course_pdf(temp_path, settings.max_sections)
         return JSONResponse(preview)
@@ -80,6 +89,7 @@ def create_app() -> FastAPI:
     async def create_course(
         course_name: str = Form(...),
         sections_json: str = Form(...),
+        instructor_names_json: str = Form("[]"),
         raw_curriculum_text: str = Form(""),
         curriculum_pdf: UploadFile = File(...),
     ) -> JSONResponse:
@@ -88,17 +98,34 @@ def create_app() -> FastAPI:
             sections_payload = json.loads(sections_json)
             if not isinstance(sections_payload, list):
                 raise ValueError("sections_json must be a list")
+            instructor_names_payload = json.loads(instructor_names_json)
+            if not isinstance(instructor_names_payload, list):
+                raise ValueError("instructor_names_json must be a list")
         except (json.JSONDecodeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=f"과정 섹션 정보를 해석하지 못했습니다. ({exc})") from exc
 
+        normalized_instructor_names: list[str] = []
+        for item in instructor_names_payload:
+            name = str(item or "").strip()
+            if name and name not in normalized_instructor_names:
+                normalized_instructor_names.append(name)
+        if not normalized_instructor_names:
+            raise HTTPException(status_code=400, detail="과정에는 최소 1명의 강사를 등록해 주세요.")
+
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / (Path(curriculum_pdf.filename or "curriculum.pdf").name)
+            temp_path = Path(temp_dir) / build_safe_storage_name(
+                curriculum_pdf.filename or "curriculum.pdf",
+                default_stem="curriculum-upload",
+                default_ext=".pdf",
+                max_basename_chars=72,
+            )
             await _write_upload_to_path(curriculum_pdf, temp_path, settings.max_upload_bytes)
             record = create_course_record(
                 name=course_name,
                 curriculum_pdf_path=temp_path,
                 curriculum_pdf_name=curriculum_pdf.filename or "curriculum.pdf",
                 sections_payload=sections_payload,
+                instructor_names=normalized_instructor_names,
                 raw_curriculum_text=raw_curriculum_text,
                 storage=storage,
             )
@@ -133,8 +160,8 @@ def create_app() -> FastAPI:
                 raise ValueError("분석할 과정을 먼저 선택해 주세요.")
 
             manifest = _parse_instructor_manifest(str(form.get("instructor_manifest", "[]") or "[]"))
-            if len(manifest) < 2:
-                raise ValueError("최소 2명의 강사 블록이 필요합니다.")
+            if len(manifest) < 1:
+                raise ValueError("최소 1명의 강사 자료가 필요합니다.")
 
             job_id = new_job_id()
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -161,8 +188,8 @@ def create_app() -> FastAPI:
                     if instructor.files or instructor.youtube_urls:
                         instructors.append(instructor)
 
-            if len(instructors) < 2:
-                raise ValueError("강사명과 자료가 있는 강사 2명 이상이 필요합니다.")
+            if len(instructors) < 1:
+                raise ValueError("강사명과 자료가 있는 강사 1명 이상이 필요합니다.")
 
             payload = AnalysisJobPayload(
                 job_id=job_id,
@@ -188,6 +215,43 @@ def create_app() -> FastAPI:
                 ),
                 status_code=400,
             )
+
+    @app.get("/jobs/{job_id}/assets/{instructor_index}/{asset_index}", response_class=Response, name="job_asset_download")
+    async def job_asset_download(job_id: str, instructor_index: int, asset_index: int) -> Response:
+        job = get_job(job_id, settings)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾지 못했습니다.")
+
+        payload = load_job_payload(job, settings)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="작업 입력을 찾지 못했습니다.")
+
+        try:
+            instructor = payload.instructors[instructor_index - 1]
+            asset_ref = instructor.files[asset_index - 1]
+        except IndexError as exc:
+            raise HTTPException(status_code=404, detail="업로드 자료를 찾지 못했습니다.") from exc
+
+        original_name = Path(asset_ref.original_name or f"upload-{instructor_index}-{asset_index}").name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / build_safe_storage_name(
+                original_name,
+                default_stem=f"job-asset-{instructor_index}-{asset_index}",
+                max_basename_chars=72,
+            )
+            storage.download_to_path(asset_ref.storage_key, temp_path)
+            payload_bytes = temp_path.read_bytes()
+
+        media_type = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        ascii_name = Path(build_safe_storage_name(original_name, default_stem="download", max_basename_chars=48)).name
+        content_disposition = (
+            f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(original_name)}'
+        )
+        return Response(
+            content=payload_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition},
+        )
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse, name="job_detail")
     async def job_detail(request: Request, job_id: str) -> HTMLResponse:
@@ -241,15 +305,20 @@ def _index_context(
     selected_course: CourseRecord | None = None,
 ) -> dict:
     serialized_courses = [_serialize_course(course) for course in courses]
+    recent_job_records = list_recent_jobs(limit=settings.max_saved_jobs, settings=settings)
     return {
         "request": request,
         "settings": settings,
         "error": error,
         "courses": serialized_courses,
         "courses_json": json.dumps(serialized_courses, ensure_ascii=False),
+        "course_restore_drafts_json": json.dumps(
+            _serialize_course_restore_drafts(request, settings, recent_job_records),
+            ensure_ascii=False,
+        ),
         "selected_course_id": selected_course.id if selected_course else "",
         "selected_course_name": selected_course.name if selected_course else "",
-        "recent_jobs": [_job_card(job, request) for job in list_recent_jobs(settings=settings)],
+        "recent_jobs": [_job_card(job, request) for job in recent_job_records],
     }
 
 
@@ -307,15 +376,20 @@ async def _build_job_instructor(
         normalized_name = f"강사 {index}"
     stored_uploads: list[StoredUploadRef] = []
 
-    for upload in uploads:
-        safe_filename = Path(upload.filename or f"upload-{index}").name
-        temp_path = temp_dir / f"instructor-{index}-{safe_filename}"
+    for asset_index, upload in enumerate(uploads, start=1):
+        original_name = Path(upload.filename or f"upload-{index}").name
+        safe_temp_name = build_safe_storage_name(
+            original_name,
+            default_stem=f"upload-{index}",
+            max_basename_chars=72,
+        )
+        temp_path = temp_dir / f"instructor-{index}-{asset_index}-{safe_temp_name}"
         total_size = await _write_upload_to_path(upload, temp_path, max_upload_bytes)
         if total_size == 0:
             continue
-        storage_key = build_upload_key(job_id, index, safe_filename)
+        storage_key = build_upload_key(job_id, index, original_name)
         storage.put_file(storage_key, temp_path, content_type=upload.content_type)
-        stored_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=safe_filename))
+        stored_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=original_name))
 
     urls = [line.strip() for line in youtube_urls.splitlines() if line.strip()]
     return JobInstructorInput(name=normalized_name, files=stored_uploads, youtube_urls=urls)
@@ -371,6 +445,7 @@ def _serialize_course(course: CourseRecord) -> dict:
         "id": course.id,
         "name": course.name,
         "sections": [section_to_dict(section) for section in course.sections],
+        "instructor_names": list(course.instructor_names),
         "raw_curriculum_text": course.raw_curriculum_text,
         "created_at": course.created_at,
         "updated_at": course.updated_at,
@@ -393,6 +468,49 @@ def _job_card(job, request: Request) -> dict:  # noqa: ANN001
         "section_count": job.section_count,
         "url": request.url_for("job_detail", job_id=job.id),
     }
+
+
+def _serialize_course_restore_drafts(request: Request, settings, jobs) -> dict:  # noqa: ANN001
+    drafts: dict[str, dict] = {}
+    for job in jobs:
+        course_id = str(getattr(job, "course_id", "") or "").strip()
+        if not course_id or course_id in drafts:
+            continue
+        try:
+            payload = load_job_payload(job, settings)
+        except Exception:
+            continue
+        if payload is None or not payload.instructors:
+            continue
+        drafts[course_id] = {
+            "course_id": course_id,
+            "job_id": job.id,
+            "updated_at": job.updated_at,
+            "updated_at_label": _format_timestamp(job.updated_at),
+            "blocks": [
+                {
+                    "instructor_name": instructor.name,
+                    "mode": "files" if instructor.files else "youtube",
+                    "youtube_urls": list(instructor.youtube_urls),
+                    "files": [
+                        {
+                            "original_name": asset_ref.original_name,
+                            "download_url": str(
+                                request.url_for(
+                                    "job_asset_download",
+                                    job_id=job.id,
+                                    instructor_index=str(instructor_index),
+                                    asset_index=str(asset_index),
+                                )
+                            ),
+                        }
+                        for asset_index, asset_ref in enumerate(instructor.files, start=1)
+                    ],
+                }
+                for instructor_index, instructor in enumerate(payload.instructors, start=1)
+            ],
+        }
+    return drafts
 
 
 def _sections_to_curriculum_text(sections) -> str:  # noqa: ANN001

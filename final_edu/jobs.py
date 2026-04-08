@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -17,9 +16,9 @@ from final_edu.models import (
     UploadedAsset,
 )
 from final_edu.storage import ObjectStorage, create_object_storage
+from final_edu.utils import build_safe_storage_name
 
 RECENT_JOBS_LIMIT = 10
-SAFE_NAME_RE = re.compile(r"[^0-9A-Za-z가-힣._-]+")
 
 
 class JobRepository:
@@ -214,7 +213,11 @@ def new_job_id() -> str:
 
 
 def build_upload_key(job_id: str, instructor_index: int, original_name: str) -> str:
-    safe_name = SAFE_NAME_RE.sub("-", original_name.strip()).strip("-") or "upload"
+    safe_name = build_safe_storage_name(
+        original_name,
+        default_stem=f"upload-{instructor_index}",
+        max_basename_chars=72,
+    )
     return f"jobs/{job_id}/uploads/instructor-{instructor_index}/{uuid.uuid4().hex[:8]}-{safe_name}"
 
 
@@ -284,6 +287,13 @@ def load_job_result(job: AnalysisJobRecord, settings: Settings | None = None) ->
     return services.storage.get_json(job.result_key)
 
 
+def load_job_payload(job: AnalysisJobRecord, settings: Settings | None = None) -> AnalysisJobPayload | None:
+    if not job.payload_key:
+        return None
+    services = create_job_services(settings)
+    return AnalysisJobPayload.from_dict(services.storage.get_json(job.payload_key))
+
+
 def run_analysis_job(job_id: str) -> None:
     services = create_job_services()
     record = services.repository.get(job_id)
@@ -319,7 +329,12 @@ def _execute_analysis(payload: AnalysisJobPayload, storage: ObjectStorage, setti
         for instructor_index, instructor in enumerate(payload.instructors, start=1):
             uploads: list[UploadedAsset] = []
             for asset_index, asset_ref in enumerate(instructor.files, start=1):
-                destination = root / f"instructor-{instructor_index}-{asset_index}-{_safe_name(asset_ref.original_name)}"
+                safe_destination_name = build_safe_storage_name(
+                    asset_ref.original_name,
+                    default_stem=f"upload-{instructor_index}-{asset_index}",
+                    max_basename_chars=72,
+                )
+                destination = root / f"instructor-{instructor_index}-{asset_index}-{safe_destination_name}"
                 storage.download_to_path(asset_ref.storage_key, destination)
                 uploads.append(UploadedAsset(path=destination, original_name=asset_ref.original_name))
 
@@ -353,12 +368,6 @@ def _updated_record(record: AnalysisJobRecord, **changes) -> AnalysisJobRecord:
     payload["updated_at"] = updated_at
     payload["updated_at_ts"] = updated_at_ts
     return AnalysisJobRecord.from_dict(payload)
-
-
-def _safe_name(original_name: str) -> str:
-    return SAFE_NAME_RE.sub("-", original_name).strip("-") or "upload"
-
-
 def _now() -> tuple[str, float]:
     current = datetime.now(UTC)
     return current.isoformat(), current.timestamp()

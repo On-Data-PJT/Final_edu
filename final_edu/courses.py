@@ -11,7 +11,7 @@ from pypdf import PdfReader
 from final_edu.config import Settings
 from final_edu.models import CourseRecord, CurriculumSection
 from final_edu.storage import ObjectStorage
-from final_edu.utils import normalize_text, slugify
+from final_edu.utils import build_safe_storage_name, normalize_text, slugify
 
 NUMBER_PREFIX_RE = re.compile(r"^\s*(?:[-*]|\d+[\.\)]?)\s*")
 PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
@@ -92,12 +92,19 @@ def create_course_record(
     curriculum_pdf_path: Path,
     curriculum_pdf_name: str,
     sections_payload: list[dict],
+    instructor_names: list[str],
     raw_curriculum_text: str,
     storage: ObjectStorage,
 ) -> CourseRecord:
     now = _now_iso()
     course_id = uuid.uuid4().hex[:12]
-    storage_key = f"courses/{course_id}/curriculum/{uuid.uuid4().hex[:8]}-{Path(curriculum_pdf_name).name}"
+    safe_pdf_name = build_safe_storage_name(
+        curriculum_pdf_name,
+        default_stem="curriculum",
+        default_ext=".pdf",
+        max_basename_chars=72,
+    )
+    storage_key = f"courses/{course_id}/curriculum/{uuid.uuid4().hex[:8]}-{safe_pdf_name}"
     storage.put_file(storage_key, curriculum_pdf_path, content_type="application/pdf")
     sections = normalize_course_sections(sections_payload)
     return CourseRecord(
@@ -105,6 +112,7 @@ def create_course_record(
         name=name.strip() or "이름 없는 과정",
         curriculum_pdf_key=storage_key,
         sections=sections,
+        instructor_names=[item for item in instructor_names if item],
         raw_curriculum_text=raw_curriculum_text,
         created_at=now,
         updated_at=now,

@@ -132,9 +132,10 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 이 파일은 **이 저장소 전용 디자인 구현 스킬**입니다.
 
 - `.agent/Components.md`의 구조 요구사항을 `.agent/DESIGN.md`의 시각 톤에 맞춰 구현하는 방법
+- 첨부 이미지와 `.agent/Components.md`를 runtime UI contract 로 쓰는 방법
 - 디자인 작업의 contract lock 방식
 - subagent 를 허용하는 세션에서의 `Structure / Visual / Interaction / Reviewer` workflow
-- screenshot artifact 와 reviewer 점수 루프
+- `cmux` 우선 / Playwright fallback screenshot artifact 와 reviewer 점수 루프
 
 를 정의합니다.
 
@@ -231,6 +232,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - UI 구현 전 `.agent/Components.md`를 현재 페이지 요구사항의 기준 문서로 확인
 - UI 구현 전 `.agent/DESIGN.md`를 전체 시각 톤의 기준 문서로 확인
 - 디자인 관련 구현 전 `./.codex/skills/final-edu-design/SKILL.md`를 반드시 확인
+- 디자인 검수 전 `cmux ping` 가능 여부를 먼저 확인하고, 가능하면 `capture_pages.py --backend auto`로 `cmux` 우선 검수를 수행
 - 현재 세션에서 subagent 사용이 허용되면 디자인 작업은 스킬의 `Structure / Visual / Interaction / Reviewer` workflow 를 우선 사용
 - 현재 세션에서 subagent 사용이 허용되지 않으면 같은 lane 분리를 로컬에서 순차적으로 수행
 - 금지: 분석 기준 자체 변경
@@ -406,6 +408,7 @@ Lead 가 병렬 작업 결과를 통합하기 전에 아래를 확인합니다.
 - 검증 결과 또는 검증 불가 사유가 남아 있음
 - 디자인/UI 작업이라면 `final-edu-design` 스킬 workflow 를 따름
 - 디자인/UI 작업이라면 screenshot artifact 와 로컬 렌더 결과가 남아 있음
+- 디자인/UI 작업이라면 사용한 capture backend(`cmux` 또는 Playwright fallback)와 fallback 사유가 기록되어 있음
 - 디자인/UI 작업이라면 final reviewer 점수 `90점 이상`, 또는 최대 3회 루프 후 잔여 리스크가 `.agent/STATUS.md`에 기록되어 있음
 
 ## Release / Contest Caution

@@ -4,11 +4,14 @@ import hashlib
 import math
 import re
 from collections import Counter
+from pathlib import Path
 
 from final_edu.models import ExtractedChunk, RawTextSegment
 
 WORD_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 WHITESPACE_RE = re.compile(r"\s+")
+SAFE_FILENAME_RE = re.compile(r"[^0-9A-Za-z._-]+")
+SAFE_EXTENSION_RE = re.compile(r"\.[a-z0-9]{1,16}")
 STOP_WORDS = {
     "the",
     "a",
@@ -60,6 +63,37 @@ def count_tokens(text: str) -> int:
 def slugify(value: str) -> str:
     cleaned = re.sub(r"[^0-9A-Za-z가-힣]+", "-", value.strip().lower())
     return cleaned.strip("-") or "section"
+
+
+def build_safe_storage_name(
+    original_name: str,
+    *,
+    default_stem: str,
+    default_ext: str = "",
+    max_basename_chars: int = 80,
+) -> str:
+    raw_name = Path(str(original_name or "")).name
+    raw_stem = Path(raw_name).stem
+    raw_ext = Path(raw_name).suffix.lower()
+
+    default_stem_clean = SAFE_FILENAME_RE.sub("-", str(default_stem or "file").strip().lower()).strip("._-") or "file"
+    stem = SAFE_FILENAME_RE.sub("-", raw_stem.strip().lower()).strip("._-") or default_stem_clean
+    stem = re.sub(r"-{2,}", "-", stem)
+
+    ext_candidate = raw_ext if SAFE_EXTENSION_RE.fullmatch(raw_ext) else ""
+    if not ext_candidate and default_ext:
+        normalized_default_ext = str(default_ext).lower()
+        if not normalized_default_ext.startswith("."):
+            normalized_default_ext = f".{normalized_default_ext}"
+        if SAFE_EXTENSION_RE.fullmatch(normalized_default_ext):
+            ext_candidate = normalized_default_ext
+
+    hash_source = raw_name or f"{default_stem_clean}{ext_candidate}"
+    digest = hashlib.sha1(hash_source.encode("utf-8")).hexdigest()[:10]
+    suffix = f"-{digest}{ext_candidate}"
+    available_chars = max(8, max_basename_chars - len(suffix))
+    bounded_stem = stem[:available_chars].rstrip("._-") or default_stem_clean
+    return f"{bounded_stem}{suffix}"
 
 
 def fingerprint_text(text: str) -> str:

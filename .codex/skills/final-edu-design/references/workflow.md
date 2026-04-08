@@ -2,7 +2,7 @@
 
 ## Overview
 
-이 스킬은 `.agent/Components.md`와 `.agent/DESIGN.md` 사이에서 구조와 시각 표현을 동시에 맞추는 UI 작업용 workflow다. 핵심은 먼저 계약을 잠그고, 가능하면 병렬 구현한 뒤, 독립 reviewer가 점수화하고, 기준 점수에 못 미치면 고쳐서 다시 검토받는 것이다.
+이 스킬은 `.agent/Components.md`와 `.agent/DESIGN.md` 사이에서 구조와 시각 표현을 동시에 맞추는 UI 작업용 workflow다. 핵심은 먼저 계약을 잠그고, 가능하면 병렬 구현한 뒤, `cmux` 우선 / Playwright fallback 검수 아티팩트를 만들고, 독립 reviewer가 점수화하고, 기준 점수에 못 미치면 고쳐서 다시 검토받는 것이다.
 
 ## 1. Preflight
 
@@ -10,6 +10,7 @@
 2. `.agent/Components.md`, `.agent/DESIGN.md`를 읽는다.
 3. 현재 task가 어느 페이지와 섹션을 다루는지 명확히 적는다.
 4. 현재 브랜치와 dirty worktree 상태를 확인한다.
+5. `cmux` 사용 가능 여부를 확인한다. (`cmux ping`, browser capabilities)
 
 ## 2. Size The Task
 
@@ -43,6 +44,7 @@
 - 차트 또는 시각화 구현 방식
 - 편집 가능한 표나 form 의 컴포넌트 형태
 - 필수 스크린샷 대상
+- capture backend (`cmux`, `playwright`, `auto`)와 fallback 조건
 - reviewer가 평가할 상태 목록
 
 이 단계가 끝나기 전에는 worker를 병렬로 띄우지 않는다.
@@ -92,6 +94,8 @@ reviewer에게는 아래만 넘긴다.
 - 변경 코드
 - 로컬 렌더 결과
 - 스크린샷 경로
+- `cmux`를 썼다면 compact snapshot 경로
+- 사용한 capture backend 와 fallback 사유
 - `.agent/Components.md`
 - `.agent/DESIGN.md`
 
@@ -100,12 +104,12 @@ reviewer에게는 아래만 넘긴다.
 ## 7. Review Loop
 
 1. 구현 결과를 정리한다.
-2. 스크린샷을 캡처한다.
+2. `cmux`가 가능하면 desktop/tablet 검수는 `cmux`로, mobile 또는 `cmux` 불가 환경은 Playwright로 캡처한다.
 3. reviewer에게 점수화시킨다.
 4. 총점이 `90점 이상`이고 hard-fail이 없으면 통과한다.
 5. 총점이 `90점 미만`이거나 hard-fail이 있으면 must-fix를 lane별로 다시 나눈다.
 6. 필요한 lane만 다시 구현한다.
-7. 새 스크린샷을 만든 뒤 fresh reviewer로 다시 검토한다.
+7. 새 스크린샷/스냅샷을 만든 뒤 fresh reviewer로 다시 검토한다.
 
 최대 `3회`까지 반복한다.
 
@@ -133,3 +137,4 @@ reviewer에게는 아래만 넘긴다.
 - `app.py`와 템플릿 계약이 아직 잠기지 않았을 때
 - 제출 직전 미세 조정 단계일 때
 - screenshot artifact가 아직 없는 상태에서 reviewer를 돌리려 할 때
+- `cmux` 검수 가능 환경인데도 이유 없이 검수 backend를 기록하지 않았을 때

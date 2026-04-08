@@ -62,8 +62,8 @@ def analyze_submissions(
     started = time.perf_counter()
     normalized_sections = _normalize_target_weights(sections)
     active_submissions = [submission for submission in submissions if submission.files or submission.youtube_urls]
-    if len(active_submissions) < 2:
-        raise ValueError("최소 2명의 강사 자료가 필요합니다.")
+    if len(active_submissions) < 1:
+        raise ValueError("최소 1명의 강사 자료가 필요합니다.")
 
     all_chunks = []
     warnings: list[str] = []

@@ -5,6 +5,7 @@
 - 총점 `90점 이상`
 - hard-fail 없음
 - 스크린샷과 로컬 렌더 결과가 모두 존재
+- 사용한 capture backend 가 기록되어 있음
 
 ## Hard-Fail Conditions
 
@@ -15,6 +16,7 @@
 - 페이지 렌더링 오류 또는 명백한 런타임 오류
 - `.agent/DESIGN.md`의 전체 톤과 명백히 다른 결과
 - reviewer가 시각 결과를 판단할 스크린샷이 없음
+- 표준 검수 backend(`cmux` 또는 Playwright fallback)와 fallback 사유가 기록되지 않음
 
 ## Score Table
 
@@ -53,7 +55,8 @@
 4. `Hard-Fails`
 5. `Must-Fix`
 6. `Optional Polish`
-7. `Referenced Screenshots`
+7. `Capture Backend`
+8. `Referenced Screenshots`
 
 ## Reviewer Behavior Rules
 

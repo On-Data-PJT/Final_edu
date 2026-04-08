@@ -1,6 +1,6 @@
 # STATUS
 
-Last Updated: 2026-04-08
+Last Updated: 2026-04-09
 
 ## Current Snapshot
 
@@ -11,9 +11,9 @@ Last Updated: 2026-04-08
 - 현재 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
   - 현재 YouTube 입력은 개별 영상 URL 기준이며, 재생목록 URL의 내부 영상 자동 확장은 아직 미구현
 - 현재 과정 기준:
-  - `Page 1`에서 과정명과 커리큘럼 PDF를 등록
+  - `Page 1`에서 과정명, 커리큘럼 PDF, 담당 강사 roster 를 등록
   - PDF에서 대주제/목표 비중 초안을 추출
-  - 사용자가 수정해 저장한 목표 비중이 분석 기준이 됨
+  - preview table 은 숨기고 추출 결과는 hidden state 로 저장함
 - 현재 분석 모드:
   - `OPENAI_API_KEY`가 있으면 OpenAI embedding 사용
   - 키가 없거나 실패하면 lexical similarity fallback
@@ -21,10 +21,12 @@ Last Updated: 2026-04-08
   - 현재 기본 insight model: `gpt-5.4-mini`
   - insight model 실패 시 deterministic fallback 카드 사용
 - 현재 작업 방식:
-  - `Page 1`: 과정 추가/선택 + 강사 자료 등록
+  - `Page 1`: 중앙 popup 기반 과정 추가/선택 + chat-style 자료 lane 등록
+  - 과정 목록에서 같은 과정을 다시 선택하면 과정별 draft cache 또는 최근 제출 payload 기준으로 강사 자료/유튜브 링크를 복원함
   - `POST /analyze`는 즉시 결과를 반환하지 않음
   - 분석 Job을 생성하고 `/jobs/{job_id}`에서 첫 번째 결과 페이지를 확인함
   - `/jobs/{job_id}/solutions`에서 솔루션 인사이트 페이지를 확인함
+  - 단일 강사 1명만 있어도 analyze 제출과 결과 렌더링이 가능함
 - 현재 배포 전제:
   - 프로덕션: `Render Web + Worker + Key Value + R2`
   - 로컬: `inline/local` fallback
@@ -42,14 +44,20 @@ Last Updated: 2026-04-08
   - `.agent/Components.md`: 페이지별 UI 구성요소 및 상호작용 명세
   - `.agent/DESIGN.md`: 전체 웹 작업물의 시각 톤 및 디자인 시스템 명세
   - `./.codex/skills/final-edu-design/SKILL.md`: repo-local 디자인 구현 스킬
+  - `capture_pages.py --backend auto`: `cmux` 우선 / Playwright fallback 디자인 검수 스크립트
   - 협업 규칙 문서는 `.agent/AGENTS.md` 중심으로 단일화되고, 루트 `AGENTS.md`는 bootstrap 으로만 유지
 - 현재 브랜치 상태: `dev...origin/dev`
-- 현재 작업 트리 상태: clean 상태 유지 기준으로 관리
+- 현재 기준선: Page 1 minimal blue composer 재설계, course instructor roster 저장, 단일 강사 허용, 긴 파일명 안전 처리, 과정별 draft 복원까지 반영된 상태
+- 현재 디자인 검수 경로:
+  - macOS + `cmux` 가능 시 desktop/tablet 검수는 `cmux` 브라우저 우선
+  - mobile 또는 `cmux` 불가 환경은 Playwright fallback
+  - reviewer 입력물에는 capture backend 와 fallback 사유를 함께 기록
 
 ## Current Goal
 
 - 현재 목표는 **3페이지 데모 UI와 과정 기반 분석 흐름을 안정화**하는 것
 - 지금 시점에서 가장 중요한 다음 단계:
+  - 새 Airtable 톤 UI를 mobile/tablet 까지 추가 압축할지 판단
   - 현재 UI/분석 확장 변경을 정리하고 커밋 가능한 상태로 마감
   - 실제 데모용 강의자료 2~3세트 확보
   - Render 실배포 검증
@@ -121,6 +129,11 @@ Last Updated: 2026-04-08
   - `Page 1`: 과정 생성/목록/선택, 동적 강사 블록, 파일/YouTube 입력, 완료 버튼
   - `Page 2`: 4단 스크롤 결과 페이지, mode toggle, rose chart, wordcloud, 평균/강사별 bar, 목표 대비 line
   - `Page 3`: 솔루션 인사이트 페이지, 외부 동향 슬롯 placeholder
+- Airtable 톤 기반 UI 재구성 완료
+  - `.agent/DESIGN.md`를 새 reference 기준으로 교체
+  - `Page 1`을 헤더 액션 + 중앙 업로드 workspace 중심으로 단순화
+  - `Page 2`를 compact 4-panel dashboard 로 재구성
+  - `Page 3`를 같은 톤의 compact insight layout 으로 정리
   - 최근 작업 목록과 상태 칩 정리
 - 배포 준비 파일 추가 완료
   - `.env.example`
@@ -160,6 +173,14 @@ Last Updated: 2026-04-08
 - design-review 스크린샷 세트 생성 완료
   - 경로: `.final_edu_runtime/design-review/three-page-ui/`
 - 최종 reviewer 결과: `93/100`, hard-fail 없음, pass
+- `cmux` 브라우저 surface 로 `GET /`, 모달 열기, 과정 목록 패널 열기 검수 가능 여부 확인
+- `capture_pages.py --backend auto`로 desktop은 `cmux`, mobile은 Playwright fallback 이 실제로 동작함을 검증
+- Page 1 핵심 요소에 `data-testid`를 추가해 automation selector를 안정화
+- Airtable redesign 캡처 세트 생성 완료
+  - 경로: `.final_edu_runtime/design-review/airtable-redesign/`
+- TestClient 기준 `GET /`, `GET /health`, `/jobs/{job_id}`, `/jobs/{job_id}/solutions` 렌더링 재검증 완료
+- TestClient 기준 매우 긴 PDF 파일명으로 `POST /courses/preview`, `POST /courses` 재현 검증 통과
+- TestClient 기준 매우 긴 강의자료 파일명으로 단일 강사 `POST /analyze` 재현 검증 통과
 
 ## Known Gaps / Next Priorities
 
@@ -172,6 +193,8 @@ Last Updated: 2026-04-08
 - 외부 동향 슬롯은 현재 placeholder 수준이며 실검색/실반영은 미구현
 - captionless YouTube STT 파이프라인은 아직 없음
 - `Page 2`/`Page 3` 모바일 밀도와 `Page 1` vertical breathing room 은 선택적 polish 여지가 남아 있음
+- 현재 `cmux`는 WKWebView 제약으로 mobile viewport를 직접 제어하지 못하므로 mobile 캡처는 Playwright fallback을 사용해야 함
+- 실제 Haas 폰트 자산은 저장소에 없으므로 runtime 구현은 `Inter + Korean fallback` 기반이다
 - 결과 페이지에서 요구하는 `only발화` 모드는 자막 없는 영상까지 포함하려면 STT 파이프라인이 추가로 필요하다
 - 솔루션 페이지의 외부 조사 기반 인사이트는 고위험 확장 기능이며 아직 구현되지 않았다
 - 자막 없는 영상 STT fallback 은 아직 미구현
@@ -182,7 +205,7 @@ Last Updated: 2026-04-08
 - 기존 MVP 구현은 현재 `dev` 브랜치에 커밋되어 원격까지 푸시된 상태다
 - 다음 작업자는 시작 전에 `git status --short --branch`를 확인해야 한다
 - 현재 기준점은 과정 저장/선택, 3페이지 UI, mode별 결과 계산, insight fallback, reviewer pass까지 로컬에서 구현된 상태다
-- 현재 라운드 변경은 `dev` 브랜치에 정리해 원격과 동기화하는 것을 기준으로 마감한다
+- 현재 라운드 변경은 `dev` 브랜치에서 Page 1 minimal composer 재설계, 단일 강사 허용, 긴 파일명 안전 처리, 과정별 draft 복원, 문서 계약 정리를 포함한다
 - 루트 `AGENTS.md`는 bootstrap entrypoint 로 유지되고, canonical 운영 문서는 `.agent/` 아래에서 관리된다
 - 다음 작업자는 이 브랜치 기준으로 바로 후속 작업을 이어가면 된다
 - `.agent/STATUS.md`는 현재 사실을 기록하는 문서이며, 방금 만든 모든 커밋 해시를 계속 덧붙이는 용도로 쓰지 않는다
@@ -201,6 +224,30 @@ Last Updated: 2026-04-08
 - 강의 커리큘럼 커버리지 분석 MVP 구현 시작
 - FastAPI+Jinja 웹 앱, 추출기, 분석기, 템플릿, 배포 설정 추가
 - 로컬 smoke test 와 HTTP 레벨 검증 통과
+
+### 2026-04-09
+
+- `.agent/references/` 의존을 제거하고 Page 1 구현 기준을 첨부 이미지 + 문서 계약으로 단순화
+- `.agent/Components.md`를 중앙 popup + chat-style composer + 단일 강사 허용 기준으로 재작성
+- 첫 메인페이지를 white/blue minimal shell 로 재구성
+- `CourseRecord`와 `/courses` 응답에 `instructor_names`를 추가
+- 과정 추가 popup 에서 PDF 1개 + 강사명 comma token 입력을 저장하도록 변경
+- `/analyze`와 `analysis.py`의 최소 강사 수 제한을 1명으로 완화
+- TestClient 기준 단일 강사 course 생성, analyze, `/jobs/{job_id}`, `/jobs/{job_id}/solutions` 렌더링 재검증 완료
+- 과정 PDF와 강의자료 업로드 경로 생성에 공용 safe filename helper 를 적용
+- local object storage 에 key component 길이 guard 를 추가해 긴 파일명 오류를 더 빠르게 식별 가능하게 함
+- 사용자 긴 파일명 재현 로그의 `OSError: [Errno 63] File name too long` 문제를 해소
+- Page 1의 과정 추가/과정 목록 popup 이 좌측에 붙던 CSS 회귀를 수정해 다시 정중앙 overlay 로 표시되도록 복구
+- 과정 추가 modal 의 강사명 token input 에서 backspace 로 마지막 token 이 지워지지 않도록 바꾸고 `x` 클릭 삭제만 허용하도록 조정
+- 과정 추가 modal 의 파일/강사 token `x` 아이콘을 y축 중앙에 맞추고, 하단 `취소` / `저장` 버튼을 우측 하단 정렬로 정리
+- 과정 추가 modal 의 저장 버튼은 preview/save 진행 중에도 텍스트를 `저장`으로 유지하도록 조정
+- Page 1 composer 의 상태 메시지를 lane 우측 상단으로 옮기고, 강사 선택 UI를 visible select 대신 icon trigger + dropdown menu 로 전환
+- Page 1 composer capsule 높이와 내부 간격을 더 줄여 전체 자료 업로드 lane 을 더 얇게 정리
+- 과정 미선택 empty-state 문구를 별도 블록 대신 lane 중앙 문구로 옮기고, 파일 모드 안내 텍스트를 composer 중앙 정렬로 조정
+- Page 1 status message 를 lane 우측 상단 바깥쪽으로 더 밀어내어 업로드 capsule 바깥에서 보이도록 조정
+- Page 1 자료 업로드 안내 문구가 좌우 아이콘과 y축 기준으로 더 정확히 중앙에 오도록 lane middle surface 의 수직 정렬을 보정
+- 과정 목록 popup 에서 과정을 다시 선택하면 현재 세션의 과정별 lane draft 를 보존하고, 저장된 최근 job payload 가 있으면 강사별 파일/유튜브 입력을 복원하도록 보강
+- `GET /jobs/{job_id}/assets/{instructor_index}/{asset_index}` 다운로드 경로를 추가해 Page 1 draft 복원 시 저장된 업로드 파일을 다시 `File` 객체로 채울 수 있게 함
 
 ### 2026-04-07
 
@@ -244,6 +291,23 @@ Last Updated: 2026-04-08
 - `Web / Demo Agent`가 UI 작업 전에 `.agent/Components.md`와 `.agent/DESIGN.md`를 함께 참고하도록 운영 문서에 반영
 
 ### 2026-04-08
+
+- `.agent/DESIGN.md`를 Airtable reference 기준으로 교체
+- 루트 `AGENTS.md`, `.agent/AGENTS.md`, `.agent/Components.md`, `final-edu-design` 스킬 문서에서 새 reference 파일을 읽도록 갱신
+- `base.html`, `styles.css`를 white canvas + deep navy + Airtable blue 톤으로 재구성
+- `Page 1`에서 hero, 과정 카드 그리드, 최근 작업 패널을 제거하고 중앙 업로드 workspace 중심으로 단순화
+- `Page 2`를 donut + wordcloud + stacked bars + multi-instructor comparison 의 4-panel dashboard 로 재구성
+- `Page 3`를 compact intro + insight grid + trend status card 구조로 정리
+- `final_edu/static/app.js`에서 선택 과정 표시 sync, Page 2 segmented control, 다중 강사 비교 차트 로직을 보강
+- TestClient 기준 `/`, `/health`, `/jobs/{job_id}`, `/jobs/{job_id}/solutions` 200 응답 재확인
+- `capture_pages.py --backend auto`로 새 Airtable redesign desktop 캡처 세트 생성
+
+- `test` 브랜치에서 확인한 오래된 데모 버전과 분리해, 실제 구현/수정 기준 브랜치를 다시 `dev`로 고정
+- `cmux` 브라우저 surface 로 로컬 Uvicorn 페이지를 직접 열고 snapshot/screenshot/click 검증 경로를 재확인
+- 디자인 검수 표준 경로를 `cmux 우선 + Playwright fallback`으로 정리
+- `capture_pages.py`를 `auto|cmux|playwright` backend 지원 형태로 확장
+- `cmux`는 desktop/tablet, Playwright는 mobile fallback 으로 쓰도록 스킬 문서와 운영 문서 갱신
+- Page 1/2/3 핵심 UI 요소에 `data-testid`를 추가해 자동화 selector를 안정화
 
 - 현재 작업 브랜치 이름을 `feat/mvp-curriculum-coverage`에서 `dev`로 변경
 - 새 원격 추적 브랜치 `origin/dev` 생성 및 업스트림 전환 완료

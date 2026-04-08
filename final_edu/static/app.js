@@ -8,13 +8,22 @@
       selectedCourse: null,
       preview: null,
       previewFile: null,
+      draftInstructorNames: [],
       blocks: [],
+      blockData: {},
+      courseDrafts: {},
+      persistedCourseDrafts: {},
+      menuOpenBlockId: "",
+      instructorMenuOpenBlockId: "",
+      restoringCourseId: "",
+      restoreRequestId: 0,
     },
     page2: {
       result: null,
       mode: "combined",
       instructorIndex: 0,
       instructorName: "",
+      compareNames: [],
       charts: new Map(),
     },
     page3: {
@@ -32,15 +41,21 @@
 
   const SELECTORS = {
     page1CoursesData: "#page1-courses-data",
+    page1CourseDraftsData: "#page1-course-drafts-data",
     courseModal: "#course-modal, [data-testid='course-modal']",
     courseListPanel: "#course-list-panel, [data-testid='course-list-panel']",
     courseModalForm: "#course-modal-form, [data-testid='course-modal-form']",
     coursePreviewState: "#course-preview-state, [data-testid='course-preview-state']",
     coursePreviewTable: "#course-preview-table, [data-testid='course-preview-table']",
     courseSaveButton: "#course-save-button, [data-testid='course-save-button']",
+    courseFileTokens: "#course-file-tokens, [data-role='course-file-tokens']",
+    courseInstructorInput: "#course-instructor-input, [data-testid='course-instructor-input']",
+    courseInstructorTokens: "#course-instructor-tokens, [data-role='course-instructor-tokens']",
+    courseInstructorNamesJson: "#course-instructor-names-json",
     selectedCourseId: "#selected-course-id, [data-testid='selected-course-id']",
     selectedCourseName: "#selected-course-name, [data-testid='selected-course-name']",
     page1Workspace: "#page1-workspace, [data-testid='page1-workspace']",
+    page1EmptyState: "[data-workspace-disabled]",
     instructorBlocks: "#instructor-blocks, [data-testid='instructor-blocks']",
     instructorBlockTemplate: "#instructor-block-template, [data-testid='instructor-block-template']",
     addInstructorBlock: "#add-instructor-block, [data-testid='add-instructor-block']",
@@ -83,12 +98,14 @@
     page2LineChart: "#page2-line-chart, [data-chart='line']",
     page2SelectedInstructor: "#page2-selected-instructor, [data-testid='page2-selected-instructor'], [data-page2-selected-instructor]",
     page2InstructorNav: "[data-instructor-nav]",
+    page2CompareAll: "[data-compare-all]",
+    page2CompareInputs: "[data-compare-instructor]",
     page3ResultData: "#page3-result-data, [data-testid='page3-result-data']",
     page3InsightContainer: "#page3-insights, [data-page3-insights], [data-testid='page3-insights']",
     page3TrendStatus: "#page3-trend-status, [data-page3-trend-status], [data-testid='page3-trend-status']",
   };
 
-  const CHART_COLORS = ["#5b6cff", "#7a6ff0", "#63b68b", "#f2c66d", "#8fc9ff", "#ff8a7a", "#6bc1c7", "#b4a0ff"];
+  const CHART_COLORS = ["#1b61c9", "#254fad", "#5aa469", "#f0a202", "#8c5fe2", "#ff7b7b", "#13b5c8", "#7081ff"];
 
   function init() {
     initPage1();
@@ -104,128 +121,165 @@
   }
 
   function initPage1() {
-    const coursesScript = $(SELECTORS.page1CoursesData);
-    const courses = safeParseJSON(text(coursesScript), []);
-    if (Array.isArray(courses)) {
-      state.page1.courses = courses;
-    }
-
-    const courseModal = $(SELECTORS.courseModal);
-    const courseListPanel = $(SELECTORS.courseListPanel);
-    const courseForm = $(SELECTORS.courseForm);
     const analysisForm = $(SELECTORS.analysisForm);
     const workspace = $(SELECTORS.page1Workspace);
-    const blocksRoot = $(SELECTORS.instructorBlocks);
-    const template = $(SELECTORS.instructorBlockTemplate);
-    const addBlockButton = $(SELECTORS.addInstructorBlock);
-    const submitButton = $(SELECTORS.submitAnalysis);
-    const saveButton = $(SELECTORS.courseSaveButton);
-    const previewState = $(SELECTORS.coursePreviewState);
-    const previewTable = $(SELECTORS.coursePreviewTable);
-    const selectedCourseId = ensureHiddenInput(analysisForm, "course_id");
-    const selectedCourseName = ensureHiddenInput(analysisForm, "course_name");
-    const manifestInput = ensureHiddenInput(analysisForm, "instructor_manifest");
-    const courseFileInput = findFirst(courseForm, [
-      "input[type='file'][name='curriculum_pdf']",
-      "[data-role='course-curriculum-file']",
-      "[data-testid='course-curriculum-file']",
-    ]);
-    const courseNameInput = findFirst(courseForm, [
-      "input[name='course_name']",
-      "[data-role='course-name']",
-      "[data-testid='course-name']",
-    ]);
-
-    if (workspace) {
-      workspace.dataset.state = "disabled";
+    const courseForm = $(SELECTORS.courseForm);
+    if (!analysisForm || !workspace || !courseForm) {
+      return;
     }
 
-    if (courseForm && courseFileInput) {
-      courseFileInput.addEventListener("change", () => {
-        if (courseFileInput.files && courseFileInput.files.length > 0) {
-          previewCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton);
-        }
+    const coursesScript = $(SELECTORS.page1CoursesData);
+    const courses = safeParseJSON(text(coursesScript), []);
+    state.page1.courses = Array.isArray(courses) ? courses.map(normalizeCoursePayload) : [];
+    const courseDraftsScript = $(SELECTORS.page1CourseDraftsData);
+    state.page1.persistedCourseDrafts = normalizePersistedCourseDrafts(
+      safeParseJSON(text(courseDraftsScript), {}),
+    );
+
+    const refs = {
+      courseModal: $(SELECTORS.courseModal),
+      courseListPanel: $(SELECTORS.courseListPanel),
+      courseForm,
+      analysisForm,
+      workspace,
+      emptyState: $(SELECTORS.page1EmptyState),
+      blocksRoot: $(SELECTORS.instructorBlocks),
+      template: $(SELECTORS.instructorBlockTemplate),
+      addBlockButton: $(SELECTORS.addInstructorBlock),
+      submitButton: $(SELECTORS.submitAnalysis),
+      saveButton: $(SELECTORS.courseSaveButton),
+      previewState: $(SELECTORS.coursePreviewState),
+      previewTable: $(SELECTORS.coursePreviewTable),
+      selectedCourseId: ensureHiddenInput(analysisForm, "course_id"),
+      selectedCourseName: ensureHiddenInput(analysisForm, "course_name"),
+      manifestInput: ensureHiddenInput(analysisForm, "instructor_manifest"),
+      courseFileInput: findFirst(courseForm, [
+        "input[type='file'][name='curriculum_pdf']",
+        "[data-testid='course-curriculum-file']",
+      ]),
+      courseNameInput: findFirst(courseForm, [
+        "input[name='course_name']",
+        "[data-testid='course-name']",
+      ]),
+      courseDropzone: findFirst(courseForm, [
+        "[data-role='course-dropzone']",
+        ".page1-file-dropzone",
+      ]),
+      courseFileTokens: $(SELECTORS.courseFileTokens),
+      courseInstructorInput: $(SELECTORS.courseInstructorInput),
+      courseInstructorTokens: $(SELECTORS.courseInstructorTokens),
+      courseInstructorNamesJson: $(SELECTORS.courseInstructorNamesJson),
+    };
+
+    state.page1.selectedCourseId = valueOf(refs.selectedCourseId);
+    state.page1.selectedCourse = state.page1.courses.find((item) => item.id === state.page1.selectedCourseId) || null;
+
+    bindDialog(refs.courseModal, SELECTORS.openCourseModal, SELECTORS.closeDialogs);
+    bindDialog(refs.courseListPanel, SELECTORS.openCourseList, SELECTORS.closeDialogs);
+
+    if (refs.courseFileInput) {
+      refs.courseFileInput.addEventListener("change", () => {
+        handleCourseFileSelection(refs);
       });
     }
 
-    if (courseForm) {
-      courseForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!state.page1.preview) {
-          await previewCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton);
-          return;
-        }
-        await saveCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton, courseModal);
+    if (refs.courseNameInput) {
+      refs.courseNameInput.addEventListener("input", () => {
+        updateCourseSaveButtonState(refs);
       });
     }
 
-    bindDialog(courseModal, SELECTORS.openCourseModal, SELECTORS.closeDialogs, () => {
-      if (courseNameInput && !courseNameInput.value && state.page1.selectedCourse) {
-        courseNameInput.value = state.page1.selectedCourse.name;
-      }
-      if (courseFileInput && courseFileInput.files && courseFileInput.files.length > 0 && !state.page1.preview) {
-        previewCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton);
-      }
-    });
-
-    bindPanel(courseListPanel, SELECTORS.openCourseList, SELECTORS.closeDialogs);
-
-    if (addBlockButton) {
-      addBlockButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        if (!state.page1.selectedCourseId) {
-          return;
-        }
-        addInstructorBlock(blocksRoot, template, analysisForm, manifestInput);
-        syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput);
+    if (refs.courseDropzone) {
+      bindDropzone(refs.courseDropzone, {
+        onFiles(files) {
+          setCourseDraftFile(files[0] || null, refs);
+        },
       });
     }
 
-    if (submitButton && analysisForm) {
-      submitButton.addEventListener("click", (event) => {
-        event.preventDefault();
-        if (!canSubmitAnalysis()) {
-          setStatus(previewState, "과정 선택, 강사 2명 이상, 각 강사 자료 등록이 필요합니다.");
-          return;
-        }
-        analysisForm.requestSubmit ? analysisForm.requestSubmit(submitButton) : analysisForm.submit();
-      });
-    }
-
-    if (workspace) {
-      workspace.addEventListener("click", (event) => {
+    if (refs.courseFileTokens) {
+      refs.courseFileTokens.addEventListener("click", (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) {
           return;
         }
-        const action = target.closest("[data-action]");
-        if (!action) {
+        const removeButton = target.closest("[data-remove-course-file]");
+        if (!removeButton) {
           return;
         }
-        const block = action.closest("[data-instructor-block]");
-        if (!block) {
-          return;
-        }
-        const actionName = action.getAttribute("data-action");
-        if (actionName === "toggle-files") {
-          toggleBlockPanel(block, "files");
-        }
-        if (actionName === "toggle-youtube") {
-          toggleBlockPanel(block, "youtube");
-        }
-      });
-
-      workspace.addEventListener("input", () => {
-        syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput);
-      });
-
-      workspace.addEventListener("change", () => {
-        syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput);
+        event.preventDefault();
+        clearCourseDraftFile(refs);
       });
     }
 
-    if (courseListPanel) {
-      courseListPanel.addEventListener("click", (event) => {
+    if (refs.courseInstructorInput) {
+      refs.courseInstructorInput.addEventListener("keydown", (event) => {
+        if (event.key === "," || event.key === "Enter") {
+          event.preventDefault();
+          commitCourseInstructorDraft(refs.courseInstructorInput.value, refs);
+        }
+      });
+      refs.courseInstructorInput.addEventListener("blur", () => {
+        if (refs.courseInstructorInput.value.trim()) {
+          commitCourseInstructorDraft(refs.courseInstructorInput.value, refs);
+        }
+      });
+    }
+
+    if (refs.courseInstructorTokens) {
+      refs.courseInstructorTokens.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const removeButton = target.closest("[data-remove-course-instructor]");
+        if (!removeButton) {
+          return;
+        }
+        const index = Number(removeButton.getAttribute("data-remove-course-instructor"));
+        if (Number.isNaN(index)) {
+          return;
+        }
+        state.page1.draftInstructorNames.splice(index, 1);
+        renderCourseInstructorTokens(refs);
+        updateCourseSaveButtonState(refs);
+      });
+    }
+
+    refs.courseForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!state.page1.preview) {
+        await previewCourse(refs.courseForm, refs.courseFileInput, refs.courseNameInput, refs.previewState, refs.previewTable, refs.saveButton);
+      }
+      if (canSaveCourse(refs)) {
+        await saveCourse(refs.courseForm, refs.courseFileInput, refs.courseNameInput, refs.previewState, refs.previewTable, refs.saveButton, refs.courseModal, refs);
+      }
+    });
+
+    if (refs.addBlockButton) {
+      refs.addBlockButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (!canAddMoreBlocks()) {
+          return;
+        }
+        addInstructorBlock(refs.blocksRoot, refs.template, refs.analysisForm, refs.manifestInput);
+        syncPage1State(refs);
+      });
+    }
+
+    if (refs.submitButton) {
+      refs.submitButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (!canSubmitAnalysis()) {
+          setStatus(refs.previewState, "과정을 선택하고 강사 1명 이상에게 자료를 연결해 주세요.");
+          return;
+        }
+        refs.analysisForm.requestSubmit ? refs.analysisForm.requestSubmit(refs.submitButton) : refs.analysisForm.submit();
+      });
+    }
+
+    if (refs.courseListPanel) {
+      refs.courseListPanel.addEventListener("click", async (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) {
           return;
@@ -236,59 +290,60 @@
         }
         const courseId = button.getAttribute("data-course-select");
         const course = state.page1.courses.find((item) => item.id === courseId);
-        if (course) {
-          selectCourse(course, {
-            workspace,
-            selectedCourseId,
-            selectedCourseName,
-            submitButton,
-            manifestInput,
-            courseListPanel,
-          });
+        if (!course) {
+          return;
         }
+        closeSurface(refs.courseListPanel);
+        await selectCourse(course, refs);
       });
     }
 
-    qsa("[data-course-card]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const courseId = button.getAttribute("data-course-select") || button.getAttribute("data-course-id");
-        const course = state.page1.courses.find((item) => item.id === courseId);
-        if (course) {
-          selectCourse(course, {
-            workspace,
-            selectedCourseId,
-            selectedCourseName,
-            submitButton,
-            manifestInput,
-            courseListPanel,
-          });
-        }
-      });
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (!target.closest("[data-instructor-block]")) {
+        closeAllBlockMenus();
+      }
     });
 
     if (!state.page1.courses.length) {
       fetchCourses().then((items) => {
-        if (items.length) {
-          state.page1.courses = items;
-          renderCourseList(courseListPanel);
+        if (!items.length) {
+          return;
         }
+        state.page1.courses = items.map(normalizeCoursePayload);
+        renderCourseList(refs.courseListPanel);
+        syncPage1State(refs);
       });
     } else {
-      renderCourseList(courseListPanel);
+      renderCourseList(refs.courseListPanel);
     }
 
-    if (blocksRoot) {
-      const existingBlocks = qsa("[data-instructor-block]", blocksRoot);
-      if (!existingBlocks.length) {
-        addInstructorBlock(blocksRoot, template, analysisForm, manifestInput);
-      } else {
-        state.page1.blocks = existingBlocks.slice();
-        existingBlocks.forEach((block, index) => bindInstructorBlock(block, index + 1));
-      }
+    const existingBlocks = refs.blocksRoot ? qsa("[data-instructor-block]", refs.blocksRoot) : [];
+    state.page1.blocks = [];
+    state.page1.blockData = {};
+    state.page1.instructorMenuOpenBlockId = "";
+    if (!existingBlocks.length) {
+      addInstructorBlock(refs.blocksRoot, refs.template, refs.analysisForm, refs.manifestInput);
+    } else {
+      existingBlocks.forEach((block, index) => {
+        state.page1.blocks.push(block);
+        bindInstructorBlock(block, index + 1);
+      });
     }
 
-    syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput);
-    updateCourseListSelection(courseListPanel);
+    renderCourseFileTokens(refs);
+    renderCourseInstructorTokens(refs);
+    updateCourseSaveButtonState(refs);
+    updateCourseListSelection(refs.courseListPanel);
+    syncPage1State(refs);
+    if (state.page1.selectedCourse) {
+      selectCourse(state.page1.selectedCourse, refs).catch((error) => {
+        console.error(error);
+      });
+    }
   }
 
   function initPage2() {
@@ -309,6 +364,8 @@
     };
     const modeButtons = qsa(joinSelectors(SELECTORS.page2ModeButtons));
     const instructorButtons = qsa(joinSelectors(SELECTORS.page2InstructorButtons));
+    const compareAll = $(SELECTORS.page2CompareAll);
+    const compareInputs = qsa(SELECTORS.page2CompareInputs);
 
     if (!result.instructors || !result.instructors.length) {
       return;
@@ -319,6 +376,9 @@
       0,
     );
     state.page2.instructorName = result.instructors[state.page2.instructorIndex]?.name || result.selected_instructor || result.selectedInstructor || result.instructors[0].name;
+    state.page2.compareNames = compareInputs.length
+      ? compareInputs.filter((input) => input.checked).map((input) => input.value)
+      : result.instructors.map((item) => item.name);
 
     modeButtons.forEach((button) => {
       button.addEventListener("click", () => {
@@ -339,11 +399,28 @@
         selectPage2Instructor(
           button.getAttribute("data-instructor-index") ?? instructorIndex,
           containers,
-          { updateRoseWordcloud: true, updateModeCharts: false, updateLine: true },
+          { updateRoseWordcloud: true, updateModeCharts: false, updateLine: false },
         );
       });
     });
     syncInstructorButtons(instructorButtons, state.page2.instructorIndex, state.page2.instructorName);
+
+    if (compareAll) {
+      compareAll.addEventListener("change", () => {
+        compareInputs.forEach((input) => {
+          input.checked = compareAll.checked;
+        });
+        syncComparisonSelection(compareInputs, compareAll);
+        updatePage2Charts(containers, { updateRoseWordcloud: false, updateModeCharts: false, updateLine: true });
+      });
+    }
+
+    compareInputs.forEach((input) => {
+      input.addEventListener("change", () => {
+        syncComparisonSelection(compareInputs, compareAll);
+        updatePage2Charts(containers, { updateRoseWordcloud: false, updateModeCharts: false, updateLine: true });
+      });
+    });
 
     document.addEventListener("click", (event) => {
       const target = event.target;
@@ -362,10 +439,11 @@
       selectPage2Instructor(
         direction === "prev" ? state.page2.instructorIndex - 1 : state.page2.instructorIndex + 1,
         containers,
-        { updateRoseWordcloud: true, updateModeCharts: false, updateLine: true },
+        { updateRoseWordcloud: true, updateModeCharts: false, updateLine: false },
       );
     });
 
+    syncComparisonSelection(compareInputs, compareAll);
     updatePage2Charts(containers);
     window.addEventListener("resize", debounce(() => resizeCharts(), 100));
   }
@@ -404,7 +482,7 @@
     const fd = new FormData();
     fd.append("curriculum_pdf", file, file.name);
     state.page1.previewFile = file;
-    setBusy(saveButton, true, "미리보는 중");
+    setBusy(saveButton, true);
     setStatus(previewState, "커리큘럼 PDF를 분석하는 중입니다.");
 
     return fetchJson("/courses/preview", {
@@ -414,19 +492,23 @@
       .then((payload) => {
         state.page1.preview = normalizePreview(payload);
         renderCoursePreview(previewTable, previewState, state.page1.preview, courseNameInput?.value || "");
-        setButtonDisabled(saveButton, false);
         setBusy(saveButton, false);
+        updateCourseSaveButtonState({
+          courseNameInput,
+          saveButton,
+          courseInstructorNamesJson: $(SELECTORS.courseInstructorNamesJson),
+        });
         return state.page1.preview;
       })
       .catch((error) => {
         setStatus(previewState, `미리보기에 실패했습니다. ${error.message}`);
-        setButtonDisabled(saveButton, true);
         setBusy(saveButton, false);
+        setButtonDisabled(saveButton, true);
         return null;
       });
   }
 
-  function saveCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton, courseModal) {
+  function saveCourse(courseForm, courseFileInput, courseNameInput, previewState, previewTable, saveButton, courseModal, refs) {
     if (!state.page1.preview || !courseFileInput?.files?.length) {
       setStatus(previewState, "먼저 PDF를 미리보기로 분석해 주세요.");
       return Promise.resolve(null);
@@ -436,36 +518,47 @@
     fd.append("course_name", courseNameInput?.value?.trim() || "이름 없는 과정");
     fd.append("raw_curriculum_text", state.page1.preview.raw_curriculum_text || "");
     fd.append("sections_json", JSON.stringify(readPreviewSections(previewTable)));
+    fd.append("instructor_names_json", JSON.stringify(state.page1.draftInstructorNames));
     fd.append("curriculum_pdf", courseFileInput.files[0], courseFileInput.files[0].name);
-    setBusy(saveButton, true, "저장 중");
+    setBusy(saveButton, true);
 
     return fetchJson("/courses", {
       method: "POST",
       body: fd,
     })
       .then((payload) => {
-        state.page1.courses = Array.isArray(payload.courses) ? payload.courses : state.page1.courses;
+        state.page1.courses = Array.isArray(payload.courses) ? payload.courses.map(normalizeCoursePayload) : state.page1.courses;
         if (payload.course) {
-          selectCourse(payload.course, {
-            workspace: $(SELECTORS.page1Workspace),
-            selectedCourseId: $(SELECTORS.selectedCourseId),
-            selectedCourseName: $(SELECTORS.selectedCourseName),
-            submitButton: $(SELECTORS.submitAnalysis),
-            manifestInput: ensureHiddenInput($(SELECTORS.analysisForm), "instructor_manifest"),
-            courseListPanel: $(SELECTORS.courseListPanel),
-          });
+          return selectCourse(normalizeCoursePayload(payload.course), refs).then(() => payload);
         }
-        renderCourseList($(SELECTORS.courseListPanel));
+        renderCourseList(refs.courseListPanel);
         setStatus(previewState, "과정이 저장되었습니다.");
         if (courseModal) {
           closeSurface(courseModal);
         }
+        resetCourseDraft(refs);
         setBusy(saveButton, false);
+        updateCourseSaveButtonState(refs);
+        return payload;
+      })
+      .then((payload) => {
+        if (!payload) {
+          return null;
+        }
+        renderCourseList(refs.courseListPanel);
+        setStatus(previewState, "과정이 저장되었습니다.");
+        if (courseModal) {
+          closeSurface(courseModal);
+        }
+        resetCourseDraft(refs);
+        setBusy(saveButton, false);
+        updateCourseSaveButtonState(refs);
         return payload;
       })
       .catch((error) => {
         setStatus(previewState, `저장에 실패했습니다. ${error.message}`);
         setBusy(saveButton, false);
+        updateCourseSaveButtonState(refs);
         return null;
       });
   }
@@ -475,69 +568,25 @@
       return;
     }
     previewTable.innerHTML = "";
-    const table = document.createElement("table");
-    table.className = "course-preview-table";
-    const thead = document.createElement("thead");
-    thead.innerHTML = `
-      <tr>
-        <th>#</th>
-        <th>대주제</th>
-        <th>설명</th>
-        <th>목표 비중</th>
-      </tr>
-    `;
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    preview.sections.forEach((section, index) => {
-      const row = document.createElement("tr");
-      row.dataset.sectionId = section.id;
-      row.dataset.coursePreviewRow = "true";
-      row.innerHTML = `
-        <td>${index + 1}</td>
-        <td><input type="text" data-section-field="title" value="${escapeAttr(section.title)}"></td>
-        <td><input type="text" data-section-field="description" value="${escapeAttr(section.description)}"></td>
-        <td><input type="number" min="0" step="0.1" max="100" data-section-field="target_weight" value="${escapeAttr(String(section.target_weight ?? 0))}"></td>
-      `;
-      tbody.appendChild(row);
-    });
-    table.appendChild(tbody);
-    previewTable.appendChild(table);
-
-    const footer = document.createElement("div");
-    footer.className = "course-preview-meta";
-    footer.dataset.coursePreviewMeta = "true";
-    footer.textContent = `${courseName ? `${courseName} · ` : ""}${preview.sections.length}개 대주제 · ${summaryPreviewWeights(preview.sections)}`;
-    previewTable.appendChild(footer);
+    previewTable.dataset.sectionCount = String(preview.sections.length);
 
     if (previewState) {
       const warnings = preview.warnings && preview.warnings.length ? ` 경고 ${preview.warnings.length}건.` : "";
-      previewState.textContent = `초안 추출 완료.${warnings}`;
+      previewState.textContent = `${courseName ? `${courseName} · ` : ""}${preview.sections.length}개 대주제 초안 추출 완료.${warnings}`;
     }
 
-    qsa("input[data-section-field]", previewTable).forEach((input) => {
-      input.addEventListener("input", () => {
-        if (previewState) {
-          previewState.textContent = `초안 수정 중 · 합계 ${summaryPreviewWeights(readPreviewSections(previewTable))}`;
-        }
-      });
-    });
+    const sectionsInput = $("#course-sections-json");
+    const rawTextInput = $("#course-raw-curriculum-text");
+    if (sectionsInput) {
+      sectionsInput.value = JSON.stringify(preview.sections);
+    }
+    if (rawTextInput) {
+      rawTextInput.value = preview.raw_curriculum_text || "";
+    }
   }
 
   function readPreviewSections(previewTable) {
-    if (!previewTable) {
-      return [];
-    }
-    return qsa("[data-course-preview-row]", previewTable).map((row) => {
-      const title = findOne(row, ["[data-section-field='title']", "input[data-section-field='title']"]);
-      const description = findOne(row, ["[data-section-field='description']", "input[data-section-field='description']"]);
-      const weight = findOne(row, ["[data-section-field='target_weight']", "input[data-section-field='target_weight']"]);
-      return {
-        id: row.dataset.sectionId || uniqueId("section"),
-        title: title ? title.value.trim() : "",
-        description: description ? description.value.trim() : "",
-        target_weight: weight ? Number(weight.value || 0) : 0,
-      };
-    }).filter((section) => section.title);
+    return Array.isArray(state.page1.preview?.sections) ? state.page1.preview.sections : [];
   }
 
   function renderCourseList(courseListPanel) {
@@ -566,10 +615,10 @@
       card.innerHTML = `
         <div class="course-list-item-head">
           <strong>${escapeHtml(course.name)}</strong>
-          <span class="course-state-chip is-sage">목표 비중 추출 완료</span>
+          <span class="course-state-chip is-sage">선택 가능</span>
         </div>
-        <span>${course.sections.length}개 대주제</span>
-        <small>목표 비중 합계 ${formatCourseWeightTotal(course.sections)}%</small>
+        <span>등록 강사 ${Array.isArray(course.instructor_names) ? course.instructor_names.length : 0}명</span>
+        <small>대주제 ${course.sections.length}개</small>
       `;
       target.appendChild(card);
     });
@@ -596,32 +645,213 @@
     return total.toFixed(1);
   }
 
-  function selectCourse(course, refs) {
-    state.page1.selectedCourse = course;
-    state.page1.selectedCourseId = course.id;
-    const { workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput, courseListPanel } = refs;
+  async function selectCourse(course, refs) {
+    const normalizedCourse = normalizeCoursePayload(course);
+    const previousCourseId = state.page1.selectedCourseId;
+    if (previousCourseId && previousCourseId !== normalizedCourse.id) {
+      cacheCurrentCourseDraft(previousCourseId);
+    }
+    state.page1.selectedCourse = normalizedCourse;
+    state.page1.selectedCourseId = normalizedCourse.id;
+    state.page1.restoringCourseId = normalizedCourse.id;
+    const restoreRequestId = ++state.page1.restoreRequestId;
+    const { selectedCourseId, selectedCourseName, courseListPanel } = refs;
 
-    setFieldValue(selectedCourseId, course.id);
-    setFieldValue(selectedCourseName, course.name);
+    setFieldValue(selectedCourseId, normalizedCourse.id);
+    setFieldValue(selectedCourseName, normalizedCourse.name);
     state.page1.preview = null;
     state.page1.previewFile = null;
 
-    if (workspace) {
-      workspace.dataset.state = "active";
-      workspace.classList.remove(CSS.disabled);
+    if (previousCourseId !== normalizedCourse.id) {
+      let restored = false;
+      try {
+        restored = await restoreCourseDraftForSelection(normalizedCourse.id, refs, restoreRequestId);
+      } catch (error) {
+        console.error(error);
+      }
+      if (!restored && restoreRequestId === state.page1.restoreRequestId) {
+        resetPage1Blocks(refs.blocksRoot, refs.template, refs.analysisForm, refs.manifestInput);
+      }
     }
-
-    if (manifestInput) {
-      manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
+    if (restoreRequestId === state.page1.restoreRequestId) {
+      state.page1.restoringCourseId = "";
     }
-
-    enableWorkspaceInputs(true);
     renderCourseList(courseListPanel);
     updateCourseListSelection(courseListPanel);
-    syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput);
+    syncPage1State(refs);
   }
 
-  function syncPage1State(workspace, selectedCourseId, selectedCourseName, submitButton, manifestInput) {
+  function normalizePersistedCourseDrafts(payload) {
+    if (!payload || typeof payload !== "object") {
+      return {};
+    }
+    return Object.entries(payload).reduce((acc, [courseId, draft]) => {
+      const normalized = normalizeCourseDraft(draft);
+      if (normalized.blocks.length) {
+        acc[courseId] = normalized;
+      }
+      return acc;
+    }, {});
+  }
+
+  function normalizeCourseDraft(draft) {
+    const blocks = Array.isArray(draft?.blocks) ? draft.blocks.map(normalizeCourseDraftBlock).filter(Boolean) : [];
+    return {
+      courseId: String(draft?.course_id || draft?.courseId || ""),
+      jobId: String(draft?.job_id || draft?.jobId || ""),
+      updatedAt: String(draft?.updated_at || draft?.updatedAt || ""),
+      updatedAtLabel: String(draft?.updated_at_label || draft?.updatedAtLabel || ""),
+      blocks,
+    };
+  }
+
+  function normalizeCourseDraftBlock(block) {
+    if (!block || typeof block !== "object") {
+      return null;
+    }
+    const files = Array.isArray(block.files)
+      ? block.files
+          .map((file) => {
+            if (file instanceof File) {
+              return file;
+            }
+            if (!file || typeof file !== "object") {
+              return null;
+            }
+            return {
+              originalName: String(file.original_name || file.originalName || file.name || ""),
+              downloadUrl: String(file.download_url || file.downloadUrl || ""),
+            };
+          })
+          .filter((file) => file && (file instanceof File || file.originalName))
+      : [];
+    const youtubeUrls = Array.isArray(block.youtube_urls || block.youtubeUrls)
+      ? (block.youtube_urls || block.youtubeUrls).map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const instructorName = String(block.instructor_name || block.instructorName || "").trim();
+    const mode = block.mode === "youtube" ? "youtube" : "files";
+    if (!instructorName && !files.length && !youtubeUrls.length) {
+      return null;
+    }
+    return {
+      mode: files.length ? mode : (youtubeUrls.length ? "youtube" : mode),
+      instructorName,
+      files,
+      youtubeUrls,
+    };
+  }
+
+  function cacheCurrentCourseDraft(courseId) {
+    const normalizedCourseId = String(courseId || "").trim();
+    if (!normalizedCourseId) {
+      return;
+    }
+    state.page1.courseDrafts[normalizedCourseId] = snapshotCurrentCourseDraft();
+  }
+
+  function snapshotCurrentCourseDraft() {
+    const blocks = state.page1.blocks
+      .map((block) => snapshotBlockState(getBlockState(block)))
+      .filter((block) => block.instructorName || block.files.length || block.youtubeUrls.length);
+    return {
+      blocks: blocks.length ? blocks : [createEmptyDraftBlock()],
+    };
+  }
+
+  function snapshotBlockState(blockState) {
+    return {
+      mode: blockState.mode === "youtube" ? "youtube" : "files",
+      instructorName: String(blockState.instructorName || "").trim(),
+      files: Array.isArray(blockState.files) ? blockState.files.slice() : [],
+      youtubeUrls: Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.slice() : [],
+    };
+  }
+
+  function createEmptyDraftBlock() {
+    return {
+      mode: "files",
+      instructorName: "",
+      files: [],
+      youtubeUrls: [],
+    };
+  }
+
+  async function restoreCourseDraftForSelection(courseId, refs, restoreRequestId) {
+    const normalizedCourseId = String(courseId || "").trim();
+    const localDraft = state.page1.courseDrafts[normalizedCourseId];
+    if (localDraft?.blocks?.length) {
+      applyCourseDraft(refs, localDraft);
+      return true;
+    }
+
+    const persistedDraft = state.page1.persistedCourseDrafts[normalizedCourseId];
+    if (!persistedDraft?.blocks?.length) {
+      return false;
+    }
+
+    const resolvedDraft = await resolvePersistedCourseDraft(persistedDraft, normalizedCourseId, restoreRequestId);
+    if (!resolvedDraft || restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== normalizedCourseId) {
+      return false;
+    }
+    state.page1.courseDrafts[normalizedCourseId] = resolvedDraft;
+    applyCourseDraft(refs, resolvedDraft);
+    return true;
+  }
+
+  async function resolvePersistedCourseDraft(draft, courseId, restoreRequestId) {
+    const resolvedBlocks = await Promise.all(
+      draft.blocks.map(async (block) => {
+        const restoredFiles = await Promise.all(
+          (Array.isArray(block.files) ? block.files : []).map((file) => restoreDraftFile(file)),
+        );
+        if (restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== courseId) {
+          return null;
+        }
+        return {
+          mode: block.mode === "youtube" ? "youtube" : (restoredFiles.length ? "files" : "youtube"),
+          instructorName: block.instructorName,
+          files: restoredFiles.filter((file) => file instanceof File),
+          youtubeUrls: Array.isArray(block.youtubeUrls) ? block.youtubeUrls.slice() : [],
+        };
+      }),
+    );
+
+    const meaningfulBlocks = resolvedBlocks.filter((block) => block && (block.instructorName || block.files.length || block.youtubeUrls.length));
+    if (!meaningfulBlocks.length) {
+      return null;
+    }
+    return { blocks: meaningfulBlocks };
+  }
+
+  async function restoreDraftFile(file) {
+    if (file instanceof File) {
+      return file;
+    }
+    const originalName = String(file?.originalName || file?.original_name || file?.name || "").trim();
+    const downloadUrl = String(file?.downloadUrl || file?.download_url || "").trim();
+    if (!originalName || !downloadUrl) {
+      return null;
+    }
+    const response = await fetch(downloadUrl, { credentials: "same-origin" });
+    if (!response.ok) {
+      throw new Error(`${originalName}: 저장된 자료를 다시 불러오지 못했습니다.`);
+    }
+    const blob = await response.blob();
+    return new File([blob], originalName, {
+      type: blob.type || "application/octet-stream",
+      lastModified: Date.now(),
+    });
+  }
+
+  function applyCourseDraft(refs, draft) {
+    const snapshots = Array.isArray(draft?.blocks) && draft.blocks.length
+      ? draft.blocks.map((block) => snapshotBlockState(block))
+      : [createEmptyDraftBlock()];
+    rebuildPage1Blocks(refs.blocksRoot, refs.template, refs.analysisForm, refs.manifestInput, snapshots);
+  }
+
+  function syncPage1State(refs) {
+    const { workspace, emptyState, selectedCourseId, selectedCourseName, submitButton, manifestInput, addBlockButton } = refs;
     const selectedId = state.page1.selectedCourseId || valueOf(selectedCourseId);
     const selectedCourse = state.page1.courses.find((item) => item.id === selectedId) || state.page1.selectedCourse;
     state.page1.selectedCourse = selectedCourse || null;
@@ -634,29 +864,31 @@
       workspace.dataset.state = selectedCourse ? "active" : "disabled";
       workspace.classList.toggle(CSS.disabled, !selectedCourse);
     }
+    if (emptyState) {
+      emptyState.classList.toggle(CSS.hidden, Boolean(selectedCourse));
+    }
 
     if (manifestInput) {
       manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
     }
 
-    enableWorkspaceInputs(Boolean(selectedCourse));
+    state.page1.blocks.forEach((block) => {
+      renderBlock(block);
+      setBlockDisabled(block, !selectedCourse);
+    });
+
+    if (addBlockButton) {
+      setButtonDisabled(addBlockButton, !canAddMoreBlocks());
+    }
     if (submitButton) {
       setButtonDisabled(submitButton, !canSubmitAnalysis());
     }
 
-    if (courseSaveButton()) {
-      setButtonDisabled(courseSaveButton(), !state.page1.preview);
-    }
+    updateCourseSaveButtonState(refs);
   }
 
-  function enableWorkspaceInputs(enabled) {
-    const root = $(SELECTORS.page1Workspace);
-    if (!root) {
-      return;
-    }
-    qsa("input, textarea, button, select", root).forEach((el) => {
-      el.disabled = !enabled;
-    });
+  function enableWorkspaceInputs() {
+    // Page 1 now uses per-lane disabled state instead of disabling the full workspace tree.
   }
 
   function addInstructorBlock(blocksRoot, template, analysisForm, manifestInput) {
@@ -669,7 +901,7 @@
     blocksRoot.appendChild(block);
     state.page1.blocks.push(block);
     bindInstructorBlock(block, index);
-    syncPage1State($(SELECTORS.page1Workspace), $(SELECTORS.selectedCourseId), $(SELECTORS.selectedCourseName), $(SELECTORS.submitAnalysis), manifestInput);
+    syncPage1State(page1Refs());
     if (analysisForm) {
       manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
     }
@@ -690,35 +922,41 @@
     }
 
     const block = document.createElement("article");
-    block.className = "instructor-block";
+    block.className = "composer-lane";
     block.dataset.instructorBlock = "true";
     block.dataset.blockId = blockId;
     block.innerHTML = `
-      <div class="instructor-block__header">
-        <label class="field instructor-block__name">
-          <span>강사명</span>
-          <input type="text" data-role="instructor-name" name="instructor_name__${blockId}" placeholder="예: 김강사">
-        </label>
-        <span class="instructor-block__status" data-role="block-status">자료 없음</span>
+      <div class="composer-lane__start">
+        <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
+        <div class="lane-mode-menu" data-role="mode-menu" hidden>
+          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="files">파일 업로드</button>
+          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="youtube">유튜브 링크</button>
+        </div>
       </div>
-      <div class="instructor-block__actions">
-        <button type="button" class="icon-chip" data-action="toggle-files">파일 업로드</button>
-        <button type="button" class="icon-chip" data-action="toggle-youtube">YouTube 링크</button>
+      <div class="composer-lane__main">
+        <div class="lane-surface lane-surface-files" data-role="files-surface">
+          <input class="sr-only" type="file" multiple accept=".pdf,.pptx,.txt,.md" data-role="instructor-files" name="instructor_files__${blockId}">
+          <button type="button" class="lane-surface__tap" data-action="open-file-picker">강의 자료를 드래그하거나 클릭해 업로드</button>
+          <div class="lane-asset-strip lane-file-strip" data-role="file-list"></div>
+        </div>
+        <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+          <div class="lane-token-shell">
+            <div class="lane-token-list" data-role="youtube-token-list"></div>
+            <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요">
+          </div>
+          <input type="hidden" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" value="">
+        </div>
       </div>
-      <div class="instructor-block__panels">
-        <section class="instructor-block__panel" data-role="files-panel" hidden>
-          <label class="field">
-            <span>강의 자료 파일</span>
-            <input type="file" multiple accept=".pdf,.pptx,.txt,.md" data-role="instructor-files" name="instructor_files__${blockId}">
-          </label>
-        </section>
-        <section class="instructor-block__panel" data-role="youtube-panel" hidden>
-          <label class="field">
-            <span>YouTube URL</span>
-            <textarea rows="4" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" placeholder="한 줄에 하나씩 입력"></textarea>
-          </label>
-        </section>
+      <div class="composer-lane__end">
+        <input type="hidden" data-role="instructor-name" name="instructor_name__${blockId}" value="">
+        <button type="button" class="instructor-picker-button" data-action="toggle-instructor-menu" aria-label="강사 선택" aria-haspopup="menu" aria-expanded="false" title="강사 선택">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.68 0-6.67 1.79-6.67 4v1h13.34v-1c0-2.21-2.99-4-6.67-4Z"></path>
+          </svg>
+        </button>
+        <div class="instructor-picker-menu" data-role="instructor-menu" hidden></div>
       </div>
+      <div class="composer-lane__meta" data-role="block-status">자료 없음</div>
     `;
     decorateInstructorBlock(block, blockId, index);
     return block;
@@ -729,73 +967,145 @@
     block.dataset.blockId = blockId;
     block.dataset.blockIndex = String(index);
 
-    const nameInput = findOne(block, [
-      "[data-role='instructor-name']",
-      "input[type='text']",
-    ]);
-    const fileInput = findOne(block, [
-      "[data-role='instructor-files']",
-      "input[type='file']",
-    ]);
-    const youtubeInput = findOne(block, [
-      "[data-role='instructor-youtube']",
-      "textarea",
-    ]);
-    const status = findOne(block, ["[data-role='block-status']"]);
-    const filePanel = findOne(block, ["[data-role='files-panel']"]);
-    const youtubePanel = findOne(block, ["[data-role='youtube-panel']"]);
-
-    if (nameInput) {
-      nameInput.name = `instructor_name__${blockId}`;
-      nameInput.dataset.blockField = "name";
-      nameInput.addEventListener("input", () => updateBlockStatus(block));
+    const instructorInput = findOne(block, ["[data-role='instructor-name']", "input[type='hidden']"]);
+    const fileInput = findOne(block, ["[data-role='instructor-files']", "input[type='file']"]);
+    const youtubeInput = findOne(block, ["[data-role='instructor-youtube']", "input[type='hidden']"]);
+    if (instructorInput) {
+      instructorInput.name = `instructor_name__${blockId}`;
+      instructorInput.id = `instructor-select-${blockId}`;
     }
     if (fileInput) {
       fileInput.name = `instructor_files__${blockId}`;
-      fileInput.dataset.blockField = "files";
-      fileInput.addEventListener("change", () => updateBlockStatus(block));
     }
     if (youtubeInput) {
       youtubeInput.name = `instructor_youtube_urls__${blockId}`;
-      youtubeInput.dataset.blockField = "youtube";
-      youtubeInput.addEventListener("input", () => updateBlockStatus(block));
     }
-    if (status) {
-      status.dataset.blockStatus = "true";
-    }
-    if (filePanel) {
-      filePanel.dataset.blockPanel = "files";
-    }
-    if (youtubePanel) {
-      youtubePanel.dataset.blockPanel = "youtube";
-    }
-
-    updateBlockStatus(block);
+    state.page1.blockData[blockId] = state.page1.blockData[blockId] || {
+      mode: "files",
+      instructorName: "",
+      files: [],
+      youtubeUrls: [],
+    };
+    renderBlock(block);
   }
 
   function bindInstructorBlock(block, index) {
-    decorateInstructorBlock(block, block.dataset.blockId || uniqueId("instructor"), index);
-  }
+    const blockId = block.dataset.blockId || uniqueId("instructor");
+    decorateInstructorBlock(block, blockId, index);
 
-  function toggleBlockPanel(block, type) {
-    const panel = findOne(block, [`[data-role='${type}-panel']`, `[data-block-panel='${type}']`]);
-    if (!panel) {
-      return;
+    const fileSurface = findOne(block, ["[data-role='files-surface']"]);
+    if (fileSurface) {
+      bindDropzone(fileSurface, {
+        onFiles(files) {
+          addBlockFiles(block, files);
+        },
+      });
     }
-    const isOpen = !panel.hasAttribute("hidden");
-    panel.hidden = isOpen;
-    panel.classList.toggle(CSS.open, !isOpen);
+
+    block.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const action = target.closest("[data-action]");
+      if (action) {
+        const actionName = action.getAttribute("data-action");
+        if (actionName === "toggle-mode-menu") {
+          event.preventDefault();
+          toggleModeMenu(block);
+          return;
+        }
+        if (actionName === "toggle-instructor-menu") {
+          event.preventDefault();
+          toggleInstructorMenu(block);
+          return;
+        }
+        if (actionName === "switch-mode") {
+          event.preventDefault();
+          switchBlockMode(block, action.getAttribute("data-mode") || "files");
+          return;
+        }
+        if (actionName === "open-file-picker") {
+          event.preventDefault();
+          const fileInput = findOne(block, ["[data-role='instructor-files']"]);
+          if (fileInput) {
+            fileInput.click();
+          }
+          return;
+        }
+        if (actionName === "select-instructor") {
+          event.preventDefault();
+          const blockState = getBlockState(block);
+          blockState.instructorName = (action.getAttribute("data-instructor-value") || "").trim();
+          state.page1.instructorMenuOpenBlockId = "";
+          renderBlock(block);
+          syncPage1State(page1Refs());
+          return;
+        }
+      }
+
+      const removeFileButton = target.closest("[data-remove-file-index]");
+      if (removeFileButton) {
+        event.preventDefault();
+        removeBlockFile(block, Number(removeFileButton.getAttribute("data-remove-file-index")));
+        return;
+      }
+
+      const removeUrlButton = target.closest("[data-remove-youtube-index]");
+      if (removeUrlButton) {
+        event.preventDefault();
+        removeBlockYoutubeUrl(block, Number(removeUrlButton.getAttribute("data-remove-youtube-index")));
+      }
+    });
+
+    block.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (target.matches("[data-role='instructor-files']")) {
+        addBlockFiles(block, Array.from(target.files || []));
+        return;
+      }
+    });
+
+    block.addEventListener("keydown", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      if (!target.matches("[data-role='youtube-draft']")) {
+        return;
+      }
+      if (event.key === "," || event.key === "Enter") {
+        event.preventDefault();
+        commitYoutubeDraft(block, valueOf(target));
+      } else if (event.key === "Backspace" && !valueOf(target)) {
+        const blockState = getBlockState(block);
+        blockState.youtubeUrls.pop();
+        renderBlock(block);
+        syncPage1State(page1Refs());
+      }
+    });
+
+    block.addEventListener("blur", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.matches("[data-role='youtube-draft']")) {
+        return;
+      }
+      if (valueOf(target).trim()) {
+        commitYoutubeDraft(block, valueOf(target));
+      }
+    }, true);
   }
 
   function updateBlockStatus(block) {
-    const nameInput = findOne(block, ["[data-role='instructor-name']"]);
-    const fileInput = findOne(block, ["[data-role='instructor-files']"]);
-    const youtubeInput = findOne(block, ["[data-role='instructor-youtube']"]);
     const status = findOne(block, ["[data-role='block-status']"]);
+    const blockState = getBlockState(block);
 
-    const hasName = Boolean(nameInput && nameInput.value.trim());
-    const fileCount = fileInput && fileInput.files ? fileInput.files.length : 0;
-    const youtubeCount = youtubeInput ? youtubeInput.value.split(/\n+/).map((line) => line.trim()).filter(Boolean).length : 0;
+    const hasName = Boolean(blockState.instructorName);
+    const fileCount = Array.isArray(blockState.files) ? blockState.files.length : 0;
+    const youtubeCount = Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.length : 0;
     const hasAssets = fileCount > 0 || youtubeCount > 0;
 
     block.dataset.valid = String(hasName && hasAssets);
@@ -805,12 +1115,11 @@
       } else if (hasName && !hasAssets) {
         status.textContent = "자료 대기";
       } else if (!hasName && hasAssets) {
-        status.textContent = "강사명 필요";
+        status.textContent = "강사 선택";
       } else {
         status.textContent = `파일 ${fileCount}개 · 링크 ${youtubeCount}개`;
       }
     }
-    syncPage1State($(SELECTORS.page1Workspace), $(SELECTORS.selectedCourseId), $(SELECTORS.selectedCourseName), $(SELECTORS.submitAnalysis), ensureHiddenInput($(SELECTORS.analysisForm), "instructor_manifest"));
   }
 
   function getInstructorManifest() {
@@ -820,11 +1129,551 @@
   }
 
   function canSubmitAnalysis() {
-    if (!state.page1.selectedCourseId) {
+    if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
       return false;
     }
     const validBlocks = state.page1.blocks.filter((block) => block.dataset.valid === "true");
-    return validBlocks.length >= 2;
+    return validBlocks.length >= 1;
+  }
+
+  function normalizeCoursePayload(course) {
+    return {
+      ...course,
+      instructor_names: Array.isArray(course?.instructor_names)
+        ? course.instructor_names.map((item) => String(item || "").trim()).filter(Boolean)
+        : [],
+      sections: Array.isArray(course?.sections) ? course.sections : [],
+    };
+  }
+
+  function page1Refs() {
+    return {
+      courseModal: $(SELECTORS.courseModal),
+      courseListPanel: $(SELECTORS.courseListPanel),
+      courseForm: $(SELECTORS.courseForm),
+      analysisForm: $(SELECTORS.analysisForm),
+      workspace: $(SELECTORS.page1Workspace),
+      emptyState: $(SELECTORS.page1EmptyState),
+      blocksRoot: $(SELECTORS.instructorBlocks),
+      template: $(SELECTORS.instructorBlockTemplate),
+      addBlockButton: $(SELECTORS.addInstructorBlock),
+      submitButton: $(SELECTORS.submitAnalysis),
+      saveButton: $(SELECTORS.courseSaveButton),
+      previewState: $(SELECTORS.coursePreviewState),
+      previewTable: $(SELECTORS.coursePreviewTable),
+      selectedCourseId: $(SELECTORS.selectedCourseId),
+      selectedCourseName: $(SELECTORS.selectedCourseName),
+      manifestInput: ensureHiddenInput($(SELECTORS.analysisForm), "instructor_manifest"),
+      courseFileInput: findFirst($(SELECTORS.courseForm), ["input[type='file'][name='curriculum_pdf']", "[data-testid='course-curriculum-file']"]),
+      courseNameInput: findFirst($(SELECTORS.courseForm), ["input[name='course_name']", "[data-testid='course-name']"]),
+      courseFileTokens: $(SELECTORS.courseFileTokens),
+      courseInstructorInput: $(SELECTORS.courseInstructorInput),
+      courseInstructorTokens: $(SELECTORS.courseInstructorTokens),
+      courseInstructorNamesJson: $(SELECTORS.courseInstructorNamesJson),
+    };
+  }
+
+  function canSaveCourse(refs) {
+    const courseName = refs.courseNameInput ? refs.courseNameInput.value.trim() : "";
+    return Boolean(courseName && state.page1.preview && state.page1.previewFile && state.page1.draftInstructorNames.length >= 1);
+  }
+
+  function updateCourseSaveButtonState(refs) {
+    if (refs.courseInstructorNamesJson) {
+      refs.courseInstructorNamesJson.value = JSON.stringify(state.page1.draftInstructorNames);
+    }
+    if (refs.saveButton) {
+      setButtonDisabled(refs.saveButton, !canSaveCourse(refs));
+    }
+  }
+
+  function handleCourseFileSelection(refs) {
+    const file = refs.courseFileInput?.files?.[0] || null;
+    setCourseDraftFile(file, refs);
+  }
+
+  function setCourseDraftFile(file, refs) {
+    if (!file) {
+      clearCourseDraftFile(refs);
+      return;
+    }
+    state.page1.preview = null;
+    state.page1.previewFile = file;
+    replaceSingleFile(refs.courseFileInput, file);
+    renderCourseFileTokens(refs);
+    previewCourse(refs.courseForm, refs.courseFileInput, refs.courseNameInput, refs.previewState, refs.previewTable, refs.saveButton).then(() => {
+      updateCourseSaveButtonState(refs);
+    });
+  }
+
+  function clearCourseDraftFile(refs) {
+    state.page1.preview = null;
+    state.page1.previewFile = null;
+    replaceSingleFile(refs.courseFileInput, null);
+    const sectionsInput = $("#course-sections-json");
+    const rawTextInput = $("#course-raw-curriculum-text");
+    if (sectionsInput) {
+      sectionsInput.value = "[]";
+    }
+    if (rawTextInput) {
+      rawTextInput.value = "";
+    }
+    renderCourseFileTokens(refs);
+    setStatus(refs.previewState, "PDF를 업로드하면 과정 초안이 준비됩니다.");
+    updateCourseSaveButtonState(refs);
+  }
+
+  function renderCourseFileTokens(refs) {
+    if (!refs.courseFileTokens) {
+      return;
+    }
+    refs.courseFileTokens.innerHTML = "";
+    if (!state.page1.previewFile) {
+      return;
+    }
+    refs.courseFileTokens.appendChild(createChip(state.page1.previewFile.name, {
+      removeAttr: "data-remove-course-file",
+      removeValue: "0",
+    }));
+  }
+
+  function commitCourseInstructorDraft(rawValue, refs) {
+    const nextValues = String(rawValue || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!nextValues.length) {
+      refs.courseInstructorInput.value = "";
+      return;
+    }
+    nextValues.forEach((name) => {
+      if (!state.page1.draftInstructorNames.includes(name)) {
+        state.page1.draftInstructorNames.push(name);
+      }
+    });
+    refs.courseInstructorInput.value = "";
+    renderCourseInstructorTokens(refs);
+    updateCourseSaveButtonState(refs);
+  }
+
+  function renderCourseInstructorTokens(refs) {
+    if (!refs.courseInstructorTokens) {
+      return;
+    }
+    refs.courseInstructorTokens.innerHTML = "";
+    state.page1.draftInstructorNames.forEach((name, index) => {
+      refs.courseInstructorTokens.appendChild(createChip(name, {
+        removeAttr: "data-remove-course-instructor",
+        removeValue: String(index),
+      }));
+    });
+    if (refs.courseInstructorNamesJson) {
+      refs.courseInstructorNamesJson.value = JSON.stringify(state.page1.draftInstructorNames);
+    }
+  }
+
+  function resetCourseDraft(refs) {
+    state.page1.preview = null;
+    state.page1.previewFile = null;
+    state.page1.draftInstructorNames = [];
+    if (refs.courseForm) {
+      refs.courseForm.reset();
+    }
+    if (refs.previewTable) {
+      refs.previewTable.innerHTML = "";
+    }
+    const sectionsInput = $("#course-sections-json");
+    const rawTextInput = $("#course-raw-curriculum-text");
+    if (sectionsInput) {
+      sectionsInput.value = "[]";
+    }
+    if (rawTextInput) {
+      rawTextInput.value = "";
+    }
+    renderCourseFileTokens(refs);
+    renderCourseInstructorTokens(refs);
+    setStatus(refs.previewState, "PDF를 업로드하면 과정 초안이 준비됩니다.");
+    updateCourseSaveButtonState(refs);
+  }
+
+  function resetPage1Blocks(blocksRoot, template, analysisForm, manifestInput) {
+    rebuildPage1Blocks(blocksRoot, template, analysisForm, manifestInput, [createEmptyDraftBlock()]);
+  }
+
+  function rebuildPage1Blocks(blocksRoot, template, analysisForm, manifestInput, snapshots = []) {
+    if (!blocksRoot) {
+      return;
+    }
+    blocksRoot.innerHTML = "";
+    state.page1.blocks = [];
+    state.page1.blockData = {};
+    state.page1.menuOpenBlockId = "";
+    state.page1.instructorMenuOpenBlockId = "";
+    const blockSnapshots = Array.isArray(snapshots) && snapshots.length ? snapshots : [createEmptyDraftBlock()];
+    blockSnapshots.forEach((snapshot, index) => {
+      const blockId = uniqueId("instructor");
+      const block = createInstructorBlock(blockId, index + 1, template);
+      blocksRoot.appendChild(block);
+      state.page1.blocks.push(block);
+      bindInstructorBlock(block, index + 1);
+      const blockState = getBlockState(block);
+      blockState.mode = snapshot?.mode === "youtube" ? "youtube" : "files";
+      blockState.instructorName = String(snapshot?.instructorName || "").trim();
+      blockState.files = Array.isArray(snapshot?.files) ? snapshot.files.slice() : [];
+      blockState.youtubeUrls = Array.isArray(snapshot?.youtubeUrls) ? snapshot.youtubeUrls.slice() : [];
+      renderBlock(block);
+    });
+    if (analysisForm && manifestInput) {
+      manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
+    }
+  }
+
+  function getBlockState(block) {
+    const blockId = block?.dataset?.blockId || "";
+    state.page1.blockData[blockId] = state.page1.blockData[blockId] || {
+      mode: "files",
+      instructorName: "",
+      files: [],
+      youtubeUrls: [],
+    };
+    return state.page1.blockData[blockId];
+  }
+
+  function renderBlock(block) {
+    if (!(block instanceof HTMLElement)) {
+      return;
+    }
+    const blockState = getBlockState(block);
+    const trigger = findOne(block, ["[data-action='toggle-mode-menu']"]);
+    const menu = findOne(block, ["[data-role='mode-menu']"]);
+    const filesSurface = findOne(block, ["[data-role='files-surface']"]);
+    const youtubeSurface = findOne(block, ["[data-role='youtube-surface']"]);
+    const youtubeDraft = findOne(block, ["[data-role='youtube-draft']"]);
+    const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
+    const fileList = findOne(block, ["[data-role='file-list']"]);
+    const youtubeList = findOne(block, ["[data-role='youtube-token-list']"]);
+    const instructorInput = findOne(block, ["[data-role='instructor-name']"]);
+    const instructorTrigger = findOne(block, ["[data-action='toggle-instructor-menu']"]);
+    const instructorMenu = findOne(block, ["[data-role='instructor-menu']"]);
+    const fileTap = findOne(block, ["[data-action='open-file-picker']"]);
+
+    if (trigger) {
+      trigger.classList.toggle("is-youtube", blockState.mode === "youtube");
+      if (blockState.mode !== "youtube") {
+        trigger.textContent = "+";
+      } else {
+        trigger.textContent = "";
+      }
+    }
+    if (menu) {
+      menu.hidden = state.page1.menuOpenBlockId !== block.dataset.blockId;
+    }
+    if (filesSurface) {
+      filesSurface.hidden = blockState.mode !== "files";
+    }
+    if (youtubeSurface) {
+      youtubeSurface.hidden = blockState.mode !== "youtube";
+    }
+    if (youtubeHidden) {
+      youtubeHidden.value = blockState.youtubeUrls.join("\n");
+    }
+    if (youtubeDraft) {
+      youtubeDraft.value = youtubeDraft.value || "";
+    }
+    if (fileList) {
+      renderBlockFiles(block, fileList);
+    }
+    if (youtubeList) {
+      renderBlockYoutubeUrls(block, youtubeList);
+    }
+    updateBlockPrompts(block, fileTap, youtubeDraft, blockState);
+    if (instructorInput && instructorTrigger && instructorMenu) {
+      populateBlockInstructorMenu(block, instructorInput, instructorTrigger, instructorMenu);
+    }
+    syncBlockFileInput(block);
+    updateBlockStatus(block);
+  }
+
+  function updateBlockPrompts(block, fileTap, youtubeDraft, blockState) {
+    const hasCourse = Boolean(state.page1.selectedCourseId);
+    if (fileTap) {
+      fileTap.textContent = hasCourse
+        ? "강의 자료를 드래그하거나 클릭해 업로드"
+        : "과정을 먼저 선택하거나 추가하세요";
+    }
+    if (youtubeDraft) {
+      youtubeDraft.placeholder = hasCourse
+        ? "유튜브 링크를 입력하고 콤마를 누르세요"
+        : "과정을 먼저 선택하거나 추가하세요";
+    }
+    block.dataset.empty = String(!hasCourse);
+    block.dataset.mode = blockState.mode;
+  }
+
+  function renderBlockFiles(block, container) {
+    const blockState = getBlockState(block);
+    container.innerHTML = "";
+    blockState.files.forEach((file, index) => {
+      container.appendChild(createChip(file.name, {
+        removeAttr: "data-remove-file-index",
+        removeValue: String(index),
+      }));
+    });
+  }
+
+  function renderBlockYoutubeUrls(block, container) {
+    const blockState = getBlockState(block);
+    container.innerHTML = "";
+    blockState.youtubeUrls.forEach((url, index) => {
+      container.appendChild(createChip(url, {
+        removeAttr: "data-remove-youtube-index",
+        removeValue: String(index),
+      }));
+    });
+  }
+
+  function populateBlockInstructorMenu(block, input, trigger, menu) {
+    const roster = currentCourseInstructorNames();
+    const blockState = getBlockState(block);
+    if (blockState.instructorName && !roster.includes(blockState.instructorName)) {
+      blockState.instructorName = "";
+    }
+    const usedNames = new Set(
+      state.page1.blocks
+        .filter((item) => item !== block)
+        .map((item) => getBlockState(item).instructorName)
+        .filter(Boolean),
+    );
+    input.value = blockState.instructorName || "";
+    trigger.classList.toggle(CSS.active, Boolean(blockState.instructorName));
+    trigger.setAttribute("aria-expanded", String(state.page1.instructorMenuOpenBlockId === block.dataset.blockId));
+    trigger.setAttribute("title", blockState.instructorName || "강사 선택");
+    trigger.setAttribute("aria-label", blockState.instructorName ? `강사 선택됨: ${blockState.instructorName}` : "강사 선택");
+    menu.hidden = state.page1.instructorMenuOpenBlockId !== block.dataset.blockId;
+    menu.innerHTML = "";
+
+    if (!roster.length) {
+      const empty = document.createElement("div");
+      empty.className = "instructor-picker-menu__empty";
+      empty.textContent = "등록 강사 없음";
+      menu.appendChild(empty);
+      return;
+    }
+
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.className = "instructor-picker-menu__item";
+    resetButton.textContent = "선택 해제";
+    resetButton.setAttribute("data-action", "select-instructor");
+    resetButton.setAttribute("data-instructor-value", "");
+    resetButton.classList.toggle(CSS.selected, !blockState.instructorName);
+    menu.appendChild(resetButton);
+
+    roster.forEach((name) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "instructor-picker-menu__item";
+      option.textContent = name;
+      option.setAttribute("data-action", "select-instructor");
+      option.setAttribute("data-instructor-value", name);
+      option.disabled = usedNames.has(name);
+      option.classList.toggle(CSS.selected, blockState.instructorName === name);
+      menu.appendChild(option);
+    });
+  }
+
+  function currentCourseInstructorNames() {
+    return Array.isArray(state.page1.selectedCourse?.instructor_names) ? state.page1.selectedCourse.instructor_names : [];
+  }
+
+  function toggleModeMenu(block) {
+    const blockId = block.dataset.blockId || "";
+    state.page1.menuOpenBlockId = state.page1.menuOpenBlockId === blockId ? "" : blockId;
+    state.page1.instructorMenuOpenBlockId = "";
+    state.page1.blocks.forEach((item) => renderBlock(item));
+  }
+
+  function toggleInstructorMenu(block) {
+    const blockId = block.dataset.blockId || "";
+    state.page1.instructorMenuOpenBlockId = state.page1.instructorMenuOpenBlockId === blockId ? "" : blockId;
+    state.page1.menuOpenBlockId = "";
+    state.page1.blocks.forEach((item) => renderBlock(item));
+  }
+
+  function closeAllBlockMenus() {
+    if (!state.page1.menuOpenBlockId && !state.page1.instructorMenuOpenBlockId) {
+      return;
+    }
+    state.page1.menuOpenBlockId = "";
+    state.page1.instructorMenuOpenBlockId = "";
+    state.page1.blocks.forEach((block) => renderBlock(block));
+  }
+
+  function switchBlockMode(block, mode) {
+    const blockState = getBlockState(block);
+    blockState.mode = mode === "youtube" ? "youtube" : "files";
+    state.page1.menuOpenBlockId = "";
+    state.page1.instructorMenuOpenBlockId = "";
+    renderBlock(block);
+  }
+
+  function addBlockFiles(block, files) {
+    const blockState = getBlockState(block);
+    const nextFiles = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (!nextFiles.length) {
+      return;
+    }
+    const seen = new Set(blockState.files.map(fileIdentity));
+    nextFiles.forEach((file) => {
+      const identity = fileIdentity(file);
+      if (!seen.has(identity)) {
+        blockState.files.push(file);
+        seen.add(identity);
+      }
+    });
+    renderBlock(block);
+    syncPage1State(page1Refs());
+  }
+
+  function removeBlockFile(block, index) {
+    const blockState = getBlockState(block);
+    if (Number.isNaN(index)) {
+      return;
+    }
+    blockState.files.splice(index, 1);
+    renderBlock(block);
+    syncPage1State(page1Refs());
+  }
+
+  function commitYoutubeDraft(block, rawValue) {
+    const blockState = getBlockState(block);
+    const nextUrls = String(rawValue || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!nextUrls.length) {
+      return;
+    }
+    nextUrls.forEach((url) => {
+      if (!blockState.youtubeUrls.includes(url)) {
+        blockState.youtubeUrls.push(url);
+      }
+    });
+    const draftInput = findOne(block, ["[data-role='youtube-draft']"]);
+    if (draftInput) {
+      draftInput.value = "";
+    }
+    renderBlock(block);
+    syncPage1State(page1Refs());
+  }
+
+  function removeBlockYoutubeUrl(block, index) {
+    const blockState = getBlockState(block);
+    if (Number.isNaN(index)) {
+      return;
+    }
+    blockState.youtubeUrls.splice(index, 1);
+    renderBlock(block);
+    syncPage1State(page1Refs());
+  }
+
+  function syncBlockFileInput(block) {
+    const fileInput = findOne(block, ["[data-role='instructor-files']"]);
+    if (!fileInput) {
+      return;
+    }
+    const blockState = getBlockState(block);
+    setFilesOnInput(fileInput, blockState.files);
+  }
+
+  function setBlockDisabled(block, disabled) {
+    block.classList.toggle(CSS.disabled, disabled);
+    qsa("button, input, select", block).forEach((element) => {
+      if (element.matches("[data-role='instructor-files']")) {
+        element.disabled = disabled;
+        return;
+      }
+      element.disabled = disabled;
+    });
+  }
+
+  function canAddMoreBlocks() {
+    const roster = currentCourseInstructorNames();
+    if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
+      return false;
+    }
+    return roster.length > state.page1.blocks.length;
+  }
+
+  function replaceSingleFile(input, file) {
+    if (!input) {
+      return;
+    }
+    setFilesOnInput(input, file ? [file] : []);
+  }
+
+  function setFilesOnInput(input, files) {
+    if (!input) {
+      return;
+    }
+    if (typeof DataTransfer !== "function") {
+      return;
+    }
+    const transfer = new DataTransfer();
+    (Array.isArray(files) ? files : []).forEach((file) => {
+      if (file) {
+        transfer.items.add(file);
+      }
+    });
+    input.files = transfer.files;
+  }
+
+  function bindDropzone(node, options = {}) {
+    if (!node) {
+      return;
+    }
+    const onFiles = typeof options.onFiles === "function" ? options.onFiles : () => {};
+    ["dragenter", "dragover"].forEach((eventName) => {
+      node.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        node.classList.add("is-dragover");
+      });
+    });
+    ["dragleave", "dragend"].forEach((eventName) => {
+      node.addEventListener(eventName, () => {
+        node.classList.remove("is-dragover");
+      });
+    });
+    node.addEventListener("drop", (event) => {
+      event.preventDefault();
+      node.classList.remove("is-dragover");
+      const files = Array.from(event.dataTransfer?.files || []);
+      if (files.length) {
+        onFiles(files);
+      }
+    });
+  }
+
+  function createChip(label, options = {}) {
+    const chip = document.createElement("span");
+    chip.className = "lane-chip";
+    const text = document.createElement("span");
+    text.className = "lane-chip__label";
+    text.textContent = label;
+    chip.appendChild(text);
+    if (options.removeAttr) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "lane-chip__remove";
+      remove.textContent = "×";
+      remove.setAttribute(options.removeAttr, options.removeValue || "");
+      chip.appendChild(remove);
+    }
+    return chip;
+  }
+
+  function fileIdentity(file) {
+    return `${file.name}:${file.size}:${file.lastModified}`;
   }
 
   function renderPage2Charts(containers, options = {}) {
@@ -859,8 +1708,7 @@
     const averageSeries = Array.isArray(modeData.average) ? modeData.average : [];
     const instructorSeries = modeData.instructors || {};
     const lineSeries = result.line_series_by_mode?.[state.page2.mode] || result.line_series_by_mode?.combined || {};
-    const lineTarget = Array.isArray(lineSeries.target) ? lineSeries.target : [];
-    const lineInstructor = Array.isArray(lineSeries.instructors?.[state.page2.instructorName]) ? lineSeries.instructors[state.page2.instructorName] : [];
+    const compareNames = resolveComparisonNames(lineSeries.instructors || {}, instructors);
 
     if (options.updateRoseWordcloud !== false) {
       renderChartOrFallback(containers.rose, "rose", buildRoseOption(sections, roseData));
@@ -873,7 +1721,7 @@
     }
 
     if (options.updateLine !== false) {
-      renderChartOrFallback(containers.line, "line", buildLineOption(sections, lineTarget, lineInstructor, state.page2.instructorName));
+      renderChartOrFallback(containers.line, "comparison", buildComparisonOption(sections, lineSeries, compareNames));
     }
   }
 
@@ -882,39 +1730,47 @@
   }
 
   function buildRoseOption(sections, data) {
+    const roseData = (data.length
+      ? data
+      : sections.map((section) => ({
+          name: section.title,
+          value: Number(section.target_weight || 0),
+        }))
+    ).sort((left, right) => Number(right.value || 0) - Number(left.value || 0));
+
     return {
       backgroundColor: "transparent",
       tooltip: { trigger: "item" },
       legend: {
-        bottom: 0,
-        type: "scroll",
+        orient: "vertical",
+        left: "4%",
+        top: "middle",
+        itemWidth: 12,
+        itemHeight: 12,
+        textStyle: {
+          color: "#181d26",
+          fontSize: 12,
+        },
       },
       series: [
         {
           name: "강의 비중",
           type: "pie",
-          radius: ["24%", "74%"],
-          center: ["50%", "45%"],
-          roseType: "radius",
+          radius: ["58%", "82%"],
+          center: ["68%", "48%"],
           itemStyle: {
-            borderRadius: 12,
+            borderRadius: 10,
             borderColor: "#fff",
             borderWidth: 2,
           },
           label: {
-            color: "#23263a",
+            show: false,
           },
-          data: data.length
-            ? data.map((item, index) => ({
-                name: item.name || sections[index]?.title || `대주제 ${index + 1}`,
-                value: Number(item.value || 0),
-                itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
-              }))
-            : sections.map((section, index) => ({
-                name: section.title,
-                value: Number(section.target_weight || 0),
-                itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
-              })),
+          data: roseData.map((item, index) => ({
+            name: item.name || sections[index]?.title || `대주제 ${index + 1}`,
+            value: Math.round(Number(item.value || 0) * 10) / 10,
+            itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
+          })),
         },
       ],
     };
@@ -958,16 +1814,23 @@
         bottom: 0,
         type: "scroll",
       },
-      grid: { left: 8, right: 8, top: 24, bottom: 48, containLabel: true },
-      xAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+      grid: { left: 70, right: 8, top: 12, bottom: 48, containLabel: false },
+      xAxis: { type: "value", max: 100, show: false },
       yAxis: { type: "category", data: ["전체 평균"] },
       series: safeItems.map((item, index) => ({
         name: item.section_title || sections[index]?.title || `대주제 ${index + 1}`,
         type: "bar",
         stack: "average",
-        barWidth: 22,
+        barWidth: 28,
         data: [Math.round((item.share || 0) * 10000) / 100],
-        itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
+        label: {
+          show: true,
+          position: "inside",
+          color: "#fff",
+          fontSize: 11,
+          formatter: "{c}%",
+        },
+        itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length], borderRadius: 999 },
       })),
     };
   }
@@ -976,11 +1839,11 @@
     return {
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
       legend: {
-        bottom: 0,
+        top: 0,
         type: "scroll",
       },
-      grid: { left: 16, right: 16, top: 24, bottom: 56, containLabel: true },
-      xAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+      grid: { left: 86, right: 8, top: 38, bottom: 20, containLabel: false },
+      xAxis: { type: "value", max: 100, show: false },
       yAxis: {
         type: "category",
         data: instructors.map((item) => item.name),
@@ -989,44 +1852,76 @@
         name: section.title,
         type: "bar",
         stack: "instructors",
-        barWidth: 16,
+        barWidth: 26,
         data: instructors.map((instructor) => {
           const series = seriesByInstructor[instructor.name] || [];
           const item = series.find((entry) => entry.section_id === section.id);
           return Math.round((item?.share || 0) * 10000) / 100;
         }),
-        itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
+        label: {
+          show: true,
+          position: "inside",
+          color: "#fff",
+          fontSize: 10,
+          formatter: "{c}%",
+        },
+        itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length], borderRadius: 999 },
       })),
     };
   }
 
-  function buildLineOption(sections, target, instructor, instructorName) {
+  function buildComparisonOption(sections, lineSeries, compareNames) {
     const labels = sections.map((item) => item.title);
-    const targetValues = labels.map((_, index) => Math.round((target[index]?.share || 0) * 10000) / 100);
-    const instructorValues = labels.map((_, index) => Math.round((instructor[index]?.share || 0) * 10000) / 100);
-    const instructorColor = stableColorForKey(instructorName || "selected-instructor");
+    const targetValues = labels.map((_, index) => Math.round((lineSeries.target?.[index]?.share || 0) * 10000) / 100);
+    const selectedNames = compareNames.length ? compareNames : Object.keys(lineSeries.instructors || {});
+    const radarSeries = [
+      {
+        value: targetValues,
+        name: "목표 (강의계획서)",
+        itemStyle: { color: "#181d26" },
+        lineStyle: { type: "dashed", width: 2 },
+        areaStyle: { opacity: 0.04 },
+      },
+      ...selectedNames.map((name) => ({
+        value: labels.map((_, index) => Math.round((lineSeries.instructors?.[name]?.[index]?.share || 0) * 10000) / 100),
+        name,
+        itemStyle: { color: stableColorForKey(name) },
+        lineStyle: { width: 3 },
+        areaStyle: { opacity: 0.08 },
+      })),
+    ];
+
     return {
-      tooltip: { trigger: "axis" },
-      legend: { bottom: 0 },
-      grid: { left: 20, right: 20, top: 24, bottom: 52, containLabel: true },
-      xAxis: { type: "category", data: labels },
-      yAxis: { type: "value", max: 100, axisLabel: { formatter: "{value}%" } },
+      tooltip: {
+        trigger: "item",
+        formatter(params) {
+          const items = Array.isArray(params.value) ? params.value : [];
+          return `<strong>${params.name}</strong><br>${items.map((value, index) => `${labels[index]}: ${Number(value || 0).toFixed(1)}%`).join("<br>")}`;
+        },
+      },
+      legend: {
+        bottom: 0,
+        type: "scroll",
+      },
+      radar: {
+        radius: "62%",
+        indicator: labels.map((label) => ({ name: label, max: 100 })),
+        splitArea: {
+          areaStyle: {
+            color: ["rgba(248,250,252,0.7)", "rgba(255,255,255,0.92)"],
+          },
+        },
+        axisName: {
+          color: "#181d26",
+          fontSize: 12,
+          fontWeight: 500,
+        },
+      },
       series: [
         {
-          name: "목표",
-          type: "line",
-          smooth: true,
-          data: targetValues,
-          lineStyle: { width: 3, color: CHART_COLORS[0] },
-          itemStyle: { color: CHART_COLORS[0] },
-        },
-        {
-          name: instructorName || "선택 강사",
-          type: "line",
-          smooth: true,
-          data: instructorValues,
-          lineStyle: { width: 3, color: instructorColor },
-          itemStyle: { color: instructorColor },
+          type: "radar",
+          symbolSize: 6,
+          data: radarSeries,
         },
       ],
     };
@@ -1078,6 +1973,14 @@
         const row = document.createElement("div");
         row.className = "chart-fallback-row";
         row.textContent = `${item.name}: ${(item.data || []).map((value) => Number(value || 0).toFixed(1)).join(" · ")}`;
+        wrapper.appendChild(row);
+      });
+    } else if (kind === "comparison") {
+      const series = option.series?.[0]?.data || [];
+      series.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "chart-fallback-row";
+        row.textContent = `${item.name}: ${(item.value || []).map((value) => Number(value || 0).toFixed(1)).join(" · ")}`;
         wrapper.appendChild(row);
       });
     } else {
@@ -1314,6 +2217,24 @@
     state.page2.instructorIndex = nextIndex;
     state.page2.instructorName = instructors[nextIndex]?.name || instructors[0].name;
     updatePage2Charts(containers, options);
+  }
+
+  function syncComparisonSelection(compareInputs, compareAll) {
+    const inputs = Array.isArray(compareInputs) ? compareInputs : [];
+    state.page2.compareNames = inputs.filter((input) => input.checked).map((input) => input.value);
+    if (compareAll) {
+      compareAll.checked = Boolean(inputs.length) && inputs.every((input) => input.checked);
+    }
+  }
+
+  function resolveComparisonNames(seriesByInstructor, instructors) {
+    const availableNames = Array.isArray(instructors) ? instructors.map((item) => item.name) : [];
+    const seriesNames = Object.keys(seriesByInstructor || {});
+    const selectedNames = (state.page2.compareNames || []).filter((name) => seriesNames.includes(name));
+    if (selectedNames.length) {
+      return selectedNames;
+    }
+    return availableNames.filter((name) => seriesNames.includes(name));
   }
 
   function getSelectedInstructorRecord(instructors) {
