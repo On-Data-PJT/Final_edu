@@ -207,16 +207,28 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 분석 방식:
   - `Page 1`: 과정 선택 + 강사 자료 등록
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행
+  - YouTube metadata/playlist 해석과 transcript fetch 는 process-local throttle 과 object-storage 기반 shared cache 를 사용한다
+  - web `prepare`와 worker 본분석은 같은 cache 경로를 재사용해야 하며, 같은 YouTube URL의 반복 호출을 줄이는 것이 기본 정책이다
   - Job enqueue
   - 배경 분석
-  - `Page 2`: 4단 결과 페이지
+  - `Page 2`: `sidebar + 4 panel` 대시보드 결과 페이지
+    - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 dataset source 를 제어
+    - 결과 렌더는 저장된 course 와 실제 업로드/YouTube 분석 결과만 사용
   - `Page 3`: 솔루션 인사이트 페이지
+- 결과 payload contract:
+  - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `line_series_by_mode`를 사용
+  - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
   - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
   - 솔루션 인사이트는 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
   - 현재 기본 insight model 은 `gpt-5.4-mini`
 - 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
+- YouTube throttle / cache env:
+  - `FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS`
+  - `FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS`
+  - `FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS`
+  - web / worker 둘 다 같은 값을 쓰는 것을 기본값으로 본다
 - 저장소:
   - 프로덕션: `Render Web + Worker + Key Value + Cloudflare R2`
   - 로컬 개발: `inline/local` fallback 허용

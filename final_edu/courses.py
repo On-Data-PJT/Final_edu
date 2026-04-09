@@ -281,7 +281,11 @@ def _preview_with_openai(
     if not settings.openai_api_key or OpenAI is None:
         return None
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = OpenAI(
+        api_key=settings.openai_api_key,
+        timeout=settings.curriculum_preview_timeout_seconds,
+        max_retries=0,
+    )
     candidate_excerpt = _build_preview_candidate_excerpt(page_records, settings)
     if not candidate_excerpt:
         return CurriculumPreviewResult(

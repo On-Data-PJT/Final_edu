@@ -25,6 +25,11 @@ from final_edu.models import (
     InstructorSummary,
     SectionCoverage,
 )
+from final_edu.storage import ObjectStorage
+from final_edu.youtube_cache import (
+    YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE,
+    has_youtube_request_limit_warning,
+)
 from final_edu.utils import (
     build_chunks,
     cosine_similarity,
@@ -37,6 +42,13 @@ from final_edu.utils import (
 SECTION_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[\.\)]?)\s*")
 MATERIAL_SOURCE_TYPES = {"pdf", "pptx", "text"}
 SPEECH_SOURCE_TYPES = {"youtube"}
+RESULT_MODES = ("combined", "material", "speech")
+MODE_SOURCE_FILTERS = {
+    "combined": None,
+    "material": MATERIAL_SOURCE_TYPES,
+    "speech": SPEECH_SOURCE_TYPES,
+}
+NO_ANALYZABLE_TEXT_ERROR_MESSAGE = "분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요."
 
 
 class InsightCardSchema(BaseModel):
@@ -52,6 +64,12 @@ class InsightBundleSchema(BaseModel):
     cards: list[InsightCardSchema] = Field(min_length=5, max_length=5)
 
 
+def _analysis_no_text_error(warnings: list[str]) -> str:
+    if has_youtube_request_limit_warning(warnings):
+        return YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE
+    return NO_ANALYZABLE_TEXT_ERROR_MESSAGE
+
+
 def analyze_submissions(
     *,
     course_id: str,
@@ -59,6 +77,7 @@ def analyze_submissions(
     sections: list[CurriculumSection],
     submissions: list[InstructorSubmission],
     settings: Settings,
+    storage: ObjectStorage | None = None,
     progress_callback=None,
     analysis_mode: str = "auto",
 ) -> AnalysisRun:
@@ -76,6 +95,7 @@ def analyze_submissions(
             sections=normalized_sections,
             submissions=active_submissions,
             settings=settings,
+            storage=storage,
             started=started,
             progress_callback=progress_callback,
         )
@@ -116,7 +136,12 @@ def analyze_submissions(
                 )
 
         for youtube_url in submission.youtube_urls:
-            source, segments, source_warnings = extract_youtube_asset(youtube_url, submission.name)
+            source, segments, source_warnings = extract_youtube_asset(
+                youtube_url,
+                submission.name,
+                settings=settings,
+                storage=storage,
+            )
             warnings.extend(source_warnings)
             instructor_warnings[submission.name].extend(source_warnings)
             processed_youtube_videos += 1
@@ -156,7 +181,7 @@ def analyze_submissions(
     deduped_chunks, dedupe_warnings = _dedupe_chunks(all_chunks)
     warnings.extend(dedupe_warnings)
     if not deduped_chunks:
-        raise ValueError("분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요.")
+        raise ValueError(_analysis_no_text_error(warnings))
 
     _emit_progress(
         progress_callback,
@@ -183,11 +208,16 @@ def analyze_submissions(
         submissions=active_submissions,
         assignments=assignments,
     )
-    keywords_by_instructor = _build_keywords_by_instructor(
+    rose_series_by_mode = _build_rose_series_by_mode(
+        mode_series=mode_series,
+        sections=normalized_sections,
+    )
+    keywords_by_mode = _build_keywords_by_mode(
         chunks=deduped_chunks,
         sections=normalized_sections,
     )
-    rose_series_by_instructor = _build_rose_series(summaries)
+    keywords_by_instructor = keywords_by_mode.get("combined", {})
+    rose_series_by_instructor = rose_series_by_mode.get("combined", {})
     _emit_progress(
         progress_callback,
         phase="insight_generating",
@@ -231,7 +261,9 @@ def analyze_submissions(
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
+        keywords_by_mode=keywords_by_mode,
         rose_series_by_instructor=rose_series_by_instructor,
+        rose_series_by_mode=rose_series_by_mode,
         line_series_by_mode=line_series_by_mode,
         insights=insights,
         insight_generation_mode=insight_generation_mode,
@@ -246,6 +278,7 @@ def _analyze_submissions_lexical_streaming(
     sections: list[CurriculumSection],
     submissions: list[InstructorSubmission],
     settings: Settings,
+    storage: ObjectStorage | None,
     started: float,
     progress_callback=None,
 ) -> AnalysisRun:
@@ -256,8 +289,12 @@ def _analyze_submissions_lexical_streaming(
     processed_youtube_videos = 0
     caption_success_count = 0
     caption_failure_count = 0
-    keyword_counters: dict[str, Counter[str]] = defaultdict(Counter)
-    off_curriculum_counters: dict[str, Counter[str]] = defaultdict(Counter)
+    keyword_counters_by_mode: dict[str, dict[str, Counter[str]]] = {
+        mode: defaultdict(Counter) for mode in RESULT_MODES
+    }
+    off_curriculum_counters_by_mode: dict[str, dict[str, Counter[str]]] = {
+        mode: defaultdict(Counter) for mode in RESULT_MODES
+    }
     curriculum_tokens = set()
     for section in sections:
         curriculum_tokens.update(tokenize(section.search_text))
@@ -295,14 +332,19 @@ def _analyze_submissions_lexical_streaming(
                 dedupe_seen=dedupe_seen,
                 mode_aggregates=mode_aggregates,
                 evidence_map=evidence_map,
-                keyword_counters=keyword_counters,
-                off_curriculum_counters=off_curriculum_counters,
+                keyword_counters_by_mode=keyword_counters_by_mode,
+                off_curriculum_counters_by_mode=off_curriculum_counters_by_mode,
                 curriculum_tokens=curriculum_tokens,
                 max_evidence=settings.max_evidence_per_section,
             )
 
         for youtube_url in submission.youtube_urls:
-            source, segments, source_warnings = extract_youtube_asset(youtube_url, submission.name)
+            source, segments, source_warnings = extract_youtube_asset(
+                youtube_url,
+                submission.name,
+                settings=settings,
+                storage=storage,
+            )
             warnings.extend(source_warnings)
             instructor_warnings[submission.name].extend(source_warnings)
             processed_youtube_videos += 1
@@ -318,8 +360,8 @@ def _analyze_submissions_lexical_streaming(
                     dedupe_seen=dedupe_seen,
                     mode_aggregates=mode_aggregates,
                     evidence_map=evidence_map,
-                    keyword_counters=keyword_counters,
-                    off_curriculum_counters=off_curriculum_counters,
+                    keyword_counters_by_mode=keyword_counters_by_mode,
+                    off_curriculum_counters_by_mode=off_curriculum_counters_by_mode,
                     curriculum_tokens=curriculum_tokens,
                     max_evidence=settings.max_evidence_per_section,
                 )
@@ -341,7 +383,7 @@ def _analyze_submissions_lexical_streaming(
 
     combined_aggregates = mode_aggregates["combined"]
     if not any(combined_aggregates.get(submission.name, {}).get("total_tokens", 0) for submission in submissions):
-        raise ValueError("분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요.")
+        raise ValueError(_analysis_no_text_error(warnings))
 
     _emit_progress(
         progress_callback,
@@ -367,8 +409,16 @@ def _analyze_submissions_lexical_streaming(
         submissions=submissions,
         mode_aggregates=mode_aggregates,
     )
-    keywords_by_instructor = _build_keywords_from_counters(keyword_counters, off_curriculum_counters)
-    rose_series_by_instructor = _build_rose_series(summaries)
+    rose_series_by_mode = _build_rose_series_by_mode(
+        mode_series=mode_series,
+        sections=sections,
+    )
+    keywords_by_mode = _build_keywords_by_mode_from_counters(
+        grouped_by_mode=keyword_counters_by_mode,
+        grouped_off_curriculum_by_mode=off_curriculum_counters_by_mode,
+    )
+    keywords_by_instructor = keywords_by_mode.get("combined", {})
+    rose_series_by_instructor = rose_series_by_mode.get("combined", {})
     _emit_progress(
         progress_callback,
         phase="insight_generating",
@@ -411,7 +461,9 @@ def _analyze_submissions_lexical_streaming(
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
+        keywords_by_mode=keywords_by_mode,
         rose_series_by_instructor=rose_series_by_instructor,
+        rose_series_by_mode=rose_series_by_mode,
         line_series_by_mode=line_series_by_mode,
         insights=insights,
         insight_generation_mode=insight_generation_mode,
@@ -465,7 +517,7 @@ def _init_mode_aggregates(sections: list[CurriculumSection], submissions: list[I
             }
             for submission in submissions
         }
-        for mode in ("combined", "material", "speech")
+        for mode in RESULT_MODES
     }
 
 
@@ -479,8 +531,8 @@ def _stream_segments_into_aggregates(
     dedupe_seen: set[tuple[str, str]],
     mode_aggregates: dict,
     evidence_map: dict,
-    keyword_counters: dict[str, Counter[str]],
-    off_curriculum_counters: dict[str, Counter[str]],
+    keyword_counters_by_mode: dict[str, dict[str, Counter[str]]],
+    off_curriculum_counters_by_mode: dict[str, dict[str, Counter[str]]],
     curriculum_tokens: set[str],
     max_evidence: int,
 ) -> int:
@@ -499,11 +551,11 @@ def _stream_segments_into_aggregates(
 
         assignment = _assign_chunk_lexical(chunk, sections, lexical_index)
         tokens = tokenize(chunk.text)
-        keyword_counters[instructor_name].update(tokens)
-        off_curriculum_counters[instructor_name].update(
-            token for token in tokens if token not in curriculum_tokens
-        )
         for mode in _modes_for_source_type(chunk.source_type):
+            keyword_counters_by_mode[mode][instructor_name].update(tokens)
+            off_curriculum_counters_by_mode[mode][instructor_name].update(
+                token for token in tokens if token not in curriculum_tokens
+            )
             aggregate = mode_aggregates[mode][instructor_name]
             aggregate["total_tokens"] += chunk.token_count
             if assignment.is_unmapped:
@@ -621,7 +673,7 @@ def _build_mode_series_from_aggregates(
     average_series_by_mode: dict[str, list[dict]] = {}
     line_series_by_mode: dict[str, dict] = {}
 
-    for mode in ("combined", "material", "speech"):
+    for mode in RESULT_MODES:
         aggregates = mode_aggregates.get(mode, {})
         average_values: list[dict] = []
         instructor_values: dict[str, list[dict]] = {}
@@ -692,6 +744,20 @@ def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_
             for token, value in top_off_curriculum
         ]
     return keywords
+
+
+def _build_keywords_by_mode_from_counters(
+    *,
+    grouped_by_mode: dict[str, dict[str, Counter[str]]],
+    grouped_off_curriculum_by_mode: dict[str, dict[str, Counter[str]]],
+) -> dict[str, dict[str, list[dict]]]:
+    return {
+        mode: _build_keywords_from_counters(
+            grouped_by_mode.get(mode, {}),
+            grouped_off_curriculum_by_mode.get(mode, {}),
+        )
+        for mode in RESULT_MODES
+    }
 
 
 def _normalize_target_weights(sections: list[CurriculumSection]) -> list[CurriculumSection]:
@@ -953,16 +1019,11 @@ def _build_mode_series(
     submissions: list[InstructorSubmission],
     assignments: list[ChunkAssignment],
 ) -> tuple[dict, dict, dict]:
-    mode_map = {
-        "combined": None,
-        "material": MATERIAL_SOURCE_TYPES,
-        "speech": SPEECH_SOURCE_TYPES,
-    }
     mode_series: dict[str, dict] = {}
     average_series_by_mode: dict[str, list[dict]] = {}
     line_series_by_mode: dict[str, dict] = {}
 
-    for mode, allowed_types in mode_map.items():
+    for mode, allowed_types in MODE_SOURCE_FILTERS.items():
         summaries = _build_instructor_summaries(
             sections=sections,
             submissions=submissions,
@@ -1021,33 +1082,32 @@ def _build_mode_series(
 
 
 def _build_keywords_by_instructor(chunks, sections: list[CurriculumSection]) -> dict[str, list[dict]]:
+    return _build_keywords_by_mode(chunks, sections).get("combined", {})
+
+
+def _build_keywords_by_mode(chunks, sections: list[CurriculumSection]) -> dict[str, dict[str, list[dict]]]:
     curriculum_tokens = set()
     for section in sections:
         curriculum_tokens.update(tokenize(section.search_text))
 
-    grouped: dict[str, Counter[str]] = defaultdict(Counter)
-    grouped_off_curriculum: dict[str, Counter[str]] = defaultdict(Counter)
+    grouped_by_mode: dict[str, dict[str, Counter[str]]] = {
+        mode: defaultdict(Counter) for mode in RESULT_MODES
+    }
+    grouped_off_curriculum_by_mode: dict[str, dict[str, Counter[str]]] = {
+        mode: defaultdict(Counter) for mode in RESULT_MODES
+    }
     for chunk in chunks:
         tokens = tokenize(chunk.text)
-        grouped[chunk.instructor_name].update(tokens)
-        grouped_off_curriculum[chunk.instructor_name].update(
-            token for token in tokens if token not in curriculum_tokens
-        )
+        for mode in _modes_for_source_type(chunk.source_type):
+            grouped_by_mode[mode][chunk.instructor_name].update(tokens)
+            grouped_off_curriculum_by_mode[mode][chunk.instructor_name].update(
+                token for token in tokens if token not in curriculum_tokens
+            )
 
-    keywords: dict[str, list[dict]] = {}
-    for instructor_name, counts in grouped.items():
-        top_keywords = counts.most_common(25)
-        top_off_curriculum = grouped_off_curriculum[instructor_name].most_common(15)
-        keywords[instructor_name] = [
-            {"text": token, "value": int(value)}
-            for token, value in top_keywords
-        ]
-        keywords[f"{instructor_name}__off_curriculum"] = [
-            {"text": token, "value": int(value)}
-            for token, value in top_off_curriculum
-        ]
-
-    return keywords
+    return _build_keywords_by_mode_from_counters(
+        grouped_by_mode=grouped_by_mode,
+        grouped_off_curriculum_by_mode=grouped_off_curriculum_by_mode,
+    )
 
 
 def _build_rose_series(summaries: list[InstructorSummary]) -> dict[str, list[dict]]:
@@ -1062,6 +1122,29 @@ def _build_rose_series(summaries: list[InstructorSummary]) -> dict[str, list[dic
         ]
         for summary in summaries
     }
+
+
+def _build_rose_series_by_mode(
+    *,
+    mode_series: dict[str, dict],
+    sections: list[CurriculumSection],
+) -> dict[str, dict[str, list[dict]]]:
+    section_titles = {section.id: section.title for section in sections}
+    rose_by_mode: dict[str, dict[str, list[dict]]] = {}
+    for mode in RESULT_MODES:
+        instructor_series = mode_series.get(mode, {}).get("instructors", {})
+        rose_by_mode[mode] = {
+            instructor_name: [
+                {
+                    "name": item.get("section_title") or section_titles.get(item.get("section_id", ""), ""),
+                    "value": round(float(item.get("share", 0.0)) * 100, 2),
+                    "section_id": item.get("section_id"),
+                }
+                for item in series_items
+            ]
+            for instructor_name, series_items in instructor_series.items()
+        }
+    return rose_by_mode
 
 
 def _build_insights(

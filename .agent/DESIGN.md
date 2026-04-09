@@ -1,98 +1,129 @@
-# Design System Inspiration of Airtable
+# Design System
 
-## 1. Visual Theme & Atmosphere
+Last Updated: 2026-04-09
 
-Airtable's website is a clean, enterprise-friendly platform that communicates "sophisticated simplicity" through a white canvas with deep navy text (`#181d26`) and Airtable Blue (`#1b61c9`) as the primary interactive accent. The Haas font family (display + text variants) creates a Swiss-precision typography system with positive letter-spacing throughout.
+## 1. Visual Theme
 
-**Key Characteristics:**
-- White canvas with deep navy text (`#181d26`)
-- Airtable Blue (`#1b61c9`) as primary CTA and link color
-- Haas + Haas Groot Disp dual font system
-- Positive letter-spacing on body text (0.08px–0.28px)
-- 12px radius buttons, 16px–32px for cards
-- Multi-layer blue-tinted shadow: `rgba(45,127,249,0.28) 0px 1px 3px`
-- Semantic theme tokens: `--theme_*` CSS variable naming
+- 기준 레퍼런스는 `test` 브랜치의 `final_edu/templates/demo.html`이다.
+- 전체 톤은 **연한 초록 배경 + 흰 카드 + 차분한 슬레이트 텍스트** 조합이다.
+- 제품 인상은 Airtable식 SaaS가 아니라, **교육용 분석 대시보드 프로토타입**에 더 가깝게 유지한다.
+- 결과 화면은 차트를 과하게 장식하지 않고, 카드/패널 바탕과 공간감으로 정리한다.
 
-## 2. Color Palette & Roles
+## 2. Color Palette
 
 ### Primary
-- **Deep Navy** (`#181d26`): Primary text
-- **Airtable Blue** (`#1b61c9`): CTA buttons, links
-- **White** (`#ffffff`): Primary surface
-- **Spotlight** (`rgba(249,252,255,0.97)`): `--theme_button-text-spotlight`
 
-### Semantic
-- **Success Green** (`#006400`): `--theme_success-text`
-- **Weak Text** (`rgba(4,14,32,0.69)`): `--theme_text-weak`
-- **Secondary Active** (`rgba(7,12,20,0.82)`): `--theme_button-text-secondary-active`
+- Canvas: `#f1f8f1`
+- Subtle surface: `#f6fbf6`
+- Card surface: `#ffffff`
+- Deep green accent: `#166534`
+- Hover green: `#f0fdf4`
+- Active green: `#dcfce7`
 
-### Neutral
-- **Dark Gray** (`#333333`): Secondary text
-- **Mid Blue** (`#254fad`): Link/accent blue variant
-- **Border** (`#e0e2e6`): Card borders
-- **Light Surface** (`#f8fafc`): Subtle surface
+### Text
 
-### Shadows
-- **Blue-tinted** (`rgba(0,0,0,0.32) 0px 0px 1px, rgba(0,0,0,0.08) 0px 0px 2px, rgba(45,127,249,0.28) 0px 1px 3px, rgba(0,0,0,0.06) 0px 0px 0px 0.5px inset`)
-- **Soft** (`rgba(15,48,106,0.05) 0px 0px 20px`)
+- Primary text: `#1e293b`
+- Secondary text: `#64748b`
+- Muted text: `#94a3b8`
 
-## 3. Typography Rules
+### Borders And States
 
-### Font Families
-- **Primary**: `Haas`, fallbacks: `-apple-system, system-ui, Segoe UI, Roboto`
-- **Display**: `Haas Groot Disp`, fallback: `Haas`
+- Default border: `#dbe7db`
+- Strong border: `#c3d5c4`
+- Success bg: `rgba(34, 197, 94, 0.12)`
+- Warning bg: `rgba(240, 162, 2, 0.12)`
+- Danger bg: `rgba(165, 68, 68, 0.10)`
 
-### Hierarchy
+### Chart Palette
 
-| Role | Font | Size | Weight | Line Height | Letter Spacing |
-|------|------|------|--------|-------------|----------------|
-| Display Hero | Haas | 48px | 400 | 1.15 | normal |
-| Display Bold | Haas Groot Disp | 48px | 900 | 1.50 | normal |
-| Section Heading | Haas | 40px | 400 | 1.25 | normal |
-| Sub-heading | Haas | 32px | 400–500 | 1.15–1.25 | normal |
-| Card Title | Haas | 24px | 400 | 1.20–1.30 | 0.12px |
-| Feature | Haas | 20px | 400 | 1.25–1.50 | 0.1px |
-| Body | Haas | 18px | 400 | 1.35 | 0.18px |
-| Body Medium | Haas | 16px | 500 | 1.30 | 0.08–0.16px |
-| Button | Haas | 16px | 500 | 1.25–1.30 | 0.08px |
-| Caption | Haas | 14px | 400–500 | 1.25–1.35 | 0.07–0.28px |
+- 대시보드 chart palette 는 demo와 같은 muted multi-color 조합을 쓴다.
+- 기본 순서:
+  - `#2e303b`
+  - `#cd483f`
+  - `#888c67`
+  - `#e89b8d`
+  - `#92c393`
+  - `#edb6c3`
+  - `#b3d3c5`
+  - `#f2e7e7`
 
-## 4. Component Stylings
+## 3. Typography
+
+- 기본 폰트는 `Pretendard Variable`, fallback은 `Noto Sans KR`, `Inter`, system sans-serif.
+- 헤드라인은 과장된 display 대신 묵직한 medium/bold 계층으로 간다.
+- 대시보드 패널 제목은 `18px`, `800` weight 기준으로 통일한다.
+- 본문/설명 텍스트는 `13px~14px`의 조밀한 dashboard density 를 허용한다.
+
+## 4. Components
+
+### Cards And Panels
+
+- 패널은 흰 배경, `20px` radius, 얕은 shadow를 사용한다.
+- 결과 페이지에서는 차트 container 자체보다 바깥 패널이 시각 중심이어야 한다.
+- 차트 영역 내부 보더는 최소화하고, 패널 외곽만 정리한다.
 
 ### Buttons
-- **Primary Blue**: `#1b61c9`, white text, 16px 24px padding, 12px radius
-- **White**: white bg, `#181d26` text, 12px radius, 1px border white
-- **Cookie Consent**: `#1b61c9` bg, 2px radius (sharp)
 
-### Cards: `1px solid #e0e2e6`, 16px–24px radius
-### Inputs: Standard Haas styling
+- Primary button 은 deep green solid를 사용한다.
+- Secondary button 은 흰 배경 + 연한 green border 로 처리한다.
+- icon button 은 원형 유지 가능하지만 Page 1 header icon 은 예외다.
 
-## 5. Layout
-- Spacing: 1–48px (8px base)
-- Radius: 2px (small), 12px (buttons), 16px (cards), 24px (sections), 32px (large), 50% (circles)
+### Segmented Control
 
-## 6. Depth
-- Blue-tinted multi-layer shadow system
-- Soft ambient: `rgba(15,48,106,0.05) 0px 0px 20px`
+- 배경은 `#f1f5f9` 계열의 옅은 neutral capsule을 사용한다.
+- 활성 버튼은 흰색 capsule + 얕은 shadow + green text 를 쓴다.
+- 결과 페이지의 dataset toggle 은 시각적으로 가볍지만 분명해야 한다.
 
-## 7. Do's and Don'ts
-### Do: Use Airtable Blue for CTAs, Haas with positive tracking, 12px radius buttons
-### Don't: Skip positive letter-spacing, use heavy shadows
+### Navigation
 
-## 8. Responsive Behavior
-Breakpoints: 425–1664px (23 breakpoints)
+- Page 2 sidebar 는 흰 카드형 sticky panel 로 처리한다.
+- active item 은 `#dcfce7` 배경과 deep green text 로 강조한다.
+- sub-nav 는 main nav 보다 한 단계 작은 typography 를 쓴다.
 
-## 9. Agent Prompt Guide
-- Text: Deep Navy (`#181d26`)
-- CTA: Airtable Blue (`#1b61c9`)
-- Background: White (`#ffffff`)
-- Border: `#e0e2e6`
+## 5. Page-Specific Rules
 
-## 10. Page 1 Exception
+### Page 1 Exception
 
-- 첫 메인페이지는 기존 카드 대시보드보다 훨씬 단순한 **chat-home shell**로 해석한다.
-- 색상은 dark 전환 없이 이 문서의 기본 화이트 + 블루 계열 토큰을 그대로 따른다.
-- 중앙 composer 는 길고 낮은 rounded capsule 이어야 한다.
-- 배경은 거의 흰색을 유지하되, 아주 약한 블루/그레이 그라데이션만 허용한다.
-- 헤더 우측 아이콘은 icon-only 로 두고 배경 원, 보더 캡슐, 그림자를 두지 않는다.
-- 강조는 큰 면적 색상보다 hover, focus, active 때의 blue accent 로 해결한다.
+- Page 1은 **구조, 크기, interaction contract 를 유지**하고 색감과 재질감만 바꾼다.
+- 금지:
+  - composer lane 구조 변경
+  - modal 구조 변경
+  - 입력 hit area 크기 변경
+  - 버튼 위치/개수 변경
+- 허용:
+  - 배경 그라데이션을 green 계열로 전환
+  - border/shadow/hover 색상 전환
+  - chip / modal / notice / dropzone tone 전환
+
+### Page 2
+
+- Page 2는 `demo.html`의 첫 결과 페이지 구조를 직접 참조한다.
+- 좌측 sticky sidebar + 우측 세로 panel stack 을 기본 골격으로 쓴다.
+- 첫 패널 우측 상단의 dataset toggle 이 페이지 전체 dataset source 를 바꾸는 기준 control 이어야 한다.
+- 강사 이동 UI는 donut 패널 아래 중앙 정렬을 유지한다.
+
+### Page 3
+
+- Page 3는 기존 insight card 구조를 유지하되, Page 2와 같은 green tone 으로 자연스럽게 이어져야 한다.
+- 결과 차트 페이지보다 밀도는 낮추고 카드 가독성을 우선한다.
+
+## 6. Responsive Rules
+
+- desktop 에서는 `sidebar + content` 2열 구조를 유지한다.
+- tablet 이하에서는 sidebar 를 content 위의 full-width panel 로 내린다.
+- mobile 에서는 panel padding 을 줄이고 donut 중심 avatar 크기를 줄인다.
+- Page 1은 mobile 에서도 기존 composer lane 구조를 그대로 유지한다.
+
+## 7. Do / Don't
+
+### Do
+
+- 연한 초록 배경과 흰 패널의 대비를 유지한다.
+- green accent 는 hover, active, CTA, nav selection 에 집중 사용한다.
+- chart 색상은 과포화 대신 muted palette 를 유지한다.
+
+### Don't
+
+- Page 1 레이아웃을 demo sidebar 구조처럼 바꾸지 않는다.
+- Page 2에 샘플 이름, 샘플 비중, 샘플 keyword 같은 fake content 를 남기지 않는다.
+- dark mode, purple bias, heavy glow shadow 를 도입하지 않는다.

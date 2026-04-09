@@ -19,6 +19,12 @@ services:
         value: "20"
       - key: FINAL_EDU_JOB_TIMEOUT_SECONDS
         value: "7200"
+      - key: FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS
+        value: "1.5"
+      - key: FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS
+        value: "86400"
+      - key: FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS
+        value: "604800"
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -55,6 +61,12 @@ services:
         value: "20"
       - key: FINAL_EDU_JOB_TIMEOUT_SECONDS
         value: "7200"
+      - key: FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS
+        value: "1.5"
+      - key: FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS
+        value: "86400"
+      - key: FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS
+        value: "604800"
       - key: REDIS_URL
         fromService:
           type: keyvalue

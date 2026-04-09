@@ -4,13 +4,15 @@ import math
 import time
 from dataclasses import dataclass
 from itertools import islice
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from yt_dlp import YoutubeDL
 
-from final_edu.config import Settings
+from final_edu.config import Settings, get_settings
 from final_edu.extractors import extract_youtube_asset
+from final_edu.storage import ObjectStorage
 from final_edu.utils import count_tokens
+from final_edu.youtube_cache import YoutubeCache, is_youtube_request_limited_error, throttle_youtube_requests
 
 YOUTUBE_HOSTS = {
     "www.youtube.com",
@@ -75,54 +77,22 @@ def canonical_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
+def is_explicit_playlist_url(url: str) -> bool:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").lower()
+    if host not in YOUTUBE_HOSTS:
+        return False
+
+    path = (parsed.path or "").strip("/")
+    query = parse_qs(parsed.query or "")
+    has_video_selector = bool(query.get("v")) or host == "youtu.be" or path.startswith("shorts/") or path.startswith("live/") or path.startswith("embed/")
+    if has_video_selector:
+        return False
+    return path == "playlist" and bool(query.get("list"))
+
+
 def resolve_youtube_input(url: str, *, max_videos: int) -> ResolvedYoutubeInput:
-    normalized_url = str(url or "").strip()
-    if not normalized_url:
-        raise ValueError("빈 YouTube URL입니다.")
-
-    ydl_options = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "extract_flat": "in_playlist",
-        "lazy_playlist": False,
-        "noplaylist": False,
-        "playlistend": max_videos + 1,
-    }
-    with YoutubeDL(ydl_options) as ydl:
-        info = ydl.extract_info(normalized_url, download=False)
-
-    if info is None:
-        raise ValueError(f"{normalized_url}: YouTube 정보를 읽지 못했습니다.")
-
-    entries = list(islice(info.get("entries") or [], max_videos + 1))
-    if entries:
-        total_count = int(info.get("playlist_count") or len(entries))
-        if total_count > max_videos or len(entries) > max_videos:
-            raise ValueError(
-                f"{normalized_url}: 재생목록 영상 수가 현재 지원 상한 {max_videos}개를 초과합니다."
-            )
-        videos = [_normalize_video_entry(entry) for entry in entries]
-        return ResolvedYoutubeInput(
-            input_url=normalized_url,
-            kind="playlist",
-            title=str(info.get("title") or "YouTube Playlist"),
-            source_id=str(info.get("id") or ""),
-            videos=[video for video in videos if video.video_id],
-            total_video_count=total_count,
-        )
-
-    video = _normalize_video_entry(info)
-    if not video.video_id:
-        raise ValueError(f"{normalized_url}: 올바른 YouTube 영상 ID를 찾지 못했습니다.")
-    return ResolvedYoutubeInput(
-        input_url=normalized_url,
-        kind="video",
-        title=video.title,
-        source_id=video.video_id,
-        videos=[video],
-        total_video_count=1,
-    )
+    return _resolve_youtube_input_with_settings(url, max_videos=max_videos, settings=None)
 
 
 def summarize_youtube_inputs(
@@ -131,6 +101,7 @@ def summarize_youtube_inputs(
     settings: Settings,
     instructor_count: int,
     section_count: int,
+    storage: ObjectStorage | None = None,
 ) -> dict:
     resolved_inputs: list[ResolvedYoutubeInput] = []
     warnings: list[str] = []
@@ -144,7 +115,12 @@ def summarize_youtube_inputs(
         if not is_youtube_url(normalized_url):
             warnings.append(f"{normalized_url}: YouTube URL 형식이 아니어서 분석 시 실패할 수 있습니다.")
             continue
-        resolved = resolve_youtube_input(normalized_url, max_videos=settings.playlist_hard_limit)
+        resolved = _resolve_youtube_input_with_settings(
+            normalized_url,
+            max_videos=settings.playlist_hard_limit,
+            settings=settings,
+            storage=storage,
+        )
         resolved_inputs.append(resolved)
         has_playlist = has_playlist or resolved.is_playlist
         expanded_urls.extend(video.url for video in resolved.videos if video.url)
@@ -154,7 +130,11 @@ def summarize_youtube_inputs(
     probe = probe_transcript_samples(
         resolved_inputs,
         sample_size=settings.playlist_probe_sample_size,
+        settings=settings,
+        storage=storage,
     )
+    warnings.extend(probe["warnings"])
+    warnings = _dedupe_strings(warnings)
     estimated_tokens = _estimate_transcript_tokens(probe, total_duration_seconds, expanded_video_count)
     estimated_chunks = int(math.ceil(estimated_tokens / max(1, settings.chunk_target_tokens))) if estimated_tokens else 0
     recommended_mode = recommend_analysis_mode(
@@ -249,18 +229,31 @@ def estimate_openai_cost_usd(
     return round(embeddings_cost + insights_cost, 4)
 
 
-def probe_transcript_samples(resolved_inputs: list[ResolvedYoutubeInput], *, sample_size: int) -> dict:
+def probe_transcript_samples(
+    resolved_inputs: list[ResolvedYoutubeInput],
+    *,
+    sample_size: int,
+    settings: Settings,
+    storage: ObjectStorage | None = None,
+) -> dict:
     videos = [video for item in resolved_inputs for video in item.videos]
     sampled_videos = _sample_videos(videos, sample_size)
     success_count = 0
     successful_token_total = 0
     successful_duration_total = 0
     fetch_times: list[float] = []
+    warnings: list[str] = []
 
     for video in sampled_videos:
         started = time.perf_counter()
-        _source, segments, _warnings = extract_youtube_asset(video.url, "__probe__")
+        _source, segments, sample_warnings = extract_youtube_asset(
+            video.url,
+            "__probe__",
+            settings=settings,
+            storage=storage,
+        )
         fetch_times.append(max(0.0, time.perf_counter() - started))
+        warnings.extend(sample_warnings)
         if not segments:
             continue
         success_count += 1
@@ -283,6 +276,7 @@ def probe_transcript_samples(resolved_inputs: list[ResolvedYoutubeInput], *, sam
         "success_count": success_count,
         "average_tokens_per_second": average_tokens_per_second,
         "average_fetch_seconds": average_fetch_seconds,
+        "warnings": _dedupe_strings(warnings),
     }
 
 
@@ -327,3 +321,146 @@ def _sample_videos(videos: list[ResolvedYoutubeVideo], sample_size: int) -> list
     for video in picked:
         unique[video.video_id] = video
     return list(unique.values())
+
+
+def _resolve_youtube_input_with_settings(
+    url: str,
+    *,
+    max_videos: int,
+    settings: Settings | None,
+    storage: ObjectStorage | None = None,
+) -> ResolvedYoutubeInput:
+    normalized_url = str(url or "").strip()
+    if not normalized_url:
+        raise ValueError("빈 YouTube URL입니다.")
+
+    treat_as_playlist = is_explicit_playlist_url(normalized_url)
+    info = _extract_youtube_info(
+        normalized_url,
+        max_videos=max_videos,
+        treat_as_playlist=treat_as_playlist,
+        settings=settings,
+        storage=storage,
+    )
+
+    entries = list(islice(info.get("entries") or [], max_videos + 1))
+    if entries:
+        total_count = int(info.get("playlist_count") or len(entries))
+        if total_count > max_videos or len(entries) > max_videos:
+            raise ValueError(
+                f"{normalized_url}: 재생목록 영상 수가 현재 지원 상한 {max_videos}개를 초과합니다."
+            )
+        videos = [_normalize_video_entry(entry) for entry in entries]
+        return ResolvedYoutubeInput(
+            input_url=normalized_url,
+            kind="playlist",
+            title=str(info.get("title") or "YouTube Playlist"),
+            source_id=str(info.get("id") or ""),
+            videos=[video for video in videos if video.video_id],
+            total_video_count=total_count,
+        )
+
+    video = _normalize_video_entry(info)
+    if not video.video_id:
+        raise ValueError(f"{normalized_url}: 올바른 YouTube 영상 ID를 찾지 못했습니다.")
+    return ResolvedYoutubeInput(
+        input_url=normalized_url,
+        kind="video",
+        title=video.title,
+        source_id=video.video_id,
+        videos=[video],
+        total_video_count=1,
+    )
+
+
+def _extract_youtube_info(
+    url: str,
+    *,
+    max_videos: int,
+    treat_as_playlist: bool,
+    settings: Settings | None,
+    storage: ObjectStorage | None = None,
+) -> dict:
+    active_settings = settings or get_settings()
+    cache = YoutubeCache(active_settings, storage=storage)
+    cached_info = cache.get_metadata(
+        url=url,
+        max_videos=max_videos,
+        treat_as_playlist=treat_as_playlist,
+        allow_stale=False,
+    )
+    if cached_info is not None:
+        return dict(cached_info.value or {})
+
+    stale_info = cache.get_metadata(
+        url=url,
+        max_videos=max_videos,
+        treat_as_playlist=treat_as_playlist,
+        allow_stale=True,
+    )
+    ydl_options = _build_ydl_options(max_videos=max_videos, treat_as_playlist=treat_as_playlist)
+    try:
+        throttle_youtube_requests(active_settings)
+        with YoutubeDL(ydl_options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:  # noqa: BLE001
+        if stale_info is not None and is_youtube_request_limited_error(exc):
+            return dict(stale_info.value or {})
+        raise
+
+    if info is None:
+        raise ValueError(f"{url}: YouTube 정보를 읽지 못했습니다.")
+    serialized = _serialize_info_for_cache(info)
+    cache.put_metadata(
+        url=url,
+        max_videos=max_videos,
+        treat_as_playlist=treat_as_playlist,
+        value=serialized,
+    )
+    return serialized
+
+
+def _build_ydl_options(*, max_videos: int, treat_as_playlist: bool) -> dict:
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": not treat_as_playlist,
+    }
+    if treat_as_playlist:
+        options.update(
+            {
+                "extract_flat": "in_playlist",
+                "lazy_playlist": False,
+                "playlistend": max_videos + 1,
+            }
+        )
+    return options
+
+
+def _serialize_info_for_cache(info: dict | None) -> dict:
+    payload = info or {}
+    entries = payload.get("entries") or []
+    if entries:
+        return {
+            "id": str(payload.get("id") or ""),
+            "title": str(payload.get("title") or "YouTube Playlist"),
+            "playlist_count": int(payload.get("playlist_count") or len(entries)),
+            "entries": [
+                {
+                    "id": str((entry or {}).get("id") or (entry or {}).get("url") or ""),
+                    "title": str((entry or {}).get("title") or ""),
+                    "duration": int((entry or {}).get("duration") or 0),
+                }
+                for entry in entries
+            ],
+        }
+    return {
+        "id": str(payload.get("id") or payload.get("url") or ""),
+        "title": str(payload.get("title") or payload.get("alt_title") or "YouTube Video"),
+        "duration": int(payload.get("duration") or payload.get("duration_seconds") or 0),
+    }
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(str(value) for value in values if str(value or "").strip()))

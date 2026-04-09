@@ -10,8 +10,17 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 from youtube_transcript_api import YouTubeTranscriptApi
 
+from final_edu.config import Settings, get_settings
 from final_edu.models import RawTextSegment, SourceAsset, UploadedAsset
+from final_edu.storage import ObjectStorage
 from final_edu.utils import format_seconds, normalize_text
+from final_edu.youtube_cache import (
+    YOUTUBE_STALE_TRANSCRIPT_WARNING,
+    YoutubeCache,
+    is_youtube_request_limited_error,
+    summarize_youtube_fetch_error,
+    throttle_youtube_requests,
+)
 
 YOUTUBE_ID_RE = re.compile(r"(?:v=|youtu\.be/|shorts/)([0-9A-Za-z_-]{11})")
 
@@ -46,7 +55,10 @@ def extract_file_asset(
 def extract_youtube_asset(
     url: str,
     instructor_name: str,
+    settings: Settings | None = None,
+    storage: ObjectStorage | None = None,
 ) -> tuple[SourceAsset, list[RawTextSegment], list[str]]:
+    settings = settings or get_settings()
     video_id = _extract_video_id(url)
     source = SourceAsset(
         id=uuid.uuid4().hex[:12],
@@ -61,14 +73,12 @@ def extract_youtube_asset(
         source.warnings.append(warning)
         return source, [], [warning]
 
+    warnings: list[str] = []
     try:
-        api = YouTubeTranscriptApi()
-        transcript = api.fetch(video_id, languages=["ko", "en", "en-US"])
+        transcript, fetch_warnings = _fetch_youtube_transcript(video_id, settings, storage=storage)
+        warnings.extend(fetch_warnings)
     except Exception as exc:  # noqa: BLE001
-        warning = (
-            f"{url}: 자막을 가져오지 못했습니다. 현재 MVP는 자막 없는 영상의 STT fallback을 "
-            f"기본 지원하지 않습니다. ({exc})"
-        )
+        warning = summarize_youtube_fetch_error(url, exc)
         source.warnings.append(warning)
         return source, [], [warning]
 
@@ -89,10 +99,10 @@ def extract_youtube_asset(
             )
         )
 
-    warnings: list[str] = []
     if not segments:
         warnings.append(f"{url}: 자막은 조회됐지만 실제 분석 가능한 텍스트가 없습니다.")
-        source.warnings.extend(warnings)
+
+    source.warnings.extend(warnings)
 
     return source, segments, warnings
 
@@ -221,6 +231,39 @@ def _shape_texts(shape) -> list[str]:  # noqa: ANN001
     return texts
 
 
+def _fetch_youtube_transcript(
+    video_id: str,
+    settings: Settings,
+    *,
+    storage: ObjectStorage | None = None,
+):
+    cache = YoutubeCache(settings, storage=storage)
+    cached_transcript = cache.get_transcript(video_id=video_id, allow_stale=False)
+    if cached_transcript is not None:
+        return list(cached_transcript.value or []), []
+
+    stale_transcript = cache.get_transcript(video_id=video_id, allow_stale=True)
+    try:
+        throttle_youtube_requests(settings)
+        transcript = YouTubeTranscriptApi().fetch(video_id, languages=["ko", "en", "en-US"])
+    except Exception as exc:  # noqa: BLE001
+        if stale_transcript is not None and is_youtube_request_limited_error(exc):
+            warning = f"{_video_url(video_id)}: {YOUTUBE_STALE_TRANSCRIPT_WARNING}"
+            return list(stale_transcript.value or []), [warning]
+        raise
+
+    serialized = [
+        {
+            "text": _transcript_text(item),
+            "start": _transcript_start(item),
+            "duration": _transcript_duration(item),
+        }
+        for item in transcript
+    ]
+    cache.put_transcript(video_id=video_id, value=serialized)
+    return serialized, []
+
+
 def _extract_video_id(url: str) -> str | None:
     direct_match = YOUTUBE_ID_RE.search(url)
     if direct_match:
@@ -242,3 +285,13 @@ def _transcript_start(item) -> float:  # noqa: ANN001
     if isinstance(item, dict):
         return float(item.get("start", 0.0))
     return float(getattr(item, "start", 0.0))
+
+
+def _transcript_duration(item) -> float:  # noqa: ANN001
+    if isinstance(item, dict):
+        return float(item.get("duration", 0.0))
+    return float(getattr(item, "duration", 0.0))
+
+
+def _video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"

@@ -11,6 +11,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from final_edu.config import get_settings
 from final_edu.courses import (
@@ -89,7 +90,7 @@ def create_app() -> FastAPI:
                 max_basename_chars=72,
             )
             await _write_upload_to_path(curriculum_pdf, temp_path, settings.max_upload_bytes)
-            preview = preview_course_pdf(temp_path, settings.max_sections, settings)
+            preview = await run_in_threadpool(preview_course_pdf, temp_path, settings.max_sections, settings)
         return JSONResponse(preview.to_dict())
 
     @app.post("/courses", response_class=JSONResponse)
@@ -531,6 +532,7 @@ async def _prepare_analysis_request(
                     settings=settings,
                     instructor_count=max(1, len(manifest)),
                     section_count=len(course.sections),
+                    storage=storage,
                 )
                 instructor.youtube_urls = list(youtube_summary["expanded_urls"])
                 has_playlist = has_playlist or bool(youtube_summary["has_playlist"])

@@ -123,6 +123,26 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/courses.py`
   Trigger Commands: `POST /courses/preview`, 시간표형 커리큘럼 PDF preview
   Must Read When: 커리큘럼 preview 추출, PDF text normalization, 시간표형 비중 산출 규칙 변경
+- `DBG-020` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `preview`, `openai`, `timeout`, `threadpool`
+  Related Files: `final_edu/app.py`, `final_edu/courses.py`, `final_edu/config.py`
+  Trigger Commands: `POST /courses/preview`, `GET /health`
+  Must Read When: 과정 preview 경로, OpenAI curriculum preview timeout, page1 loading hang 변경
+- `DBG-021` `active` Lane: `Lead / Integration`
+  Tags: `youtube`, `playlist`, `watch-url`, `prepare-confirm`
+  Related Files: `final_edu/youtube.py`, `final_edu/app.py`
+  Trigger Commands: `POST /analyze/prepare`, `resolve_youtube_input()`
+  Must Read When: YouTube URL 분기 규칙, playlist 확장, prepare 단계의 영상 수 추정 변경
+- `DBG-022` `archived` Lane: `Lead / Integration`
+  Tags: `youtube`, `proxy`, `ipblocked`, `worker`, `prepare-confirm`
+  Related Files: `final_edu/youtube.py`, `final_edu/extractors.py`, `final_edu/config.py`, `render.yaml`
+  Trigger Commands: `POST /analyze/prepare`, transcript fetch, `uv run python -m final_edu.worker`
+  Must Read When: proxy 경로를 다시 도입하거나 과거 transcript unblock 이력을 확인할 때
+- `DBG-023` `active` Lane: `Lead / Integration`
+  Tags: `youtube`, `cache`, `throttle`, `worker`, `prepare-confirm`
+  Related Files: `final_edu/youtube.py`, `final_edu/extractors.py`, `final_edu/youtube_cache.py`, `final_edu/config.py`
+  Trigger Commands: `POST /analyze/prepare`, transcript fetch, `uv run python -m final_edu.worker`
+  Must Read When: YouTube cache key / TTL / request spacing / prepare-worker parity 변경
 
 ## Active Incidents
 
@@ -348,7 +368,99 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - preview 단계에서 전체 텍스트를 바로 한 줄로 눌러버리지 말고, row/column 구조가 필요한 parser 가 있는지 먼저 판단할 것
   - OpenAI classification 이 sparse timetable 을 보수적으로 거절할 수 있으므로, 고신뢰 로컬 parser 가 있으면 reject 조건과 충돌하는지 별도 smoke 로 확인할 것
 
+### DBG-020 `active` Page 1 커리큘럼 preview 가 OpenAI 호출에 막히면 서버 전체가 같이 멈춘 것처럼 보임
+
+- Date: `2026-04-09`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `preview`, `openai`, `timeout`, `threadpool`
+- Related Files: `final_edu/app.py`, `final_edu/courses.py`, `final_edu/config.py`
+- Trigger Commands: `POST /courses/preview`, `GET /health`
+- Must Read When: 과정 preview 경로, OpenAI curriculum preview timeout, page1 loading hang 변경
+- Symptom:
+  - 과정 추가 popup 에서 PDF를 올린 뒤 `커리큘럼 PDF를 분석하는 중입니다.` 문구만 오래 남고 완료되지 않는 것처럼 보였음
+  - 같은 시점에 `GET /health`까지 응답하지 않아 서버 전체가 멈춘 것처럼 보였음
+- Root Cause:
+  - `POST /courses/preview` route 가 async 안에서 `preview_course_pdf()`의 동기 PDF 추출과 OpenAI curriculum preview 호출을 직접 수행했음
+  - OpenAI preview 호출이 지연되면 단일 event loop 가 그 작업에 묶여 다른 요청도 함께 지연될 수 있었음
+  - timeout 이 명시되지 않아 느린 외부 호출을 오래 기다릴 수 있었음
+- Resolution:
+  - `/courses/preview`에서 `preview_course_pdf()`를 `run_in_threadpool()`로 실행해 event loop 를 막지 않도록 변경
+  - OpenAI curriculum preview client 에 `curriculum_preview_timeout_seconds`와 `max_retries=0`을 적용해 지연 시 빠르게 로컬 fallback 으로 전환하도록 보강
+- Prevention Rule:
+  - async route 안에서 PDF 파싱이나 외부 API처럼 오래 걸릴 수 있는 동기 작업을 직접 실행하지 말 것
+  - preview/validation 같은 interactive page1 경로에는 명시적 timeout 을 둘 것
+  - preview 요청이 오래 걸릴 때는 `/health`까지 함께 멈추는지 확인해 event loop blocking 여부를 먼저 의심할 것
+
+### DBG-021 `active` 재생목록 안의 단일 영상 URL을 전체 playlist 로 잘못 확장함
+
+- Date: `2026-04-09`
+- Agent / Lane: `Lead / Integration`
+- Tags: `youtube`, `playlist`, `watch-url`, `prepare-confirm`
+- Related Files: `final_edu/youtube.py`, `final_edu/app.py`
+- Trigger Commands: `POST /analyze/prepare`, `resolve_youtube_input()`
+- Must Read When: YouTube URL 분기 규칙, playlist 확장, prepare 단계의 영상 수 추정 변경
+- Symptom:
+  - `https://www.youtube.com/watch?v=...&list=...&index=...` 같은 URL을 넣으면 단일 영상이 아니라 전체 playlist 로 확장되어 수백 개 영상으로 집계됐음
+- Root Cause:
+  - `resolve_youtube_input()`가 URL 형태를 먼저 구분하지 않고 모든 입력에 `noplaylist=False`를 사용해 `yt_dlp` 기본 playlist 해석에 맡겼음
+  - 그 결과 `watch` URL에 붙은 `list` query 도 전체 playlist 로 해석되었음
+- Resolution:
+  - `playlist?list=...`처럼 사용자가 명시적으로 playlist URL을 준 경우만 playlist 로 취급하도록 `is_explicit_playlist_url()` helper 를 추가
+  - `watch?v=...`, `youtu.be/...`, `shorts/...`, `live/...`, `embed/...` 계열은 `list` query 가 있어도 `noplaylist=True`로 단일 영상만 해석하도록 수정
+- Prevention Rule:
+  - YouTube 입력은 `list` query 존재 여부만으로 playlist 로 판단하지 말 것
+  - `watch` URL과 `playlist` URL을 별도 테스트로 항상 분리 검증할 것
+  - prepare 단계의 예상 영상 수가 비정상적으로 커지면 URL canonicalization 규칙부터 다시 확인할 것
+
+### DBG-023 `active` YouTube rate limit 완화는 prepare / worker shared cache 와 request spacing 이 함께 있어야 함
+
+- Date: `2026-04-09`
+- Agent / Lane: `Lead / Integration`
+- Tags: `youtube`, `cache`, `throttle`, `worker`, `prepare-confirm`
+- Related Files: `final_edu/youtube.py`, `final_edu/extractors.py`, `final_edu/youtube_cache.py`, `final_edu/config.py`
+- Trigger Commands: `POST /analyze/prepare`, transcript fetch, `uv run python -m final_edu.worker`
+- Must Read When: YouTube cache key / TTL / request spacing / prepare-worker parity 변경
+- Symptom:
+  - 같은 YouTube URL을 prepare 와 worker 가 각각 다시 호출하면서 rate limit 또는 temporary block 이 더 쉽게 재현될 수 있었음
+  - 첫 probe 는 성공했는데 본분석 transcript fetch 에서 다시 막히거나, 반대로 같은 입력을 반복 제출할 때 매번 네트워크를 다시 치는 문제가 있었음
+- Root Cause:
+  - `yt_dlp` metadata/playlist resolution 과 `youtube-transcript-api` transcript fetch 모두 네트워크 재호출 기반이었고, prepare 와 worker 사이에서 공유되는 cache 가 없었음
+  - 호출 간 최소 간격도 강제되지 않아 같은 프로세스에서 짧은 시간에 연속 요청이 나갈 수 있었음
+- Resolution:
+  - env 기반 proxy 경로를 제거하고 object-storage 기반 shared cache 를 추가해 metadata / transcript 결과를 저장하도록 정리
+  - YouTube 네트워크 호출 직전에 process-local minimum interval throttle 을 적용
+  - transcript cache 가 stale 이어도 YouTube 요청이 일시 제한되면 stale transcript 를 warning 과 함께 재사용
+  - request-limit 상황은 generic no-text 대신 explicit user-facing warning / error 문구로 승격
+- Prevention Rule:
+  - YouTube 완화 정책을 바꿀 때는 prepare / worker 가 같은 cache key 와 같은 storage 경로를 쓰는지 먼저 확인할 것
+  - `yt_dlp`와 transcript fetch 둘 다 throttle 을 우회하지 않는지 함께 점검할 것
+  - cache hit, stale fallback, minimum interval 이 회귀 테스트로 남아 있는지 확인할 것
+
 ## Archive
+
+### DBG-022 `archived` YouTube transcript unblock 은 proxy 설정이 web / worker / yt_dlp / transcript API 에 동시에 반영돼야 함
+
+- Date: `2026-04-09`
+- Agent / Lane: `Lead / Integration`
+- Tags: `youtube`, `proxy`, `ipblocked`, `worker`, `prepare-confirm`
+- Related Files: `final_edu/youtube.py`, `final_edu/extractors.py`, `final_edu/config.py`, `render.yaml`
+- Trigger Commands: `POST /analyze/prepare`, transcript fetch, `uv run python -m final_edu.worker`
+- Must Read When: proxy 경로를 다시 도입하거나 과거 transcript unblock 이력을 확인할 때
+- Symptom:
+  - 같은 YouTube URL이 prepare 단계에서는 집계가 되는데 실제 worker 분석에서 transcript fetch 가 막히거나, 반대로 prepare warning 과 본분석 결과가 서로 다를 수 있었음
+  - `IpBlocked`가 발생해도 사용자에게는 generic no-text 에러로만 보였음
+- Root Cause:
+  - YouTube 네트워크 경로가 `yt_dlp` metadata/playlist resolution 과 `youtube-transcript-api` transcript fetch 로 분리되어 있었고, proxy 설정이 한쪽에만 들어가면 prepare 와 본분석이 어긋날 수 있었음
+  - web 과 worker 가 별도 프로세스라 env parity 가 맞지 않으면 같은 입력이 서로 다르게 동작할 수 있었음
+- Resolution:
+  - env 기반 YouTube proxy helper 를 추가해 `yt_dlp`와 `youtube-transcript-api` 모두 같은 proxy URL 해석을 사용하도록 통일
+  - proxy 가 설정되면 proxy 우선, direct 1회 fallback 으로 동작하도록 정리
+  - prepare probing 과 실제 분석 transcript fetch 가 같은 proxy 정책을 공유하도록 맞춤
+  - `IpBlocked`는 explicit user-facing warning / error 문구로 승격
+- Prevention Rule:
+  - YouTube unblock 기능을 만질 때는 `yt_dlp`, transcript API, prepare probing, worker 분석 4개 경로를 함께 점검할 것
+  - proxy env 는 web 과 worker 에 동시에 주입할 것
+  - transcript block 이 generic no-text 로 뭉개지지 않는지 별도 테스트로 확인할 것
 
 ### DBG-001 `archived` `uv_build + src layout` editable import 실패
 

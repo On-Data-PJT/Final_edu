@@ -419,6 +419,7 @@ def _execute_analysis(
             sections=sections,
             submissions=submissions,
             settings=settings,
+            storage=storage,
             progress_callback=progress_callback,
             analysis_mode=payload.analysis_mode,
         )

@@ -108,7 +108,7 @@
     page3TrendStatus: "#page3-trend-status, [data-page3-trend-status], [data-testid='page3-trend-status']",
   };
 
-  const CHART_COLORS = ["#1b61c9", "#254fad", "#5aa469", "#f0a202", "#8c5fe2", "#ff7b7b", "#13b5c8", "#7081ff"];
+  const CHART_COLORS = ["#2e303b", "#cd483f", "#888c67", "#e89b8d", "#92c393", "#edb6c3", "#b3d3c5", "#f2e7e7"];
 
   function init() {
     initPage1();
@@ -421,7 +421,7 @@
         }
         state.page2.mode = normalizeMode(mode);
         syncModeButtons(modeButtons);
-        updatePage2Charts(containers, { updateRoseWordcloud: false });
+        updatePage2Charts(containers, { updateRoseWordcloud: true });
       });
     });
     syncModeButtons(modeButtons);
@@ -1991,11 +1991,21 @@
       syncModeButtons(qsa(joinSelectors(SELECTORS.page2ModeButtons)));
     }
 
-    const roseData = result.rose_series_by_instructor?.[state.page2.instructorName] || selected.instructor?.section_coverages?.map((coverage) => ({
-      name: coverage.section_title,
-      value: Math.round((coverage.token_share || 0) * 10000) / 100,
-    })) || [];
-    const wordCloudData = (result.keywords_by_instructor?.[state.page2.instructorName] || []).map((item, index) => ({
+    const roseByMode = result.rose_series_by_mode?.[state.page2.mode]
+      || result.rose_series_by_mode?.combined
+      || {};
+    const legacyRoseData = result.rose_series_by_instructor?.[state.page2.instructorName]
+      || selected.instructor?.section_coverages?.map((coverage) => ({
+        name: coverage.section_title,
+        value: Math.round((coverage.token_share || 0) * 10000) / 100,
+      }))
+      || [];
+    const roseData = roseByMode[state.page2.instructorName] || legacyRoseData;
+    const keywordsByMode = result.keywords_by_mode?.[state.page2.mode]
+      || result.keywords_by_mode?.combined
+      || result.keywords_by_instructor
+      || {};
+    const wordCloudData = (keywordsByMode[state.page2.instructorName] || []).map((item, index) => ({
       name: item.text,
       value: item.value,
       textStyle: {
@@ -2032,7 +2042,7 @@
       ? data
       : sections.map((section) => ({
           name: section.title,
-          value: Number(section.target_weight || 0),
+          value: 0,
         }))
     ).sort((left, right) => Number(right.value || 0) - Number(left.value || 0));
 
@@ -2046,8 +2056,9 @@
         itemWidth: 12,
         itemHeight: 12,
         textStyle: {
-          color: "#181d26",
+          color: "#475569",
           fontSize: 12,
+          fontWeight: 600,
         },
       },
       series: [
@@ -2077,16 +2088,17 @@
   function buildWordCloudOption(data) {
     const items = data.length ? data : [{ name: "데이터 없음", value: 1 }];
     return {
-      tooltip: {},
+      tooltip: { show: items[0]?.name !== "데이터 없음" },
       series: [
         {
           type: "wordCloud",
           shape: "circle",
           gridSize: 8,
-          sizeRange: [14, 54],
-          rotationRange: [-45, 45],
+          sizeRange: [18, 54],
+          rotationRange: [0, 0],
           textStyle: {
             color: (params) => stableColorForKey(params?.name || params?.data?.name || params?.value || "word"),
+            fontWeight: 800,
           },
           data: items.map((item, index) => ({
             name: item.name,
@@ -2104,7 +2116,7 @@
     const safeItems = seriesItems.length ? seriesItems : sections.map((section) => ({
       section_id: section.id,
       section_title: section.title,
-      share: Number(section.target_weight || 0) / 100,
+      share: 0,
     }));
     return {
       tooltip: { trigger: "item" },
@@ -2114,7 +2126,13 @@
       },
       grid: { left: 70, right: 8, top: 12, bottom: 48, containLabel: false },
       xAxis: { type: "value", max: 100, show: false },
-      yAxis: { type: "category", data: ["전체 평균"] },
+      yAxis: {
+        type: "category",
+        data: ["전체 평균"],
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: "#475569", fontWeight: 700 },
+      },
       series: safeItems.map((item, index) => ({
         name: item.section_title || sections[index]?.title || `대주제 ${index + 1}`,
         type: "bar",
@@ -2145,6 +2163,9 @@
       yAxis: {
         type: "category",
         data: instructors.map((item) => item.name),
+        axisLine: { show: true, lineStyle: { color: "#dbe7db" } },
+        axisTick: { show: false },
+        axisLabel: { color: "#475569", fontWeight: 700 },
       },
       series: sections.map((section, index) => ({
         name: section.title,
@@ -2176,9 +2197,9 @@
       {
         value: targetValues,
         name: "목표 (강의계획서)",
-        itemStyle: { color: "#181d26" },
+        itemStyle: { color: "#ff7b7b" },
         lineStyle: { type: "dashed", width: 2 },
-        areaStyle: { opacity: 0.04 },
+        areaStyle: { opacity: 0.08 },
       },
       ...selectedNames.map((name) => ({
         value: labels.map((_, index) => Math.round((lineSeries.instructors?.[name]?.[index]?.share || 0) * 10000) / 100),
@@ -2206,13 +2227,13 @@
         indicator: labels.map((label) => ({ name: label, max: 100 })),
         splitArea: {
           areaStyle: {
-            color: ["rgba(248,250,252,0.7)", "rgba(255,255,255,0.92)"],
+            color: ["rgba(255,255,255,0.92)", "rgba(246,251,246,0.96)"],
           },
         },
         axisName: {
-          color: "#181d26",
+          color: "#1e293b",
           fontSize: 12,
-          fontWeight: 500,
+          fontWeight: 600,
         },
       },
       series: [

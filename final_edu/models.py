@@ -153,7 +153,9 @@ class AnalysisRun:
     mode_series: dict = field(default_factory=dict)
     average_series_by_mode: dict = field(default_factory=dict)
     keywords_by_instructor: dict = field(default_factory=dict)
+    keywords_by_mode: dict = field(default_factory=dict)
     rose_series_by_instructor: dict = field(default_factory=dict)
+    rose_series_by_mode: dict = field(default_factory=dict)
     line_series_by_mode: dict = field(default_factory=dict)
     insights: list[dict] = field(default_factory=list)
     insight_generation_mode: str = "deterministic-fallback"

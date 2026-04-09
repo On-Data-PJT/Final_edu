@@ -15,8 +15,15 @@ Last Updated: 2026-04-09
 
 - `course`는 과정명, 커리큘럼 PDF, 대주제 목록, 목표 비중, 등록 강사명 목록을 가진다.
 - Page 1 제출 버튼은 `과정 선택 + 유효 강사 1명 이상`일 때만 활성화한다.
+- 결과 페이지는 **샘플 데이터가 아니라** 사용자가 등록한 실제 `course`, 실제 업로드 파일, 실제 YouTube 분석 결과만 사용한다.
 - 결과 페이지의 `view mode`는 `combined`, `material`, `speech` 3종이다.
-- `view mode`는 Page 2의 핵심 차트 패널에 일관되게 반영된다.
+- `view mode`는 Page 2 첫 패널 우측 상단 toggle 하나로 바꾸고, Page 2 전체 차트에 일관되게 반영된다.
+- Page 2는 최소한 아래 payload 들을 실제 결과 JSON에서 받아 쓴다.
+  - `mode_series`
+  - `rose_series_by_mode`
+  - `keywords_by_mode`
+  - `line_series_by_mode`
+- 특정 mode 데이터가 비어 있으면 해당 mode 기준 empty 상태를 보여주고 다른 mode 결과로 치환하지 않는다.
 
 ## Page 1. Main Page
 
@@ -152,12 +159,20 @@ Last Updated: 2026-04-09
 
 - 첫 결과 페이지는 복잡한 리포트가 아니라 **compact dashboard**여야 한다.
 - hero, 과도한 요약 카드, 중복 설명 영역은 제거한다.
+- `test` 브랜치 `demo.html`의 첫 결과 페이지 구조를 기준 레퍼런스로 사용한다.
 
-### Top Bar
+### Overall Layout
 
-- 상단에는 compact intro 와 `view mode` segmented control 을 둔다.
-- control 은 icon 보다 segmented text control 우선이다.
+- 페이지 상단에는 compact intro 만 두고, 본문은 `sidebar + dashboard panel stack` 구조를 사용한다.
+- 좌측 sidebar 는 sticky 로 유지한다.
+- sidebar 에는 아래가 있어야 한다.
+  - 홈으로 돌아가는 링크
+  - 현재 결과 페이지 active item
+  - 각 패널 anchor 링크
+  - 현재 선택 강사 / 상태 / 대주제 수 / 업데이트 시각
+- `view mode` segmented control 은 상단 공통 toolbar 가 아니라 **Panel 1 우측 상단**에 둔다.
 - mode 는 `combined`, `material`, `speech`를 전환한다.
+- 이 toggle 이 Page 2 전체 dataset source 의 source of truth 다.
 - job 이 아직 running 이면 status panel 에 단순 상태값만이 아니라 현재 phase 와 영상 처리 progress 를 함께 보여줘야 한다.
 
 ### Panel 1. Coverage Donut
@@ -165,22 +180,26 @@ Last Updated: 2026-04-09
 - 선택 강사의 구성 비중을 보여주는 대표 패널이다.
 - 패널 안에 아래가 함께 있어야 한다.
   - 패널 제목
-  - 현재 선택 강사 표시
+  - 우측 상단 dataset toggle
+  - donut/rose 차트
   - 이전/다음 이동 버튼
+  - 현재 선택 강사 표시
   - 강사 chip row
-  - donut 또는 compact rose 성격의 비중 차트
 - 강사 선택 변경 시 Panel 2도 같이 바뀌어야 한다.
+- Panel 1의 toggle 을 바꾸면 Panel 2, Panel 3, Panel 4도 모두 같은 mode 데이터로 갱신되어야 한다.
 
 ### Panel 2. Word Cloud
 
 - 선택 강사의 키워드 패널이다.
 - 제목에 현재 선택 강사명이 바로 드러나야 한다.
 - Panel 1과 동기화된다.
+- keyword cloud 데이터도 `view mode`에 따라 실제 material/speech/combined 결과를 써야 한다.
 
 ### Panel 3. Average + Instructor Bars
 
 - 평균 구성 비중과 강사별 stacked bar를 **하나의 카드 안**에서 연속 배치한다.
 - 중간 divider 로만 구분하고 패널 수를 늘리지 않는다.
+- 두 차트 모두 Panel 1의 `view mode`를 그대로 따라야 한다.
 
 ### Panel 4. Goal Comparison
 
@@ -189,12 +208,15 @@ Last Updated: 2026-04-09
 - 강사가 한 명뿐이면 목표선 + 단일 강사 비교 상태로 자연스럽게 동작해야 한다.
 - 강사별 on/off control 을 카드 상단에 둔다.
 - 최하단에는 `솔루션 보기` 이동 버튼을 둔다.
+- Page 4의 강사 on/off 는 비교 대상만 제어하고, dataset source 는 Panel 1 toggle 이 계속 관리한다.
 
 ### Page 2 Acceptance Checklist
 
-- Page 2는 4개 핵심 패널 구조여야 한다.
+- Page 2는 sidebar + 4개 핵심 패널 구조여야 한다.
 - 강사 선택은 Panel 1에서 일어나고 Panel 2와 동기화되어야 한다.
-- mode segmented control 은 비교 차트 계열에 반영되어야 한다.
+- Page 2 첫 패널의 toggle 하나가 Page 2 전체 dataset source 를 바꿔야 한다.
+- donut, word cloud, 평균 bar, 강사별 bar, 목표 비교가 모두 같은 `view mode`를 따라야 한다.
+- fake instructor 이름, fake keyword, fake 비중 배열은 남아 있으면 안 된다.
 - 마지막 비교 패널은 단일 강사와 다중 강사 둘 다 처리해야 한다.
 
 ## Page 3. Solution Page

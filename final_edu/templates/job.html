@@ -35,18 +35,6 @@
     </div>
   </section>
 
-  <section class="results-toolbar">
-    <div>
-      <span class="meta-label">현재 선택 강사</span>
-      <strong class="toolbar-title"><span data-page2-selected-instructor="summary">{{ result.instructors[0].name if result and result.instructors else "미선택" }}</span></strong>
-    </div>
-    <div class="segmented-control mode-toggle-group" aria-label="view mode">
-      <button type="button" class="segmented-control__button" data-view-mode="combined" data-testid="view-mode-combined" aria-label="발화+자료">전체</button>
-      <button type="button" class="segmented-control__button" data-view-mode="material" data-testid="view-mode-material" aria-label="only자료">강의자료</button>
-      <button type="button" class="segmented-control__button" data-view-mode="speech" data-testid="view-mode-speech" aria-label="only발화">강의(발화)</button>
-    </div>
-  </section>
-
   {% if job.is_active %}
     <section class="panel status-panel">
       <div class="section-heading">
@@ -82,35 +70,83 @@
       </div>
     </section>
   {% elif result %}
-    <section class="results-dashboard">
-      <div class="results-dashboard__grid">
-        <article class="panel dashboard-panel">
-          <div class="panel-head">
+    <section class="dashboard-wrapper page2-dashboard">
+      <aside class="dashboard-sidebar">
+        <div class="sidebar-logo">
+          <span class="sidebar-logo__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <path d="M12 2 2 7l10 5 10-5-10-5Zm-10 15 10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </span>
+          <div>
+            <strong>Final Edu</strong>
+            <span>Dashboard</span>
+          </div>
+        </div>
+
+        <nav class="nav-group" aria-label="주요 이동">
+          <a href="/" class="nav-item">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <path d="M3 9 12 2l9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+              <path d="M9 22v-8h6v8" />
+            </svg>
+            <span>Home</span>
+          </a>
+        </nav>
+
+        <nav class="nav-group" aria-label="결과 섹션">
+          <div class="nav-label">Dashboard</div>
+          <a href="#section-donut" class="nav-item is-active">
+            <svg viewBox="0 0 24 24" role="img" focusable="false">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+            <span>Overview</span>
+          </a>
+          <a href="#section-donut" class="sub-nav-item">커리큘럼 구성 비중</a>
+          <a href="#section-wordcloud" class="sub-nav-item">주요 수업 키워드</a>
+          <a href="#section-comparison" class="sub-nav-item">커리큘럼 구성 비교</a>
+          <a href="#section-radar" class="sub-nav-item">목표와의 비교</a>
+        </nav>
+
+        <div class="sidebar-meta">
+          <span class="meta-label">현재 선택 강사</span>
+          <strong data-page2-selected-instructor="summary">{{ selected_instructor }}</strong>
+          <div class="sidebar-chip-list">
+            <span class="meta-chip">상태 {{ job.status_label }}</span>
+            <span class="meta-chip">{{ job.section_count }}개 대주제</span>
+            <span class="meta-chip">업데이트 {{ job.updated_at_label }}</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="dashboard-container">
+        <article class="chart-panel" id="section-donut">
+          <div class="panel-header">
             <div>
               <h2 class="panel-title">강사별 커리큘럼 구성 비중</h2>
-              <p class="panel-copy">선택한 강사의 전체 커리큘럼 커버리지를 compact donut으로 봅니다.</p>
+              <p class="panel-copy">사용자가 등록한 실제 과정과 자료를 기준으로 선택 강사의 비중을 표시합니다.</p>
+            </div>
+            <div class="segmented-control mode-toggle-group" aria-label="view mode">
+              <button type="button" class="segmented-control__button" data-view-mode="combined" data-testid="view-mode-combined" aria-label="발화+자료">전체</button>
+              <button type="button" class="segmented-control__button" data-view-mode="material" data-testid="view-mode-material" aria-label="only자료">강의자료</button>
+              <button type="button" class="segmented-control__button" data-view-mode="speech" data-testid="view-mode-speech" aria-label="only발화">강의(발화)</button>
             </div>
           </div>
-          <div class="instructor-focus">
-            <div class="instructor-focus__avatar">강</div>
-            <div>
-              <span class="meta-label">현재 선택 강사</span>
-              <strong data-page2-selected-instructor="detail">{{ selected_instructor }}</strong>
-            </div>
-            <div class="instructor-nav" aria-label="강사 이동">
-              <button type="button" class="icon-button" data-instructor-nav="prev" aria-label="이전 강사">
-                <svg viewBox="0 0 24 24" role="img" focusable="false">
-                  <path d="m14 6-6 6 6 6" />
-                </svg>
-              </button>
-              <button type="button" class="icon-button" data-instructor-nav="next" aria-label="다음 강사">
-                <svg viewBox="0 0 24 24" role="img" focusable="false">
-                  <path d="m10 6 6 6-6 6" />
-                </svg>
-              </button>
-            </div>
+
+          <div class="page2-donut-shell">
+            <div id="page2-rose-chart" class="chart-shell chart-shell-donut" data-testid="page2-rose-chart" data-chart="rose"></div>
+            <div class="donut-focus-avatar" aria-hidden="true">강</div>
           </div>
-          <div id="page2-rose-chart" class="chart-shell chart-shell-donut" data-testid="page2-rose-chart" data-chart="rose"></div>
+
+          <div class="instructor-selector" aria-label="강사 이동">
+            <button type="button" class="arrow-btn" data-instructor-nav="prev" aria-label="이전 강사">◀</button>
+            <span class="instructor-name" data-page2-selected-instructor="detail">{{ selected_instructor }}</span>
+            <button type="button" class="arrow-btn" data-instructor-nav="next" aria-label="다음 강사">▶</button>
+          </div>
+
           <div class="chip-row instructor-chip-row" aria-label="강사 선택">
             {% for instructor in result.instructors %}
               <button
@@ -126,68 +162,73 @@
           </div>
         </article>
 
-        <article class="panel dashboard-panel">
-          <div class="panel-head">
+        <article class="chart-panel" id="section-wordcloud">
+          <div class="panel-header">
             <div>
               <h2 class="panel-title"><span data-page2-selected-instructor="wordcloud">{{ selected_instructor }}</span> 주요 수업 키워드</h2>
-              <p class="panel-copy">Panel 1의 강사 선택과 함께 바뀌는 keyword cloud입니다.</p>
+              <p class="panel-copy">상단 토글과 강사 선택이 바뀌면 같은 데이터셋으로 키워드를 다시 계산해 표시합니다.</p>
             </div>
           </div>
           <div id="page2-wordcloud-chart" class="chart-shell chart-shell-wordcloud" data-testid="page2-wordcloud-chart" data-chart="wordcloud"></div>
         </article>
-      </div>
 
-      <article class="panel dashboard-panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">강사 커리큘럼 구성 비교</h2>
-            <p class="panel-copy">전체 평균과 강사별 stacked bar를 한 카드 안에서 이어서 비교합니다.</p>
+        <article class="chart-panel" id="section-comparison">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">강사 커리큘럼 구성 비교</h2>
+              <p class="panel-copy">현재 선택한 데이터셋을 기준으로 평균과 강사별 구성 차이를 이어서 봅니다.</p>
+            </div>
           </div>
-        </div>
-        <div class="bars-stack">
+
           <section class="bars-stack__section">
             <h3>강사 평균 커리큘럼 구성 비중</h3>
             <div id="page2-average-bar-chart" class="chart-shell chart-shell-bars chart-shell-bars-compact" data-testid="page2-average-bar-chart" data-chart="average-bar"></div>
           </section>
+
+          <div class="panel-divider"></div>
+
           <section class="bars-stack__section">
             <h3>강사별 커리큘럼 구성 비교</h3>
             <div id="page2-instructor-bar-chart" class="chart-shell chart-shell-bars" data-testid="page2-instructor-bar-chart" data-chart="instructor-bar"></div>
           </section>
-        </div>
-      </article>
+        </article>
 
-      <article class="panel dashboard-panel">
-        <div class="panel-head panel-head-spread">
-          <div>
-            <h2 class="panel-title">목표(강의계획서)와의 비교</h2>
-            <p class="panel-copy">
-              {% if result.instructors|length > 1 %}
-                목표 기준과 여러 강사를 함께 비교해 어디가 과하거나 부족한지 봅니다.
-              {% else %}
-                목표 기준과 선택 강사를 비교해 어디가 과하거나 부족한지 봅니다.
-              {% endif %}
-            </p>
+        <article class="chart-panel" id="section-radar">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">목표(강의계획서)와의 비교</h2>
+              <p class="panel-copy">
+                {% if result.instructors|length > 1 %}
+                  목표 기준과 여러 강사를 함께 비교해 과하거나 부족한 대주제를 바로 읽습니다.
+                {% else %}
+                  목표 기준과 선택 강사를 비교해 현재 편차를 읽습니다.
+                {% endif %}
+              </p>
+            </div>
           </div>
-        </div>
-        <div class="compare-filters" aria-label="비교 강사 선택">
-          {% if result.instructors|length > 1 %}
-            <label class="checkbox-chip">
-              <input type="checkbox" data-compare-all checked />
-              <span>전체 선택</span>
-            </label>
-          {% endif %}
-          {% for instructor in result.instructors %}
-            <label class="checkbox-chip">
-              <input type="checkbox" data-compare-instructor value="{{ instructor.name }}" checked />
-              <span>{{ instructor.name }}</span>
-            </label>
-          {% endfor %}
-        </div>
-        <div id="page2-line-chart" class="chart-shell chart-shell-comparison" data-testid="page2-line-chart" data-chart="line"></div>
-        <div class="page-navigation">
-          <a class="primary-button" href="{{ request.url_for('job_solutions', job_id=job.id) }}">솔루션 보기</a>
-        </div>
-      </article>
+
+          <div class="compare-filters compare-filter-group" aria-label="비교 강사 선택">
+            {% if result.instructors|length > 1 %}
+              <label class="checkbox-chip">
+                <input type="checkbox" data-compare-all checked />
+                <span>전체 선택</span>
+              </label>
+            {% endif %}
+            {% for instructor in result.instructors %}
+              <label class="checkbox-chip">
+                <input type="checkbox" data-compare-instructor value="{{ instructor.name }}" checked />
+                <span>{{ instructor.name }}</span>
+              </label>
+            {% endfor %}
+          </div>
+
+          <div id="page2-line-chart" class="chart-shell chart-shell-comparison" data-testid="page2-line-chart" data-chart="line"></div>
+
+          <div class="page-navigation goal-panel-actions">
+            <a class="primary-button" href="{{ request.url_for('job_solutions', job_id=job.id) }}">솔루션 보기</a>
+          </div>
+        </article>
+      </div>
     </section>
   {% else %}
     <section class="panel status-panel">
