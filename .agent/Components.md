@@ -44,6 +44,8 @@ Last Updated: 2026-04-09
 - `과정 추가`와 `과정 목록`은 둘 다 **중앙 popup overlay**로 열려야 한다.
 - 두 overlay 모두 화면 좌우 측면이 아니라 정중앙에 배치한다.
 - `Escape`, 바깥 영역 클릭, 닫기 버튼으로 닫을 수 있어야 한다.
+- YouTube 재생목록이 포함된 제출에는 **분석 범위 확인 overlay**가 추가된다.
+- 이 overlay 는 확장 영상 수, 총 재생시간, 예상 chunk, 예상 시간, 예상 비용, warning 을 보여준 뒤 실제 분석 시작 여부를 확정해야 한다.
 
 ### Course Creation Popup
 
@@ -63,7 +65,17 @@ Last Updated: 2026-04-09
   - 중복 이름은 막음
   - 확정된 chip 은 키보드 backspace 로 삭제하지 않고 chip 내부 `x` 클릭으로만 삭제한다
 - PDF preview 결과의 대주제/비중 표는 사용자에게 노출하지 않는다.
-- save 활성 조건은 `과정명 + PDF preview 성공 + 강사 1명 이상`이다.
+- preview 결과는 `accepted | review_required | rejected` 세 상태를 가진다.
+- `accepted`면 compact summary 만 보여주고, preview 편집 표는 계속 숨긴다.
+- `accepted`면 상세 경고/근거 블록 없이 `저장 가능` 성격의 짧은 상태 문구만 보여준다.
+- `review_required`면 대주제/설명/비중 편집 표를 노출하고 사용자가 직접 수정할 수 있어야 한다.
+- `review_required`도 상세 판정 근거는 숨기고, `확인 후 저장` 성격의 짧은 상태 문구만 보여준다.
+- `rejected`면 저장을 막고 PDF 교체만 유도해야 한다.
+- `rejected`면 상세 사유 목록 없이 `커리큘럼으로 판정되지 않아 저장할 수 없음` 성격의 짧은 상태 문구만 보여준다.
+- save 활성 조건은 `과정명 + 저장 가능한 preview 상태 + 강사 1명 이상`이다.
+- 저장 가능한 preview 상태란 아래 둘 중 하나다.
+  - `accepted`이고 대주제/비중이 자동 검증된 상태
+  - `review_required`이지만 사용자가 대주제와 비중을 모두 채워 유효한 `sections_json`을 만든 상태
 
 ### Course List Popup
 
@@ -76,6 +88,7 @@ Last Updated: 2026-04-09
 - 클릭 시 과정이 즉시 선택되고 popup 은 닫힌다.
 - 과정 전환 시 현재 입력 중이던 lane 상태는 과정별로 보존한다.
 - 선택한 과정에 과거 분석 제출 이력이 있으면 마지막 제출 기준의 강사명, 업로드 자료, 유튜브 링크를 복원한다.
+- 과정 복원은 lane 단위가 아니라 `선택 강사 + 그 강사에게 연결된 파일/유튜브` 묶음 단위로 복원되어야 한다.
 
 ### Main Composer
 
@@ -92,10 +105,16 @@ Last Updated: 2026-04-09
   - 파일 모드에서는 drag/drop + click 업로드 surface
   - 유튜브 모드에서는 comma-token input
   - 파일은 여러 개 허용, 개별 삭제 가능
+- 파일 drag/drop 인식 범위는 중앙 안내 텍스트 일부가 아니라 lane 의 흰 capsule 전체여야 한다.
+- 유튜브 모드에서도 lane 의 흰 capsule 전체에 파일을 drop 하면 같은 lane 에 파일이 추가되고 files 모드로 전환되어야 한다.
 - 유튜브 URL은 comma 로 chip 확정, 개별 삭제 가능
+- 파일 토큰과 유튜브 토큰은 현재 모드와 관계없이 lane 하단의 공통 rail 에서 함께 보여야 한다.
+- 공통 rail 의 chip 은 같은 기본 스타일을 유지하고, 작은 파일 / YouTube 표식만으로 타입을 구분한다.
 - 과정이 선택되지 않았을 때는 별도 empty-state 문구를 두지 않고 lane 중앙 문구를 `과정을 먼저 선택하거나 추가하세요`로 대체한다.
 - 파일 모드의 기본 문구는 lane 중앙 정렬이어야 한다.
 - 상태 메시지는 lane 내부가 아니라 lane 우측 상단 바깥쪽에 붙어 보여야 한다.
+- 상태 메시지는 기본 상태 문구를 유지하되, 강사가 선택된 lane 에서는 `상태 / 강사명` 형식으로 현재 선택 강사를 함께 보여야 한다.
+- 여러 lane 이 쌓여 있을 때도 각 lane 의 상태 메시지는 이전 lane 의 capsule 이나 asset rail 을 침범하지 않아야 한다.
 - 우측 강사 아이콘을 클릭하면 dropdown menu 로 현재 선택된 과정의 `instructor_names`만 보여준다.
 - 강사 선택 UI는 아이콘-only 를 유지하고, 항상 select field 처럼 보이면 안 된다.
 - 같은 강사를 여러 lane 에 중복 배치하지 않는다.
@@ -112,6 +131,9 @@ Last Updated: 2026-04-09
   - 유효 lane 1개 이상
   - 각 유효 lane 에 강사 선택 + 자산 1개 이상
 - lane 추가 버튼은 선택한 과정의 강사 roster 를 모두 사용하면 비활성화한다.
+- YouTube 재생목록 또는 대용량 YouTube 입력이 있으면 submit 직후 바로 enqueue 하지 않고 `prepare` 단계로 먼저 보낸다.
+- `prepare` 단계는 raw YouTube 입력을 유지한 채 내부 영상 수와 추천 분석 모드를 계산해야 한다.
+- playlist가 현재 상한을 넘으면 enqueue 대신 분할 또는 축소가 필요하다는 에러를 반환해야 한다.
 
 ### Page 1 Acceptance Checklist
 
@@ -135,6 +157,7 @@ Last Updated: 2026-04-09
 - 상단에는 compact intro 와 `view mode` segmented control 을 둔다.
 - control 은 icon 보다 segmented text control 우선이다.
 - mode 는 `combined`, `material`, `speech`를 전환한다.
+- job 이 아직 running 이면 status panel 에 단순 상태값만이 아니라 현재 phase 와 영상 처리 progress 를 함께 보여줘야 한다.
 
 ### Panel 1. Coverage Donut
 

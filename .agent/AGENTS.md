@@ -19,13 +19,27 @@
 
 1. `.agent/AGENTS.md`
 2. `.agent/STATUS.md`
-3. `.agent/DEBUG.md`
+3. `.agent/DEBUG.md` preflight scan
 4. `git status --short --branch` 확인
 5. 그 다음에만 작업 시작
 
 이 순서는 선택사항이 아닙니다. 다음 에이전트가 이 워크스페이스에 처음 들어와도 바로 이어서 작업할 수 있게 하기 위한 필수 preflight 절차입니다.
 
 세 문서 중 하나라도 현재 상태와 어긋나면, 작업자는 자신의 작업 범위 안에서 즉시 바로잡아야 합니다.
+
+`DEBUG.md` preflight scan 의 의미는 아래처럼 고정합니다.
+
+1. `How To Use`와 `Always Read`를 먼저 읽기
+2. `Incident Index`를 훑고 현재 작업의 lane / 파일 / 명령 / 증상과 맞는 incident ID 찾기
+3. 일치하는 incident 본문만 추가로 읽기
+4. 아래 중 하나에 해당하면 `Active Incidents` 전체를 읽기
+   - startup / dependency / queue / storage 변경
+   - 디자인 검수 자동화 변경
+   - release 직전 점검
+   - wide refactor
+   - 원인 불명 회귀 조사
+
+즉, `.agent/DEBUG.md`는 **preflight scan 이 mandatory** 이고, **archive 전체 정독은 기본값이 아닙니다.**
 
 ## Mandatory Close-Out Workflow
 
@@ -85,6 +99,14 @@
 
 이 파일은 **해결된 오류와 재발 방지 규칙** 문서입니다.
 
+기본 구조는 아래처럼 유지합니다.
+
+- `How To Use`
+- `Always Read`
+- `Incident Index`
+- `Active Incidents`
+- `Archive`
+
 여기에는 아래만 씁니다.
 
 - 실제로 발생했던 오류
@@ -95,6 +117,8 @@
 - 다음에 같은 실수를 막는 규칙
 
 사소한 시행착오, 의미 없는 추측, 미해결 잡담은 쓰지 않습니다.
+모든 incident 는 stable ID(`DBG-001` 형식)를 가지며, 새 항목은 append-only 로 추가합니다.
+항목 본문은 필요할 때만 읽을 수 있게 `Lane`, `Tags`, `Related Files`, `Trigger Commands`, `Must Read When`, `Status`를 함께 적습니다.
 
 ### `.agent/Components.md`
 
@@ -107,7 +131,7 @@
 
 를 정리합니다.
 
-특히 `Web / Demo Agent`가 템플릿, 스타일, 화면 흐름을 수정할 때는 `.agent/AGENTS.md`, `.agent/STATUS.md`, `.agent/DEBUG.md`를 읽은 뒤 `.agent/Components.md`도 확인해야 합니다.
+특히 `Web / Demo Agent`가 템플릿, 스타일, 화면 흐름을 수정할 때는 `.agent/AGENTS.md`, `.agent/STATUS.md`, `.agent/DEBUG.md preflight scan`을 거친 뒤 `.agent/Components.md`도 확인해야 합니다.
 
 ### `.agent/DESIGN.md`
 
@@ -166,24 +190,29 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - `POST /courses`
   - `GET /courses`
   - `GET /courses/{course_id}`
+  - `POST /analyze/prepare`
+  - `POST /analyze/prepare/{request_id}/confirm`
   - `POST /analyze`
   - `GET /jobs/{job_id}`
   - `GET /jobs/{job_id}/solutions`
   - `GET /jobs/{job_id}/status`
   - `GET /health`
-- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
+- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`, `YouTube Playlist URL`
 - 커리큘럼 기준:
   - `Page 1`에서 과정명 + 커리큘럼 PDF를 등록
-  - PDF에서 대주제/목표 비중 초안을 추출
+  - `POST /courses/preview`는 PDF를 `accepted | review_required | rejected`로 판정하고, 대주제/비중 초안의 신뢰도와 저장 가능 여부를 함께 반환
+  - 비관련 PDF나 unreadable PDF는 자동 기본 섹션을 만들지 않고 저장 차단 대상으로 본다
   - 사용자가 수정/저장한 목표 비중이 canonical course contract 가 됨
 - 분석 방식:
   - `Page 1`: 과정 선택 + 강사 자료 등록
+  - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행
   - Job enqueue
   - 배경 분석
   - `Page 2`: 4단 결과 페이지
   - `Page 3`: 솔루션 인사이트 페이지
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
+  - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
   - 솔루션 인사이트는 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
   - 현재 기본 insight model 은 `gpt-5.4-mini`
 - 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
@@ -367,6 +396,7 @@ subagent 는 작업 종료 시 아래를 반드시 보고합니다.
 - What Was Done
 - Checks Run
 - Remaining Risks
+- Consulted DEBUG IDs
 - STATUS update needed?
 - DEBUG update needed?
 - AGENTS update needed?
@@ -381,6 +411,7 @@ Lead 가 병렬 작업 결과를 통합하기 전에 아래를 확인합니다.
 - 공통 타입/운영 계약 충돌 없음
 - acceptance check 통과
 - 최소 공통 검증 통과
+- 관련 `DEBUG` incident consultation 이 보고되었거나 `none matched`가 명시됨
 - `.agent/STATUS.md` 반영 필요 여부 판단
 - 해결된 오류가 있으면 `.agent/DEBUG.md` 반영 여부 판단
 - 규칙 변경이 있으면 `.agent/AGENTS.md` 반영 여부 판단
@@ -389,7 +420,7 @@ Lead 가 병렬 작업 결과를 통합하기 전에 아래를 확인합니다.
 
 모든 병렬 작업 라운드는 아래 순서를 따릅니다.
 
-1. `AGENTS.md` bootstrap → `.agent/AGENTS.md` → `.agent/STATUS.md` → `.agent/DEBUG.md` → `git status` 확인
+1. `AGENTS.md` bootstrap → `.agent/AGENTS.md` → `.agent/STATUS.md` → `.agent/DEBUG.md preflight scan` → `git status` 확인
 2. 이번 라운드 목표 정의
 3. Lead 가 계약 잠금
 4. worker / explorer 병렬 실행

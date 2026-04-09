@@ -17,6 +17,8 @@
       instructorMenuOpenBlockId: "",
       restoringCourseId: "",
       restoreRequestId: 0,
+      pendingPreparation: null,
+      isPreparingAnalysis: false,
     },
     page2: {
       result: null,
@@ -52,6 +54,7 @@
     courseInstructorInput: "#course-instructor-input, [data-testid='course-instructor-input']",
     courseInstructorTokens: "#course-instructor-tokens, [data-role='course-instructor-tokens']",
     courseInstructorNamesJson: "#course-instructor-names-json",
+    analysisPrepareModal: "#analysis-prepare-modal, [data-testid='analysis-prepare-modal']",
     selectedCourseId: "#selected-course-id, [data-testid='selected-course-id']",
     selectedCourseName: "#selected-course-name, [data-testid='selected-course-name']",
     page1Workspace: "#page1-workspace, [data-testid='page1-workspace']",
@@ -142,6 +145,7 @@
       courseForm,
       analysisForm,
       workspace,
+      prepareModal: $(SELECTORS.analysisPrepareModal),
       emptyState: $(SELECTORS.page1EmptyState),
       blocksRoot: $(SELECTORS.instructorBlocks),
       template: $(SELECTORS.instructorBlockTemplate),
@@ -169,6 +173,20 @@
       courseInstructorInput: $(SELECTORS.courseInstructorInput),
       courseInstructorTokens: $(SELECTORS.courseInstructorTokens),
       courseInstructorNamesJson: $(SELECTORS.courseInstructorNamesJson),
+      prepareMode: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-mode']"]),
+      prepareVideoCount: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-video-count']"]),
+      prepareDuration: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-duration']"]),
+      prepareChunks: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-chunks']"]),
+      prepareProcessing: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-processing']"]),
+      prepareCost: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-cost']"]),
+      prepareCaptionProbe: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-caption-probe']"]),
+      prepareCaptionSuccess: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-caption-success']"]),
+      prepareCaptionTotal: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-caption-total']"]),
+      preparePlaylistsBlock: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-playlists-block']"]),
+      preparePlaylists: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-playlists']"]),
+      prepareWarningsBlock: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-warnings-block']"]),
+      prepareWarnings: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-warnings']"]),
+      prepareConfirmButton: findFirst($(SELECTORS.analysisPrepareModal), ["[data-confirm-prepare]"]),
     };
 
     state.page1.selectedCourseId = valueOf(refs.selectedCourseId);
@@ -176,6 +194,7 @@
 
     bindDialog(refs.courseModal, SELECTORS.openCourseModal, SELECTORS.closeDialogs);
     bindDialog(refs.courseListPanel, SELECTORS.openCourseList, SELECTORS.closeDialogs);
+    bindPrepareModal(refs);
 
     if (refs.courseFileInput) {
       refs.courseFileInput.addEventListener("change", () => {
@@ -246,6 +265,18 @@
       });
     }
 
+    if (refs.previewTable) {
+      refs.previewTable.addEventListener("input", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || !target.closest("[data-preview-row]")) {
+          return;
+        }
+        syncPreviewSectionsFromTable(refs.previewTable);
+        updateCourseSaveButtonState(refs);
+        renderCoursePreviewState(refs.previewState, state.page1.preview, refs.courseNameInput?.value || "");
+      });
+    }
+
     refs.courseForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!state.page1.preview) {
@@ -254,6 +285,12 @@
       if (canSaveCourse(refs)) {
         await saveCourse(refs.courseForm, refs.courseFileInput, refs.courseNameInput, refs.previewState, refs.previewTable, refs.saveButton, refs.courseModal, refs);
       }
+    });
+
+    refs.analysisForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      syncAnalysisFormSubmission(refs);
+      await prepareAnalysisSubmission(refs);
     });
 
     if (refs.addBlockButton) {
@@ -270,10 +307,6 @@
     if (refs.submitButton) {
       refs.submitButton.addEventListener("click", (event) => {
         event.preventDefault();
-        if (!canSubmitAnalysis()) {
-          setStatus(refs.previewState, "과정을 선택하고 강사 1명 이상에게 자료를 연결해 주세요.");
-          return;
-        }
         refs.analysisForm.requestSubmit ? refs.analysisForm.requestSubmit(refs.submitButton) : refs.analysisForm.submit();
       });
     }
@@ -569,11 +602,8 @@
     }
     previewTable.innerHTML = "";
     previewTable.dataset.sectionCount = String(preview.sections.length);
-
-    if (previewState) {
-      const warnings = preview.warnings && preview.warnings.length ? ` 경고 ${preview.warnings.length}건.` : "";
-      previewState.textContent = `${courseName ? `${courseName} · ` : ""}${preview.sections.length}개 대주제 초안 추출 완료.${warnings}`;
-    }
+    renderCoursePreviewState(previewState, preview, courseName);
+    renderCoursePreviewTable(previewTable, preview);
 
     const sectionsInput = $("#course-sections-json");
     const rawTextInput = $("#course-raw-curriculum-text");
@@ -586,6 +616,7 @@
   }
 
   function readPreviewSections(previewTable) {
+    syncPreviewSectionsFromTable(previewTable);
     return Array.isArray(state.page1.preview?.sections) ? state.page1.preview.sections : [];
   }
 
@@ -751,17 +782,17 @@
 
   function snapshotCurrentCourseDraft() {
     const blocks = state.page1.blocks
-      .map((block) => snapshotBlockState(getBlockState(block)))
+      .map((block) => snapshotBlockState(getBlockState(block), block))
       .filter((block) => block.instructorName || block.files.length || block.youtubeUrls.length);
     return {
       blocks: blocks.length ? blocks : [createEmptyDraftBlock()],
     };
   }
 
-  function snapshotBlockState(blockState) {
+  function snapshotBlockState(blockState, block = null) {
     return {
       mode: blockState.mode === "youtube" ? "youtube" : "files",
-      instructorName: String(blockState.instructorName || "").trim(),
+      instructorName: resolveBlockInstructorName(block, blockState),
       files: Array.isArray(blockState.files) ? blockState.files.slice() : [],
       youtubeUrls: Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.slice() : [],
     };
@@ -799,22 +830,26 @@
   }
 
   async function resolvePersistedCourseDraft(draft, courseId, restoreRequestId) {
-    const resolvedBlocks = await Promise.all(
-      draft.blocks.map(async (block) => {
-        const restoredFiles = await Promise.all(
-          (Array.isArray(block.files) ? block.files : []).map((file) => restoreDraftFile(file)),
-        );
-        if (restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== courseId) {
-          return null;
-        }
-        return {
-          mode: block.mode === "youtube" ? "youtube" : (restoredFiles.length ? "files" : "youtube"),
-          instructorName: block.instructorName,
-          files: restoredFiles.filter((file) => file instanceof File),
-          youtubeUrls: Array.isArray(block.youtubeUrls) ? block.youtubeUrls.slice() : [],
-        };
-      }),
-    );
+    const usedFallbackNames = new Set();
+    const resolvedBlocks = [];
+    for (const [index, block] of (Array.isArray(draft.blocks) ? draft.blocks : []).entries()) {
+      const restoredFiles = await Promise.all(
+        (Array.isArray(block.files) ? block.files : []).map((file) => restoreDraftFile(file)),
+      );
+      if (restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== courseId) {
+        return null;
+      }
+      const instructorName = resolveRestoredInstructorName(block.instructorName, courseId, index, usedFallbackNames);
+      if (instructorName && currentCourseInstructorNamesForCourse(courseId).includes(instructorName)) {
+        usedFallbackNames.add(instructorName);
+      }
+      resolvedBlocks.push({
+        mode: block.mode === "youtube" ? "youtube" : (restoredFiles.length ? "files" : "youtube"),
+        instructorName,
+        files: restoredFiles.filter((file) => file instanceof File),
+        youtubeUrls: Array.isArray(block.youtubeUrls) ? block.youtubeUrls.slice() : [],
+      });
+    }
 
     const meaningfulBlocks = resolvedBlocks.filter((block) => block && (block.instructorName || block.files.length || block.youtubeUrls.length));
     if (!meaningfulBlocks.length) {
@@ -887,6 +922,153 @@
     updateCourseSaveButtonState(refs);
   }
 
+  function syncAnalysisFormSubmission(refs) {
+    if (!refs?.analysisForm) {
+      return;
+    }
+    state.page1.blocks.forEach((block) => {
+      const blockState = getBlockState(block);
+      const instructorName = resolveBlockInstructorName(block, blockState);
+      blockState.instructorName = instructorName;
+      const instructorInput = findOne(block, ["[data-role='instructor-name']"]);
+      const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
+      setFieldValue(instructorInput, instructorName);
+      setFieldValue(youtubeHidden, blockState.youtubeUrls.join("\n"));
+      syncBlockFileInput(block);
+      renderBlock(block);
+    });
+    if (refs.manifestInput) {
+      refs.manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
+    }
+  }
+
+  async function prepareAnalysisSubmission(refs) {
+    if (!refs?.analysisForm || state.page1.isPreparingAnalysis) {
+      return;
+    }
+    if (!canSubmitAnalysis()) {
+      setStatus(refs.previewState, "과정을 선택하고 강사 1명 이상에게 자료를 연결해 주세요.");
+      return;
+    }
+
+    state.page1.isPreparingAnalysis = true;
+    setButtonDisabled(refs.submitButton, true);
+    try {
+      const payload = await fetchJson("/analyze/prepare", {
+        method: "POST",
+        body: new FormData(refs.analysisForm),
+      });
+      state.page1.pendingPreparation = payload;
+      if (payload.requires_confirmation) {
+        renderPrepareSummary(refs, payload);
+        openSurface(refs.prepareModal);
+        return;
+      }
+      await confirmPreparedAnalysis(refs, payload.request_id);
+    } catch (error) {
+      setStatus(refs.previewState, `분석 준비에 실패했습니다. ${error.message}`);
+    } finally {
+      state.page1.isPreparingAnalysis = false;
+      syncPage1State(refs);
+    }
+  }
+
+  function bindPrepareModal(refs) {
+    if (!refs?.prepareModal) {
+      return;
+    }
+    qsa("[data-close-prepare]", refs.prepareModal).forEach((button) => {
+      button.addEventListener("click", () => closePrepareModal(refs));
+    });
+    if (refs.prepareConfirmButton) {
+      refs.prepareConfirmButton.addEventListener("click", async () => {
+        const requestId = String(state.page1.pendingPreparation?.request_id || "").trim();
+        if (!requestId) {
+          return;
+        }
+        await confirmPreparedAnalysis(refs, requestId);
+      });
+    }
+    refs.prepareModal.addEventListener("click", (event) => {
+      if (event.target === refs.prepareModal) {
+        closePrepareModal(refs);
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && isOpen(refs.prepareModal)) {
+        closePrepareModal(refs);
+      }
+    });
+  }
+
+  function closePrepareModal(refs) {
+    state.page1.pendingPreparation = null;
+    if (refs?.prepareModal) {
+      closeSurface(refs.prepareModal);
+    }
+  }
+
+  async function confirmPreparedAnalysis(refs, requestId) {
+    if (!requestId) {
+      return;
+    }
+    setBusy(refs.prepareConfirmButton, true, "시작 중");
+    try {
+      const payload = await fetchJson(`/analyze/prepare/${encodeURIComponent(requestId)}/confirm`, {
+        method: "POST",
+      });
+      closePrepareModal(refs);
+      if (payload.redirect_url) {
+        window.location.href = payload.redirect_url;
+      }
+    } catch (error) {
+      setStatus(refs.previewState, `분석 시작에 실패했습니다. ${error.message}`);
+    } finally {
+      setBusy(refs.prepareConfirmButton, false);
+    }
+  }
+
+  function renderPrepareSummary(refs, payload) {
+    setFieldValue(refs.prepareMode, formatPrepareMode(payload.recommended_analysis_mode));
+    setFieldValue(refs.prepareVideoCount, `${Number(payload.expanded_video_count || 0)}개`);
+    setFieldValue(refs.prepareDuration, formatDurationSeconds(payload.total_video_duration_seconds || 0));
+    setFieldValue(refs.prepareChunks, `${Number(payload.estimated_chunk_count || 0)}개`);
+    setFieldValue(refs.prepareProcessing, formatDurationSeconds(payload.estimated_processing_seconds || 0));
+    setFieldValue(refs.prepareCost, formatUsd(payload.estimated_cost_usd || 0));
+    setFieldValue(refs.prepareCaptionSuccess, String(Number(payload.caption_probe_success_count || 0)));
+    setFieldValue(refs.prepareCaptionTotal, String(Number(payload.caption_probe_sample_count || 0)));
+
+    if (refs.preparePlaylists) {
+      refs.preparePlaylists.innerHTML = "";
+      const playlistSummaries = Array.isArray(payload.playlist_summaries) ? payload.playlist_summaries : [];
+      playlistSummaries.forEach((summary) => {
+        const item = document.createElement("article");
+        item.className = "analysis-prepare-item";
+        item.innerHTML = `
+          <strong>${escapeHtml(summary.title || "YouTube Playlist")}</strong>
+          <span>${escapeHtml(summary.instructor_name || "강사")} · ${Number(summary.expanded_video_count || summary.video_count || 0)}개 영상 · ${escapeHtml(formatDurationSeconds(summary.total_duration_seconds || 0))}</span>
+        `;
+        refs.preparePlaylists.appendChild(item);
+      });
+      if (refs.preparePlaylistsBlock) {
+        refs.preparePlaylistsBlock.hidden = !playlistSummaries.length;
+      }
+    }
+
+    if (refs.prepareWarnings) {
+      refs.prepareWarnings.innerHTML = "";
+      const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+      warnings.forEach((warning) => {
+        const item = document.createElement("li");
+        item.textContent = warning;
+        refs.prepareWarnings.appendChild(item);
+      });
+      if (refs.prepareWarningsBlock) {
+        refs.prepareWarningsBlock.hidden = !warnings.length;
+      }
+    }
+  }
+
   function enableWorkspaceInputs() {
     // Page 1 now uses per-lane disabled state instead of disabling the full workspace tree.
   }
@@ -937,14 +1119,15 @@
         <div class="lane-surface lane-surface-files" data-role="files-surface">
           <input class="sr-only" type="file" multiple accept=".pdf,.pptx,.txt,.md" data-role="instructor-files" name="instructor_files__${blockId}">
           <button type="button" class="lane-surface__tap" data-action="open-file-picker">강의 자료를 드래그하거나 클릭해 업로드</button>
-          <div class="lane-asset-strip lane-file-strip" data-role="file-list"></div>
         </div>
         <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
           <div class="lane-token-shell">
-            <div class="lane-token-list" data-role="youtube-token-list"></div>
             <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요">
           </div>
           <input type="hidden" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" value="">
+        </div>
+        <div class="lane-asset-rail" data-role="asset-rail" hidden>
+          <div class="lane-asset-strip" data-role="asset-list"></div>
         </div>
       </div>
       <div class="composer-lane__end">
@@ -993,14 +1176,16 @@
     const blockId = block.dataset.blockId || uniqueId("instructor");
     decorateInstructorBlock(block, blockId, index);
 
-    const fileSurface = findOne(block, ["[data-role='files-surface']"]);
-    if (fileSurface) {
-      bindDropzone(fileSurface, {
-        onFiles(files) {
-          addBlockFiles(block, files);
-        },
-      });
-    }
+    bindDropzone(block, {
+      canAccept() {
+        return canAcceptBlockFileDrop(block);
+      },
+      onFiles(files) {
+        const blockState = getBlockState(block);
+        blockState.mode = "files";
+        addBlockFiles(block, files);
+      },
+    });
 
     block.addEventListener("click", (event) => {
       const target = event.target;
@@ -1102,24 +1287,81 @@
   function updateBlockStatus(block) {
     const status = findOne(block, ["[data-role='block-status']"]);
     const blockState = getBlockState(block);
+    const selectedInstructorName = resolveBlockInstructorName(block, blockState);
 
-    const hasName = Boolean(blockState.instructorName);
+    const hasName = Boolean(selectedInstructorName);
     const fileCount = Array.isArray(blockState.files) ? blockState.files.length : 0;
     const youtubeCount = Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.length : 0;
     const hasAssets = fileCount > 0 || youtubeCount > 0;
 
     block.dataset.valid = String(hasName && hasAssets);
+    block.dataset.instructorName = selectedInstructorName;
     if (status) {
+      let statusLabel = "";
       if (!hasName && !hasAssets) {
-        status.textContent = "자료 없음";
+        statusLabel = "자료 없음";
       } else if (hasName && !hasAssets) {
-        status.textContent = "자료 대기";
+        statusLabel = "자료 대기";
       } else if (!hasName && hasAssets) {
-        status.textContent = "강사 선택";
+        statusLabel = "강사 선택";
       } else {
-        status.textContent = `파일 ${fileCount}개 · 링크 ${youtubeCount}개`;
+        statusLabel = `파일 ${fileCount}개 · 링크 ${youtubeCount}개`;
+      }
+      status.textContent = statusLabel;
+      status.setAttribute("data-instructor-name", selectedInstructorName);
+      status.setAttribute("title", hasName ? `${statusLabel} / ${selectedInstructorName}` : statusLabel);
+    }
+  }
+
+  function resolveBlockInstructorName(block, blockState = getBlockState(block)) {
+    const candidates = [
+      blockState?.instructorName,
+      valueOf(findOne(block, ["[data-role='instructor-name']"])),
+      block?.dataset?.instructorName,
+    ];
+    const trigger = findOne(block, ["[data-action='toggle-instructor-menu']"]);
+    if (trigger instanceof HTMLElement) {
+      candidates.push(trigger.getAttribute("data-selected-instructor"));
+      const title = trigger.getAttribute("title");
+      if (title && title !== "강사 선택") {
+        candidates.push(title);
       }
     }
+    return candidates
+      .map((value) => String(value || "").trim())
+      .find(Boolean) || "";
+  }
+
+  function currentCourseInstructorNamesForCourse(courseId) {
+    const normalizedCourseId = String(courseId || "").trim();
+    const course = state.page1.courses.find((item) => item.id === normalizedCourseId)
+      || (state.page1.selectedCourse?.id === normalizedCourseId ? state.page1.selectedCourse : null);
+    return Array.isArray(course?.instructor_names) ? course.instructor_names : [];
+  }
+
+  function resolveRestoredInstructorName(rawName, courseId, fallbackIndex = 0, usedNames = new Set()) {
+    const normalizedName = String(rawName || "").trim();
+    const roster = currentCourseInstructorNamesForCourse(courseId);
+    if (!roster.length) {
+      return normalizedName;
+    }
+    if (normalizedName && roster.includes(normalizedName)) {
+      return normalizedName;
+    }
+    const fallbackCandidates = [];
+    const genericMatch = normalizedName.match(/^강사\s*(\d+)$/);
+    if (genericMatch) {
+      const genericIndex = Number(genericMatch[1]) - 1;
+      fallbackCandidates.push(roster[genericIndex] || "");
+    }
+    fallbackCandidates.push(roster[fallbackIndex] || "");
+    if (roster.length === 1) {
+      fallbackCandidates.push(roster[0]);
+    }
+    const resolvedFallback = fallbackCandidates
+      .map((name) => String(name || "").trim())
+      .find((name) => name && !usedNames.has(name));
+    return resolvedFallback || normalizedName;
   }
 
   function getInstructorManifest() {
@@ -1129,6 +1371,9 @@
   }
 
   function canSubmitAnalysis() {
+    if (state.page1.isPreparingAnalysis) {
+      return false;
+    }
     if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
       return false;
     }
@@ -1175,7 +1420,14 @@
 
   function canSaveCourse(refs) {
     const courseName = refs.courseNameInput ? refs.courseNameInput.value.trim() : "";
-    return Boolean(courseName && state.page1.preview && state.page1.previewFile && state.page1.draftInstructorNames.length >= 1);
+    syncPreviewSectionsFromTable(refs.previewTable);
+    return Boolean(
+      courseName
+        && state.page1.preview
+        && state.page1.previewFile
+        && state.page1.draftInstructorNames.length >= 1
+        && isSavableCoursePreview(state.page1.preview),
+    );
   }
 
   function updateCourseSaveButtonState(refs) {
@@ -1218,6 +1470,11 @@
     if (rawTextInput) {
       rawTextInput.value = "";
     }
+    if (refs.previewTable) {
+      refs.previewTable.innerHTML = "";
+      refs.previewTable.classList.add("is-hidden");
+    }
+    refs.previewState?.classList.remove("is-success", "is-warning", "is-danger");
     renderCourseFileTokens(refs);
     setStatus(refs.previewState, "PDF를 업로드하면 과정 초안이 준비됩니다.");
     updateCourseSaveButtonState(refs);
@@ -1281,6 +1538,7 @@
     }
     if (refs.previewTable) {
       refs.previewTable.innerHTML = "";
+      refs.previewTable.classList.add("is-hidden");
     }
     const sectionsInput = $("#course-sections-json");
     const rawTextInput = $("#course-raw-curriculum-text");
@@ -1292,6 +1550,7 @@
     }
     renderCourseFileTokens(refs);
     renderCourseInstructorTokens(refs);
+    refs.previewState?.classList.remove("is-success", "is-warning", "is-danger");
     setStatus(refs.previewState, "PDF를 업로드하면 과정 초안이 준비됩니다.");
     updateCourseSaveButtonState(refs);
   }
@@ -1350,8 +1609,8 @@
     const youtubeSurface = findOne(block, ["[data-role='youtube-surface']"]);
     const youtubeDraft = findOne(block, ["[data-role='youtube-draft']"]);
     const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
-    const fileList = findOne(block, ["[data-role='file-list']"]);
-    const youtubeList = findOne(block, ["[data-role='youtube-token-list']"]);
+    const assetRail = findOne(block, ["[data-role='asset-rail']"]);
+    const assetList = findOne(block, ["[data-role='asset-list']"]);
     const instructorInput = findOne(block, ["[data-role='instructor-name']"]);
     const instructorTrigger = findOne(block, ["[data-action='toggle-instructor-menu']"]);
     const instructorMenu = findOne(block, ["[data-role='instructor-menu']"]);
@@ -1380,11 +1639,8 @@
     if (youtubeDraft) {
       youtubeDraft.value = youtubeDraft.value || "";
     }
-    if (fileList) {
-      renderBlockFiles(block, fileList);
-    }
-    if (youtubeList) {
-      renderBlockYoutubeUrls(block, youtubeList);
+    if (assetList) {
+      renderBlockAssets(block, assetList, assetRail);
     }
     updateBlockPrompts(block, fileTap, youtubeDraft, blockState);
     if (instructorInput && instructorTrigger && instructorMenu) {
@@ -1410,26 +1666,26 @@
     block.dataset.mode = blockState.mode;
   }
 
-  function renderBlockFiles(block, container) {
+  function renderBlockAssets(block, container, rail) {
     const blockState = getBlockState(block);
     container.innerHTML = "";
     blockState.files.forEach((file, index) => {
       container.appendChild(createChip(file.name, {
+        kind: "file",
         removeAttr: "data-remove-file-index",
         removeValue: String(index),
       }));
     });
-  }
-
-  function renderBlockYoutubeUrls(block, container) {
-    const blockState = getBlockState(block);
-    container.innerHTML = "";
     blockState.youtubeUrls.forEach((url, index) => {
       container.appendChild(createChip(url, {
+        kind: "youtube",
         removeAttr: "data-remove-youtube-index",
         removeValue: String(index),
       }));
     });
+    if (rail) {
+      rail.hidden = !container.children.length;
+    }
   }
 
   function populateBlockInstructorMenu(block, input, trigger, menu) {
@@ -1445,10 +1701,12 @@
         .filter(Boolean),
     );
     input.value = blockState.instructorName || "";
+    block.dataset.instructorName = blockState.instructorName || "";
     trigger.classList.toggle(CSS.active, Boolean(blockState.instructorName));
     trigger.setAttribute("aria-expanded", String(state.page1.instructorMenuOpenBlockId === block.dataset.blockId));
     trigger.setAttribute("title", blockState.instructorName || "강사 선택");
     trigger.setAttribute("aria-label", blockState.instructorName ? `강사 선택됨: ${blockState.instructorName}` : "강사 선택");
+    trigger.setAttribute("data-selected-instructor", blockState.instructorName || "");
     menu.hidden = state.page1.instructorMenuOpenBlockId !== block.dataset.blockId;
     menu.innerHTML = "";
 
@@ -1483,7 +1741,7 @@
   }
 
   function currentCourseInstructorNames() {
-    return Array.isArray(state.page1.selectedCourse?.instructor_names) ? state.page1.selectedCourse.instructor_names : [];
+    return currentCourseInstructorNamesForCourse(state.page1.selectedCourse?.id || "");
   }
 
   function toggleModeMenu(block) {
@@ -1597,6 +1855,16 @@
     });
   }
 
+  function canAcceptBlockFileDrop(block) {
+    if (!(block instanceof HTMLElement)) {
+      return false;
+    }
+    if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
+      return false;
+    }
+    return !block.classList.contains(CSS.disabled);
+  }
+
   function canAddMoreBlocks() {
     const roster = currentCourseInstructorNames();
     if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
@@ -1633,10 +1901,27 @@
       return;
     }
     const onFiles = typeof options.onFiles === "function" ? options.onFiles : () => {};
+    const canAccept = typeof options.canAccept === "function" ? options.canAccept : () => true;
+    const hasTransferFiles = (event) => {
+      const dataTransfer = event?.dataTransfer;
+      if (!dataTransfer) {
+        return false;
+      }
+      if ((dataTransfer.files?.length || 0) > 0) {
+        return true;
+      }
+      return Array.from(dataTransfer.types || []).includes("Files");
+    };
     ["dragenter", "dragover"].forEach((eventName) => {
       node.addEventListener(eventName, (event) => {
+        if (!hasTransferFiles(event)) {
+          return;
+        }
         event.preventDefault();
-        node.classList.add("is-dragover");
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = canAccept(event) ? "copy" : "none";
+        }
+        node.classList.toggle("is-dragover", canAccept(event));
       });
     });
     ["dragleave", "dragend"].forEach((eventName) => {
@@ -1645,8 +1930,14 @@
       });
     });
     node.addEventListener("drop", (event) => {
+      if (!hasTransferFiles(event)) {
+        return;
+      }
       event.preventDefault();
       node.classList.remove("is-dragover");
+      if (!canAccept(event)) {
+        return;
+      }
       const files = Array.from(event.dataTransfer?.files || []);
       if (files.length) {
         onFiles(files);
@@ -1657,6 +1948,13 @@
   function createChip(label, options = {}) {
     const chip = document.createElement("span");
     chip.className = "lane-chip";
+    if (options.kind) {
+      chip.dataset.kind = options.kind;
+      const kind = document.createElement("span");
+      kind.className = `lane-chip__kind lane-chip__kind-${options.kind}`;
+      kind.textContent = options.kind === "youtube" ? "YT" : "파일";
+      chip.appendChild(kind);
+    }
     const text = document.createElement("span");
     text.className = "lane-chip__label";
     text.textContent = label;
@@ -2418,17 +2716,163 @@
       id: section.id || uniqueId(`section-${index + 1}`),
       title: section.title || `섹션 ${index + 1}`,
       description: section.description || section.title || "",
-      target_weight: Number(section.target_weight || 0),
+      target_weight: section.target_weight === null || section.target_weight === undefined || section.target_weight === ""
+        ? null
+        : Number(section.target_weight),
+      weight_source: section.weight_source || "none",
+      raw_weight_value: section.raw_weight_value === null || section.raw_weight_value === undefined || section.raw_weight_value === ""
+        ? null
+        : Number(section.raw_weight_value),
+      confidence: Number(section.confidence || 0),
+      source_pages: Array.isArray(section.source_pages) ? section.source_pages.map((item) => Number(item)).filter((item) => Number.isFinite(item)) : [],
+      source_snippets: Array.isArray(section.source_snippets) ? section.source_snippets.map((item) => String(item || "").trim()).filter(Boolean) : [],
+      needs_weight_input: Boolean(section.needs_weight_input),
     })) : [];
     return {
+      decision: payload.decision || "review_required",
+      document_kind: payload.document_kind || "curriculum_like",
+      document_confidence: Number(payload.document_confidence || 0),
+      weight_status: payload.weight_status || "missing",
       raw_curriculum_text: payload.raw_curriculum_text || "",
       sections,
       warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+      blocking_reasons: Array.isArray(payload.blocking_reasons) ? payload.blocking_reasons : [],
+      evidence: Array.isArray(payload.evidence) ? payload.evidence.map((item) => ({
+        page: item?.page === null || item?.page === undefined || item?.page === "" ? null : Number(item.page),
+        snippet: String(item?.snippet || "").trim(),
+        reason: String(item?.reason || "").trim(),
+      })) : [],
     };
   }
 
-  function renderCoursePreviewTable() {
-    // Intentionally left as a named hook for the structure worker contract.
+  function renderCoursePreviewState(previewState, preview, courseName) {
+    if (!previewState || !preview) {
+      return;
+    }
+    const prefix = courseName ? `${courseName} · ` : "";
+    previewState.classList.remove("is-success", "is-warning", "is-danger");
+    if (preview.decision === "accepted") {
+      previewState.textContent = `${prefix}커리큘럼으로 인식되어 저장할 수 있습니다.`;
+      previewState.classList.add("is-success");
+      return;
+    }
+    if (preview.decision === "review_required") {
+      previewState.textContent = `${prefix}커리큘럼으로 인식했지만 대주제와 비중을 확인한 뒤 저장해 주세요.`;
+      previewState.classList.add("is-warning");
+      return;
+    }
+    previewState.textContent = `${prefix}커리큘럼으로 판정되지 않아 저장할 수 없습니다.`;
+    previewState.classList.add("is-danger");
+  }
+
+  function renderCoursePreviewTable(previewTable, preview) {
+    if (!previewTable || !preview) {
+      return;
+    }
+    previewTable.innerHTML = "";
+    const shouldShowTable = preview.decision === "review_required" && preview.sections.length;
+    if (!shouldShowTable) {
+      previewTable.classList.add("is-hidden");
+      return;
+    }
+    previewTable.classList.remove("is-hidden");
+    const wrap = document.createElement("div");
+    wrap.className = "preview-table-wrap";
+    if (shouldShowTable) {
+      wrap.appendChild(buildEditablePreviewTable(preview.sections));
+    }
+    previewTable.appendChild(wrap);
+  }
+
+  function buildEditablePreviewTable(sections) {
+    const table = document.createElement("table");
+    table.className = "course-preview-table";
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>대주제</th>
+          <th>설명</th>
+          <th>비중(%)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector("tbody");
+    sections.forEach((section, index) => {
+      const row = document.createElement("tr");
+      row.dataset.previewRow = String(index);
+      row.innerHTML = `
+        <td><input type="text" data-preview-field="title" value="${escapeAttr(section.title)}" /></td>
+        <td><input type="text" data-preview-field="description" value="${escapeAttr(section.description || section.title || "")}" /></td>
+        <td>
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            data-preview-field="target_weight"
+            placeholder="직접 입력"
+            value="${section.target_weight === null || section.target_weight === undefined ? "" : escapeAttr(section.target_weight)}"
+          />
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+    return table;
+  }
+
+  function syncPreviewSectionsFromTable(previewTable) {
+    if (!state.page1.preview || !previewTable || state.page1.preview.decision !== "review_required") {
+      return;
+    }
+    const rows = qsa("[data-preview-row]", previewTable);
+    if (!rows.length) {
+      return;
+    }
+    state.page1.preview.sections = rows.map((row, index) => {
+      const titleInput = findFirst(row, ["[data-preview-field='title']"]);
+      const descriptionInput = findFirst(row, ["[data-preview-field='description']"]);
+      const weightInput = findFirst(row, ["[data-preview-field='target_weight']"]);
+      const rawWeight = valueOf(weightInput).trim();
+      const parsedWeight = rawWeight === "" ? null : Number(rawWeight);
+      return {
+        ...(state.page1.preview.sections[index] || {}),
+        id: state.page1.preview.sections[index]?.id || uniqueId(`section-${index + 1}`),
+        title: valueOf(titleInput).trim(),
+        description: valueOf(descriptionInput).trim() || valueOf(titleInput).trim(),
+        target_weight: Number.isFinite(parsedWeight) ? parsedWeight : null,
+        needs_weight_input: !(Number.isFinite(parsedWeight) && parsedWeight > 0),
+      };
+    }).filter((section) => section.title);
+    state.page1.preview.weight_status = derivePreviewWeightStatus(state.page1.preview.sections);
+    const sectionsInput = $("#course-sections-json");
+    if (sectionsInput) {
+      sectionsInput.value = JSON.stringify(state.page1.preview.sections);
+    }
+  }
+
+  function derivePreviewWeightStatus(sections) {
+    if (!Array.isArray(sections) || !sections.length) {
+      return "missing";
+    }
+    return sections.every((section) => Number(section.target_weight) > 0) ? "explicit" : "missing";
+  }
+
+  function isSavableCoursePreview(preview) {
+    if (!preview || preview.decision === "rejected") {
+      return false;
+    }
+    return previewSectionsAreValid(preview.sections);
+  }
+
+  function previewSectionsAreValid(sections) {
+    return Array.isArray(sections)
+      && sections.length > 0
+      && sections.every((section) => {
+        const title = String(section?.title || "").trim();
+        const description = String(section?.description || section?.title || "").trim();
+        const targetWeight = Number(section?.target_weight);
+        return Boolean(title && description && Number.isFinite(targetWeight) && targetWeight > 0);
+      });
   }
 
   function findOne(root, selectors) {
@@ -2457,6 +2901,38 @@
 
   function text(node) {
     return node ? node.textContent || "" : "";
+  }
+
+  function formatPrepareMode(mode) {
+    const normalized = String(mode || "").trim().toLowerCase();
+    if (normalized === "openai") {
+      return "OpenAI 임베딩";
+    }
+    if (normalized === "lexical") {
+      return "Lexical 기본";
+    }
+    return normalized || "자동";
+  }
+
+  function formatDurationSeconds(seconds) {
+    const total = Math.max(0, Number(seconds || 0));
+    if (!total) {
+      return "0분";
+    }
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.ceil((total % 3600) / 60);
+    if (hours <= 0) {
+      return `${minutes}분`;
+    }
+    if (minutes <= 0) {
+      return `${hours}시간`;
+    }
+    return `${hours}시간 ${minutes}분`;
+  }
+
+  function formatUsd(value) {
+    const amount = Number(value || 0);
+    return `$${amount.toFixed(4)}`;
   }
 
   function safeParseJSON(raw, fallback) {

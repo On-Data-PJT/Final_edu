@@ -8,12 +8,14 @@ Last Updated: 2026-04-09
 - 현재 앱 스택: `FastAPI + Jinja + CSS + Vanilla JS + uv + RQ`
 - 현재 실행 명령: `uv run python -m final_edu --reload`
 - 현재 worker 실행 명령: `uv run python -m final_edu.worker`
-- 현재 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`
-  - 현재 YouTube 입력은 개별 영상 URL 기준이며, 재생목록 URL의 내부 영상 자동 확장은 아직 미구현
+- 현재 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`, `YouTube Playlist URL`
+  - 현재 YouTube 입력은 개별 영상 URL과 playlist URL 모두 지원하고, playlist 는 내부 영상을 확장한 뒤 분석한다
 - 현재 과정 기준:
   - `Page 1`에서 과정명, 커리큘럼 PDF, 담당 강사 roster 를 등록
-  - PDF에서 대주제/목표 비중 초안을 추출
-  - preview table 은 숨기고 추출 결과는 hidden state 로 저장함
+  - `POST /courses/preview`는 커리큘럼 PDF를 `accepted | review_required | rejected`로 판정하고, 자동 저장 가능 여부를 함께 반환함
+  - 비관련 PDF나 unreadable PDF는 기본 대주제를 억지로 만들지 않고 저장 차단 대상으로 처리함
+- `review_required` 상태에서만 대주제/설명/비중 편집 표를 다시 노출해 사용자가 직접 수정 후 저장할 수 있음
+- 과정 등록 modal 의 preview 피드백은 상세 근거/경고 목록 대신 저장 가능 여부를 알려주는 짧은 상태 문구만 표시함
 - 현재 분석 모드:
   - `OPENAI_API_KEY`가 있으면 OpenAI embedding 사용
   - 키가 없거나 실패하면 lexical similarity fallback
@@ -23,6 +25,7 @@ Last Updated: 2026-04-09
 - 현재 작업 방식:
   - `Page 1`: 중앙 popup 기반 과정 추가/선택 + chat-style 자료 lane 등록
   - 과정 목록에서 같은 과정을 다시 선택하면 과정별 draft cache 또는 최근 제출 payload 기준으로 강사 자료/유튜브 링크를 복원함
+  - YouTube playlist 가 포함되면 `prepare -> confirm` 단계에서 영상 수, 예상 chunk, 예상 시간, 예상 비용을 먼저 확인함
   - `POST /analyze`는 즉시 결과를 반환하지 않음
   - 분석 Job을 생성하고 `/jobs/{job_id}`에서 첫 번째 결과 페이지를 확인함
   - `/jobs/{job_id}/solutions`에서 솔루션 인사이트 페이지를 확인함
@@ -41,6 +44,8 @@ Last Updated: 2026-04-09
   - `.agent/AGENTS.md`: 실제 운영 계약 문서
   - `.agent/STATUS.md`: 현재 상태 스냅샷 + 최근 변경
   - `.agent/DEBUG.md`: 해결된 오류와 재발 방지 규칙
+    - preflight 는 `How To Use` → `Always Read` → `Incident Index` 순으로 scan 하고, 현재 작업과 맞는 incident 본문만 추가로 읽는 방식으로 운영
+    - `Active Incidents`는 startup / dependency / queue / storage / 디자인 검수 자동화 / wide refactor / release 직전 점검에서 전체 확인
   - `.agent/Components.md`: 페이지별 UI 구성요소 및 상호작용 명세
   - `.agent/DESIGN.md`: 전체 웹 작업물의 시각 톤 및 디자인 시스템 명세
   - `./.codex/skills/final-edu-design/SKILL.md`: repo-local 디자인 구현 스킬
@@ -189,7 +194,6 @@ Last Updated: 2026-04-09
 - R2와 Render KV를 실제로 연결한 worker 경로는 아직 검증하지 않음
 - 현재 `rq 2.7.0` 기준 Windows의 별도 worker 실행은 `fork` 컨텍스트 제약 가능성이 있어 WSL/Linux 또는 배포 환경 검증이 더 적합함
 - YouTube transcript 실패 케이스를 더 다듬을 필요가 있음
-- YouTube 재생목록 URL을 내부 영상 URL들로 펼쳐 분석하는 기능은 아직 없음
 - 외부 동향 슬롯은 현재 placeholder 수준이며 실검색/실반영은 미구현
 - captionless YouTube STT 파이프라인은 아직 없음
 - `Page 2`/`Page 3` 모바일 밀도와 `Page 1` vertical breathing room 은 선택적 polish 여지가 남아 있음
@@ -227,6 +231,10 @@ Last Updated: 2026-04-09
 
 ### 2026-04-09
 
+- 루트 `AGENTS.md`와 `.agent/AGENTS.md`의 DEBUG preflight 규칙을 `전체 정독` 대신 `How To Use + Always Read + Incident Index + matched incident 본문` 기준으로 재정의
+- subagent handoff template 에 `Consulted DEBUG IDs` 필드를 추가
+- `.agent/DEBUG.md`를 stable ID(`DBG-001` 형식), `Always Read`, `Incident Index`, `Active Incidents`, `Archive` 구조로 재편
+- 과거 incident 는 index 기반 선택 조회가 가능하도록 재정리하고, 현재 재발 가능성이 높은 항목만 `Active Incidents`로 유지
 - `.agent/references/` 의존을 제거하고 Page 1 구현 기준을 첨부 이미지 + 문서 계약으로 단순화
 - `.agent/Components.md`를 중앙 popup + chat-style composer + 단일 강사 허용 기준으로 재작성
 - 첫 메인페이지를 white/blue minimal shell 로 재구성
@@ -248,6 +256,29 @@ Last Updated: 2026-04-09
 - Page 1 자료 업로드 안내 문구가 좌우 아이콘과 y축 기준으로 더 정확히 중앙에 오도록 lane middle surface 의 수직 정렬을 보정
 - 과정 목록 popup 에서 과정을 다시 선택하면 현재 세션의 과정별 lane draft 를 보존하고, 저장된 최근 job payload 가 있으면 강사별 파일/유튜브 입력을 복원하도록 보강
 - `GET /jobs/{job_id}/assets/{instructor_index}/{asset_index}` 다운로드 경로를 추가해 Page 1 draft 복원 시 저장된 업로드 파일을 다시 `File` 객체로 채울 수 있게 함
+- Page 1 lane 상태 메시지에 선택된 강사가 있으면 `상태 / 강사명` 형식으로 함께 표시되도록 조정
+- Page 1 lane 상태 메시지가 강사 선택 UI와 드리프트하지 않도록 block state, hidden input, trigger attribute를 함께 참조해 강사명을 안정적으로 표시하도록 보강
+- Page 1 lane 상태 메시지는 기본 라벨과 선택 강사명을 분리해 렌더하고, 강사명은 status element attribute + CSS pseudo content로 붙여 보이도록 보강
+- Page 1 lane 의 파일/유튜브 토큰을 공통 하단 rail 로 통합해 현재 모드와 관계없이 같은 위치에서 함께 보이도록 정리
+- Page 1 공통 asset rail 의 chip 은 동일한 기본 스타일을 유지하고, 작은 파일 / YouTube 표식만으로 타입을 구분하도록 정리
+- Page 1 stacked lane 의 상태 메시지가 이전 lane 영역을 침범하지 않도록 lane 간격과 status offset 을 조정
+- Page 1 analyze 제출 직전에 hidden input 을 강사 선택 상태와 다시 동기화해 실제 강사명이 job payload 에 저장되도록 보강
+- 기존 persisted draft 에 `강사 1/강사 2` 형태로 남은 payload 는 현재 과정 roster 순서를 이용해 강사명 fallback 복원을 시도하도록 보강
+- Page 1 파일 drag/drop target 을 중앙 surface 일부가 아니라 lane 의 흰 capsule 전체로 확장
+- 유튜브 모드에서도 같은 lane 의 흰 capsule 에 파일을 drop 하면 파일을 추가하고 files 모드로 전환하도록 보강
+- YouTube playlist URL 을 `yt-dlp` 기반으로 내부 영상 URL들로 확장하는 prepare 단계 추가
+- `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm` 2단계 제출 흐름 추가
+- playlist prepare modal 에 확장 영상 수, 총 재생시간, 예상 chunk, 예상 비용, warning 표시 추가
+- 대용량 YouTube 는 threshold hybrid 정책으로 추천 모드를 계산하고, lexical streaming 경로를 기본값으로 사용하도록 보강
+- embeddings 호출은 batched request 로 나누어 대용량 input 한도 초과 가능성을 낮추도록 보강
+- `/jobs/{job_id}/status` 와 running UI 에 phase / progress / 자막 성공·실패 집계를 노출하도록 확장
+- 과정 preview 파이프라인을 휴리스틱-only 성공 흐름에서 API 기반 문서 판별 + 구조화 추출 + 로컬 저장 가드 방식으로 교체
+- OpenAI 커리큘럼 검증이 가능하면 실제 커리큘럼 여부, 섹션 구조, 비중 근거를 먼저 판별한 뒤에만 자동 승인하도록 보강
+- OpenAI 커리큘럼 검증이 불가한 환경에서는 자동 승인하지 않고 `review_required` 또는 `rejected`만 반환하도록 보수적으로 변경
+- 커리큘럼 preview 의 기본 섹션 자동 생성과 텍스트 조각 fallback 자동 성공 경로를 제거
+- 비중 근거가 없는 섹션은 자동으로 100으로 정규화하지 않고 수동 입력이 필요하도록 변경
+- `/courses` 저장 시 대주제 비중이 비어 있거나 0 이하이면 400으로 거부하도록 서버 검증 추가
+- 과정 preview UI 에서 `확인 필요`, `경고`, `판정 근거` 상세 블록은 제거하고, 단일 상태 문구 + 필요 시 편집 표만 남기도록 단순화
 
 ### 2026-04-07
 

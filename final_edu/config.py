@@ -17,12 +17,28 @@ class Settings:
     openai_api_key: str | None
     openai_embedding_model: str
     openai_insight_model: str
+    openai_curriculum_model: str
     max_sections: int
     max_instructors: int
     max_upload_bytes: int
     chunk_target_tokens: int
     chunk_overlap_segments: int
     max_evidence_per_section: int
+    playlist_hard_limit: int
+    playlist_probe_sample_size: int
+    youtube_batch_size: int
+    youtube_fetch_concurrency: int
+    small_youtube_video_threshold: int
+    medium_youtube_video_threshold: int
+    small_youtube_chunk_threshold: int
+    medium_youtube_chunk_threshold: int
+    small_youtube_token_threshold: int
+    openai_embedding_rate_per_million_input_tokens: float
+    openai_insight_input_rate_per_million_tokens: float
+    openai_insight_output_rate_per_million_tokens: float
+    curriculum_preview_max_chars: int
+    curriculum_accept_confidence: float
+    curriculum_review_confidence: float
     redis_url: str | None
     queue_name: str
     job_timeout_seconds: int
@@ -85,12 +101,34 @@ def get_settings() -> Settings:
             "text-embedding-3-small",
         ),
         openai_insight_model=os.getenv("OPENAI_INSIGHT_MODEL", "gpt-5.4-mini"),
+        openai_curriculum_model=os.getenv("OPENAI_CURRICULUM_MODEL", "gpt-5.4-mini"),
         max_sections=8,
         max_instructors=3,
         max_upload_bytes=max_upload_mb * 1024 * 1024,
         chunk_target_tokens=550,
         chunk_overlap_segments=1,
         max_evidence_per_section=3,
+        playlist_hard_limit=int(os.getenv("FINAL_EDU_PLAYLIST_HARD_LIMIT", "500")),
+        playlist_probe_sample_size=int(os.getenv("FINAL_EDU_PLAYLIST_PROBE_SAMPLE_SIZE", "20")),
+        youtube_batch_size=int(os.getenv("FINAL_EDU_YOUTUBE_BATCH_SIZE", "20")),
+        youtube_fetch_concurrency=int(os.getenv("FINAL_EDU_YOUTUBE_FETCH_CONCURRENCY", "6")),
+        small_youtube_video_threshold=int(os.getenv("FINAL_EDU_SMALL_YOUTUBE_VIDEO_THRESHOLD", "50")),
+        medium_youtube_video_threshold=int(os.getenv("FINAL_EDU_MEDIUM_YOUTUBE_VIDEO_THRESHOLD", "200")),
+        small_youtube_chunk_threshold=int(os.getenv("FINAL_EDU_SMALL_YOUTUBE_CHUNK_THRESHOLD", "250")),
+        medium_youtube_chunk_threshold=int(os.getenv("FINAL_EDU_MEDIUM_YOUTUBE_CHUNK_THRESHOLD", "600")),
+        small_youtube_token_threshold=int(os.getenv("FINAL_EDU_SMALL_YOUTUBE_TOKEN_THRESHOLD", "150000")),
+        openai_embedding_rate_per_million_input_tokens=float(
+            os.getenv("FINAL_EDU_OPENAI_EMBEDDING_RATE_PER_MILLION", "0.02")
+        ),
+        openai_insight_input_rate_per_million_tokens=float(
+            os.getenv("FINAL_EDU_OPENAI_INSIGHT_INPUT_RATE_PER_MILLION", "0.75")
+        ),
+        openai_insight_output_rate_per_million_tokens=float(
+            os.getenv("FINAL_EDU_OPENAI_INSIGHT_OUTPUT_RATE_PER_MILLION", "4.5")
+        ),
+        curriculum_preview_max_chars=int(os.getenv("FINAL_EDU_CURRICULUM_MAX_PREVIEW_CHARS", "18000")),
+        curriculum_accept_confidence=float(os.getenv("FINAL_EDU_CURRICULUM_ACCEPT_CONFIDENCE", "0.78")),
+        curriculum_review_confidence=float(os.getenv("FINAL_EDU_CURRICULUM_REVIEW_CONFIDENCE", "0.55")),
         redis_url=os.getenv("REDIS_URL"),
         queue_name=os.getenv("FINAL_EDU_QUEUE_NAME", "final-edu-analysis"),
         job_timeout_seconds=int(os.getenv("FINAL_EDU_JOB_TIMEOUT_SECONDS", "7200")),

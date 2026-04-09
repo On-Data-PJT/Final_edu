@@ -9,7 +9,7 @@
 
 1. `.agent/AGENTS.md`
 2. `.agent/STATUS.md`
-3. `.agent/DEBUG.md`
+3. `.agent/DEBUG.md`의 `How To Use` → `Always Read` → `Incident Index` 순으로 preflight scan
 4. `git status --short --branch`
 5. UI/디자인 작업이라면 `.agent/Components.md`, `.agent/DESIGN.md`, `./.codex/skills/final-edu-design/SKILL.md`
 
@@ -18,6 +18,7 @@
 - 장기 운영 규칙, 역할, close-out 규칙, 아키텍처 계약은 **`.agent/AGENTS.md`**를 source of truth 로 사용합니다.
 - 현재 상태 스냅샷은 **`.agent/STATUS.md`**를 사용합니다.
 - 해결된 오류와 재발 방지는 **`.agent/DEBUG.md`**를 사용합니다.
+  - 단, 작업 시작 시에는 archive 전체를 정독하는 대신 `Always Read`와 `Incident Index`를 먼저 보고, 현재 작업과 맞는 incident 본문만 추가로 읽습니다.
 - UI 구조 요구사항은 **`.agent/Components.md`**를 사용합니다.
 - 시각 톤과 디자인 규칙은 **`.agent/DESIGN.md`**를 사용합니다.
 - 이 루트 파일에는 bootstrap 목적의 최소 안내만 유지합니다.

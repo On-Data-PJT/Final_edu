@@ -226,6 +226,10 @@ def create_job_record(
     payload_key: str,
     section_count: int,
     settings: Settings,
+    *,
+    selected_analysis_mode: str | None = None,
+    estimated_cost_usd: float | None = None,
+    expanded_video_count: int = 0,
 ) -> AnalysisJobRecord:
     created_at, created_at_ts = _now()
     instructor_names = [item.name for item in payload.instructors]
@@ -246,6 +250,10 @@ def create_job_record(
         asset_count=asset_count,
         youtube_url_count=youtube_url_count,
         section_count=section_count,
+        phase="playlist_expanding" if youtube_url_count else "chunking",
+        selected_analysis_mode=selected_analysis_mode or payload.analysis_mode,
+        estimated_cost_usd=estimated_cost_usd,
+        expanded_video_count=max(expanded_video_count, youtube_url_count),
     )
 
 
@@ -253,11 +261,23 @@ def enqueue_analysis_job(
     payload: AnalysisJobPayload,
     section_count: int,
     settings: Settings | None = None,
+    *,
+    selected_analysis_mode: str | None = None,
+    estimated_cost_usd: float | None = None,
+    expanded_video_count: int = 0,
 ) -> AnalysisJobRecord:
     services = create_job_services(settings)
     payload_key = f"jobs/{payload.job_id}/payload.json"
     services.storage.put_json(payload_key, payload.to_dict())
-    record = create_job_record(payload, payload_key, section_count, services.settings)
+    record = create_job_record(
+        payload,
+        payload_key,
+        section_count,
+        services.settings,
+        selected_analysis_mode=selected_analysis_mode,
+        estimated_cost_usd=estimated_cost_usd,
+        expanded_video_count=expanded_video_count,
+    )
     services.repository.save(record)
 
     try:
@@ -300,28 +320,70 @@ def run_analysis_job(job_id: str) -> None:
     if record is None:
         return
 
-    services.repository.save(_updated_record(record, status="running", error=None))
+    current_record = _updated_record(record, status="running", error=None)
+    services.repository.save(current_record)
+
+    last_progress_signature: tuple[str | None, int, int] = (
+        current_record.phase,
+        current_record.progress_current,
+        current_record.progress_total,
+    )
+
+    def progress_callback(**snapshot) -> None:
+        nonlocal current_record, last_progress_signature
+        phase = snapshot.get("phase") or current_record.phase
+        progress_current = int(snapshot.get("progress_current", current_record.progress_current or 0))
+        progress_total = int(snapshot.get("progress_total", current_record.progress_total or 0))
+        signature = (phase, progress_current, progress_total)
+        should_persist = (
+            signature[0] != last_progress_signature[0]
+            or progress_current in {0, progress_total}
+            or (progress_total > 0 and progress_current % 5 == 0)
+        )
+        if not should_persist:
+            return
+        current_record = _updated_record(
+            current_record,
+            status="running",
+            error=None,
+            phase=phase,
+            progress_current=progress_current,
+            progress_total=progress_total,
+            expanded_video_count=int(snapshot.get("expanded_video_count", current_record.expanded_video_count or 0)),
+            processed_video_count=int(snapshot.get("processed_video_count", current_record.processed_video_count or 0)),
+            caption_success_count=int(snapshot.get("caption_success_count", current_record.caption_success_count or 0)),
+            caption_failure_count=int(snapshot.get("caption_failure_count", current_record.caption_failure_count or 0)),
+        )
+        services.repository.save(current_record)
+        last_progress_signature = signature
 
     try:
-        payload = AnalysisJobPayload.from_dict(services.storage.get_json(record.payload_key))
-        result = _execute_analysis(payload, services.storage, services.settings)
+        payload = AnalysisJobPayload.from_dict(services.storage.get_json(current_record.payload_key))
+        result = _execute_analysis(payload, services.storage, services.settings, progress_callback=progress_callback)
         result_key = f"jobs/{job_id}/result.json"
         services.storage.put_json(result_key, result)
         completed = _updated_record(
-            record,
+            current_record,
             status="completed",
             result_key=result_key,
             error=None,
             scorer_mode=str(result.get("scorer_mode", "")),
             duration_ms=int(result.get("duration_ms", 0)),
             warning_count=len(result.get("warnings", [])),
+            phase=None,
+            progress_current=max(current_record.progress_current, current_record.progress_total),
         )
         services.repository.save(completed)
     except Exception as exc:  # noqa: BLE001
-        services.repository.save(_updated_record(record, status="failed", error=str(exc)))
+        services.repository.save(_updated_record(current_record, status="failed", error=str(exc)))
 
-
-def _execute_analysis(payload: AnalysisJobPayload, storage: ObjectStorage, settings: Settings) -> dict:
+def _execute_analysis(
+    payload: AnalysisJobPayload,
+    storage: ObjectStorage,
+    settings: Settings,
+    *,
+    progress_callback=None,
+) -> dict:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         submissions: list[InstructorSubmission] = []
@@ -342,7 +404,7 @@ def _execute_analysis(payload: AnalysisJobPayload, storage: ObjectStorage, setti
                 InstructorSubmission(
                     name=instructor.name,
                     files=uploads,
-                    youtube_urls=list(instructor.youtube_urls),
+                    youtube_urls=list(instructor.youtube_urls or instructor.youtube_inputs),
                 )
             )
 
@@ -357,6 +419,8 @@ def _execute_analysis(payload: AnalysisJobPayload, storage: ObjectStorage, setti
             sections=sections,
             submissions=submissions,
             settings=settings,
+            progress_callback=progress_callback,
+            analysis_mode=payload.analysis_mode,
         )
         return result.to_dict()
 

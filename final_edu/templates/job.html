@@ -24,6 +24,12 @@
     </div>
     <div class="meta-row">
       <span class="meta-chip">상태 {{ job.status_label }}</span>
+      {% if job.selected_analysis_mode %}
+        <span class="meta-chip">모드 {{ job.selected_analysis_mode }}</span>
+      {% endif %}
+      {% if job.expanded_video_count %}
+        <span class="meta-chip">영상 {{ job.expanded_video_count }}개</span>
+      {% endif %}
       <span class="meta-chip">{{ job.section_count }}개 대주제</span>
       <span class="meta-chip">업데이트 {{ job.updated_at_label }}</span>
     </div>
@@ -50,6 +56,29 @@
       <div class="job-status-panel">
         <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
         <p class="hint">현재 상태: {{ job.status_label }}</p>
+        <p id="job-phase-copy" class="hint">
+          {% if job.phase_label %}
+            단계: {{ job.phase_label }}
+          {% else %}
+            작업 준비 중
+          {% endif %}
+        </p>
+        <p id="job-progress-copy" class="hint">
+          {% if job.progress_total %}
+            진행 {{ job.progress_current }} / {{ job.progress_total }}
+          {% elif job.expanded_video_count %}
+            영상 {{ job.processed_video_count }} / {{ job.expanded_video_count }}
+          {% else %}
+            처리량 계산 중
+          {% endif %}
+        </p>
+        <p id="job-caption-copy" class="hint">
+          {% if job.expanded_video_count %}
+            자막 성공 {{ job.caption_success_count }} / 실패 {{ job.caption_failure_count }}
+          {% else %}
+            자막 상태 집계 중
+          {% endif %}
+        </p>
       </div>
     </section>
   {% elif result %}
@@ -179,6 +208,9 @@
       const statusUrl = "{{ request.url_for('job_status', job_id=job.id) }}";
       const statusPill = document.getElementById("job-status-pill");
       const updatedLabel = document.querySelector(".meta-row .meta-chip:last-child");
+      const phaseCopy = document.getElementById("job-phase-copy");
+      const progressCopy = document.getElementById("job-progress-copy");
+      const captionCopy = document.getElementById("job-caption-copy");
 
       async function pollJob() {
         const response = await fetch(statusUrl, { headers: { Accept: "application/json" } });
@@ -190,6 +222,23 @@
         }
         if (updatedLabel) {
           updatedLabel.textContent = `업데이트 ${payload.updated_at_label}`;
+        }
+        if (phaseCopy) {
+          phaseCopy.textContent = payload.phase_label
+            ? `단계: ${payload.phase_label}`
+            : "작업 준비 중";
+        }
+        if (progressCopy) {
+          progressCopy.textContent = payload.progress_total
+            ? `진행 ${payload.progress_current} / ${payload.progress_total}`
+            : (payload.expanded_video_count
+              ? `영상 ${payload.processed_video_count} / ${payload.expanded_video_count}`
+              : "처리량 계산 중");
+        }
+        if (captionCopy) {
+          captionCopy.textContent = payload.expanded_video_count
+            ? `자막 성공 ${payload.caption_success_count} / 실패 ${payload.caption_failure_count}`
+            : "자막 상태 집계 중";
         }
         if (payload.status === "completed" || payload.status === "failed") {
           window.location.reload();

@@ -5,6 +5,7 @@ import math
 import re
 import time
 from collections import Counter, defaultdict
+from dataclasses import replace
 from statistics import mean
 
 try:
@@ -58,6 +59,8 @@ def analyze_submissions(
     sections: list[CurriculumSection],
     submissions: list[InstructorSubmission],
     settings: Settings,
+    progress_callback=None,
+    analysis_mode: str = "auto",
 ) -> AnalysisRun:
     started = time.perf_counter()
     normalized_sections = _normalize_target_weights(sections)
@@ -65,10 +68,37 @@ def analyze_submissions(
     if len(active_submissions) < 1:
         raise ValueError("최소 1명의 강사 자료가 필요합니다.")
 
+    normalized_mode = str(analysis_mode or "auto").strip().lower()
+    if normalized_mode == "lexical":
+        return _analyze_submissions_lexical_streaming(
+            course_id=course_id,
+            course_name=course_name,
+            sections=normalized_sections,
+            submissions=active_submissions,
+            settings=settings,
+            started=started,
+            progress_callback=progress_callback,
+        )
+
     all_chunks = []
     warnings: list[str] = []
     instructor_assets: dict[str, int] = defaultdict(int)
     instructor_warnings: dict[str, list[str]] = defaultdict(list)
+    total_youtube_videos = sum(len(submission.youtube_urls) for submission in active_submissions)
+    processed_youtube_videos = 0
+    caption_success_count = 0
+    caption_failure_count = 0
+
+    _emit_progress(
+        progress_callback,
+        phase="transcript_fetching",
+        progress_current=0,
+        progress_total=total_youtube_videos,
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=0,
+        caption_success_count=0,
+        caption_failure_count=0,
+    )
 
     for submission in active_submissions:
         for upload in submission.files:
@@ -89,7 +119,9 @@ def analyze_submissions(
             source, segments, source_warnings = extract_youtube_asset(youtube_url, submission.name)
             warnings.extend(source_warnings)
             instructor_warnings[submission.name].extend(source_warnings)
+            processed_youtube_videos += 1
             if segments:
+                caption_success_count += 1
                 instructor_assets[submission.name] += 1
                 all_chunks.extend(
                     build_chunks(
@@ -98,12 +130,44 @@ def analyze_submissions(
                         overlap_segments=settings.chunk_overlap_segments,
                     )
                 )
+            else:
+                caption_failure_count += 1
+            _emit_progress(
+                progress_callback,
+                phase="transcript_fetching",
+                progress_current=processed_youtube_videos,
+                progress_total=total_youtube_videos,
+                expanded_video_count=total_youtube_videos,
+                processed_video_count=processed_youtube_videos,
+                caption_success_count=caption_success_count,
+                caption_failure_count=caption_failure_count,
+            )
 
+    _emit_progress(
+        progress_callback,
+        phase="chunking",
+        progress_current=len(all_chunks),
+        progress_total=max(1, len(all_chunks)),
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=processed_youtube_videos,
+        caption_success_count=caption_success_count,
+        caption_failure_count=caption_failure_count,
+    )
     deduped_chunks, dedupe_warnings = _dedupe_chunks(all_chunks)
     warnings.extend(dedupe_warnings)
     if not deduped_chunks:
         raise ValueError("분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요.")
 
+    _emit_progress(
+        progress_callback,
+        phase="assigning",
+        progress_current=0,
+        progress_total=len(deduped_chunks),
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=processed_youtube_videos,
+        caption_success_count=caption_success_count,
+        caption_failure_count=caption_failure_count,
+    )
     assignments, scorer_mode, scorer_warnings = _assign_chunks(deduped_chunks, normalized_sections, settings)
     warnings.extend(scorer_warnings)
     summaries = _build_instructor_summaries(
@@ -124,6 +188,16 @@ def analyze_submissions(
         sections=normalized_sections,
     )
     rose_series_by_instructor = _build_rose_series(summaries)
+    _emit_progress(
+        progress_callback,
+        phase="insight_generating",
+        progress_current=1,
+        progress_total=1,
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=processed_youtube_videos,
+        caption_success_count=caption_success_count,
+        caption_failure_count=caption_failure_count,
+    )
     insights, insight_generation_mode, insight_warnings = _build_insights(
         course_name=course_name,
         sections=normalized_sections,
@@ -165,6 +239,186 @@ def analyze_submissions(
     )
 
 
+def _analyze_submissions_lexical_streaming(
+    *,
+    course_id: str,
+    course_name: str,
+    sections: list[CurriculumSection],
+    submissions: list[InstructorSubmission],
+    settings: Settings,
+    started: float,
+    progress_callback=None,
+) -> AnalysisRun:
+    warnings: list[str] = []
+    instructor_assets: dict[str, int] = defaultdict(int)
+    instructor_warnings: dict[str, list[str]] = defaultdict(list)
+    total_youtube_videos = sum(len(submission.youtube_urls) for submission in submissions)
+    processed_youtube_videos = 0
+    caption_success_count = 0
+    caption_failure_count = 0
+    keyword_counters: dict[str, Counter[str]] = defaultdict(Counter)
+    off_curriculum_counters: dict[str, Counter[str]] = defaultdict(Counter)
+    curriculum_tokens = set()
+    for section in sections:
+        curriculum_tokens.update(tokenize(section.search_text))
+    lexical_index = _build_lexical_index(sections)
+    dedupe_seen: set[tuple[str, str]] = set()
+    removed_duplicates = 0
+    mode_aggregates = _init_mode_aggregates(sections, submissions)
+    evidence_map: dict[str, dict[str, list[ChunkAssignment]]] = defaultdict(lambda: defaultdict(list))
+
+    _emit_progress(
+        progress_callback,
+        phase="transcript_fetching",
+        progress_current=0,
+        progress_total=total_youtube_videos,
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=0,
+        caption_success_count=0,
+        caption_failure_count=0,
+    )
+
+    for submission in submissions:
+        for upload in submission.files:
+            source, segments, source_warnings = extract_file_asset(upload, submission.name)
+            warnings.extend(source_warnings)
+            instructor_warnings[submission.name].extend(source_warnings)
+            if not segments:
+                continue
+            instructor_assets[submission.name] += 1
+            removed_duplicates += _stream_segments_into_aggregates(
+                segments=segments,
+                instructor_name=submission.name,
+                settings=settings,
+                sections=sections,
+                lexical_index=lexical_index,
+                dedupe_seen=dedupe_seen,
+                mode_aggregates=mode_aggregates,
+                evidence_map=evidence_map,
+                keyword_counters=keyword_counters,
+                off_curriculum_counters=off_curriculum_counters,
+                curriculum_tokens=curriculum_tokens,
+                max_evidence=settings.max_evidence_per_section,
+            )
+
+        for youtube_url in submission.youtube_urls:
+            source, segments, source_warnings = extract_youtube_asset(youtube_url, submission.name)
+            warnings.extend(source_warnings)
+            instructor_warnings[submission.name].extend(source_warnings)
+            processed_youtube_videos += 1
+            if segments:
+                caption_success_count += 1
+                instructor_assets[submission.name] += 1
+                removed_duplicates += _stream_segments_into_aggregates(
+                    segments=segments,
+                    instructor_name=submission.name,
+                    settings=settings,
+                    sections=sections,
+                    lexical_index=lexical_index,
+                    dedupe_seen=dedupe_seen,
+                    mode_aggregates=mode_aggregates,
+                    evidence_map=evidence_map,
+                    keyword_counters=keyword_counters,
+                    off_curriculum_counters=off_curriculum_counters,
+                    curriculum_tokens=curriculum_tokens,
+                    max_evidence=settings.max_evidence_per_section,
+                )
+            else:
+                caption_failure_count += 1
+            _emit_progress(
+                progress_callback,
+                phase="transcript_fetching",
+                progress_current=processed_youtube_videos,
+                progress_total=total_youtube_videos,
+                expanded_video_count=total_youtube_videos,
+                processed_video_count=processed_youtube_videos,
+                caption_success_count=caption_success_count,
+                caption_failure_count=caption_failure_count,
+            )
+
+    if removed_duplicates:
+        warnings.append(f"반복 텍스트 청크 {removed_duplicates}개를 중복 제거했습니다.")
+
+    combined_aggregates = mode_aggregates["combined"]
+    if not any(combined_aggregates.get(submission.name, {}).get("total_tokens", 0) for submission in submissions):
+        raise ValueError("분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요.")
+
+    _emit_progress(
+        progress_callback,
+        phase="assigning",
+        progress_current=1,
+        progress_total=1,
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=processed_youtube_videos,
+        caption_success_count=caption_success_count,
+        caption_failure_count=caption_failure_count,
+    )
+
+    summaries = _build_summaries_from_aggregates(
+        sections=sections,
+        submissions=submissions,
+        combined_aggregates=combined_aggregates,
+        evidence_map=evidence_map,
+        instructor_assets=instructor_assets,
+        instructor_warnings=instructor_warnings,
+    )
+    mode_series, average_series_by_mode, line_series_by_mode = _build_mode_series_from_aggregates(
+        sections=sections,
+        submissions=submissions,
+        mode_aggregates=mode_aggregates,
+    )
+    keywords_by_instructor = _build_keywords_from_counters(keyword_counters, off_curriculum_counters)
+    rose_series_by_instructor = _build_rose_series(summaries)
+    _emit_progress(
+        progress_callback,
+        phase="insight_generating",
+        progress_current=1,
+        progress_total=1,
+        expanded_video_count=total_youtube_videos,
+        processed_video_count=processed_youtube_videos,
+        caption_success_count=caption_success_count,
+        caption_failure_count=caption_failure_count,
+    )
+    insights, insight_generation_mode, insight_warnings = _build_insights(
+        course_name=course_name,
+        sections=sections,
+        summaries=summaries,
+        average_series_by_mode=average_series_by_mode,
+        keywords_by_instructor=keywords_by_instructor,
+        settings=replace(settings, openai_api_key=None),
+    )
+    warnings.extend(insight_warnings)
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return AnalysisRun(
+        sections=sections,
+        instructors=summaries,
+        warnings=warnings,
+        scorer_mode="lexical-streaming",
+        duration_ms=duration_ms,
+        course={
+            "id": course_id,
+            "name": course_name,
+            "sections": [
+                {
+                    "id": section.id,
+                    "title": section.title,
+                    "description": section.description,
+                    "target_weight": section.target_weight,
+                }
+                for section in sections
+            ],
+        },
+        mode_series=mode_series,
+        average_series_by_mode=average_series_by_mode,
+        keywords_by_instructor=keywords_by_instructor,
+        rose_series_by_instructor=rose_series_by_instructor,
+        line_series_by_mode=line_series_by_mode,
+        insights=insights,
+        insight_generation_mode=insight_generation_mode,
+        external_trends_status="planned",
+    )
+
+
 def parse_curriculum_sections(curriculum_text: str, max_sections: int) -> list[CurriculumSection]:
     lines = [normalize_text(line) for line in curriculum_text.splitlines()]
     lines = [line for line in lines if line]
@@ -186,6 +440,258 @@ def parse_curriculum_sections(curriculum_text: str, max_sections: int) -> list[C
         sections.append(CurriculumSection(id=section_id, title=title, description=description))
 
     return _normalize_target_weights(sections)
+
+
+def _emit_progress(progress_callback, **payload) -> None:
+    if callable(progress_callback):
+        progress_callback(**payload)
+
+
+def _build_lexical_index(sections: list[CurriculumSection]) -> dict:
+    return {
+        "section_counters": {section.id: Counter(tokenize(section.search_text)) for section in sections},
+        "section_titles": {section.id: set(tokenize(section.title)) for section in sections},
+    }
+
+
+def _init_mode_aggregates(sections: list[CurriculumSection], submissions: list[InstructorSubmission]) -> dict:
+    section_ids = [section.id for section in sections]
+    return {
+        mode: {
+            submission.name: {
+                "total_tokens": 0,
+                "unmapped_tokens": 0,
+                "section_tokens": {section_id: 0 for section_id in section_ids},
+            }
+            for submission in submissions
+        }
+        for mode in ("combined", "material", "speech")
+    }
+
+
+def _stream_segments_into_aggregates(
+    *,
+    segments: list,
+    instructor_name: str,
+    settings: Settings,
+    sections: list[CurriculumSection],
+    lexical_index: dict,
+    dedupe_seen: set[tuple[str, str]],
+    mode_aggregates: dict,
+    evidence_map: dict,
+    keyword_counters: dict[str, Counter[str]],
+    off_curriculum_counters: dict[str, Counter[str]],
+    curriculum_tokens: set[str],
+    max_evidence: int,
+) -> int:
+    removed_duplicates = 0
+    chunks = build_chunks(
+        segments,
+        target_tokens=settings.chunk_target_tokens,
+        overlap_segments=settings.chunk_overlap_segments,
+    )
+    for chunk in chunks:
+        dedupe_key = (chunk.instructor_name, chunk.fingerprint)
+        if dedupe_key in dedupe_seen:
+            removed_duplicates += 1
+            continue
+        dedupe_seen.add(dedupe_key)
+
+        assignment = _assign_chunk_lexical(chunk, sections, lexical_index)
+        tokens = tokenize(chunk.text)
+        keyword_counters[instructor_name].update(tokens)
+        off_curriculum_counters[instructor_name].update(
+            token for token in tokens if token not in curriculum_tokens
+        )
+        for mode in _modes_for_source_type(chunk.source_type):
+            aggregate = mode_aggregates[mode][instructor_name]
+            aggregate["total_tokens"] += chunk.token_count
+            if assignment.is_unmapped:
+                aggregate["unmapped_tokens"] += chunk.token_count
+            else:
+                aggregate["section_tokens"][assignment.section_id] += chunk.token_count
+        if not assignment.is_unmapped and max_evidence > 0:
+            bucket = evidence_map[instructor_name][assignment.section_id]
+            bucket.append(assignment)
+            bucket.sort(key=lambda item: (item.score, item.chunk.token_count), reverse=True)
+            del bucket[max_evidence:]
+    return removed_duplicates
+
+
+def _modes_for_source_type(source_type: str) -> list[str]:
+    if source_type in MATERIAL_SOURCE_TYPES:
+        return ["combined", "material"]
+    if source_type in SPEECH_SOURCE_TYPES:
+        return ["combined", "speech"]
+    return ["combined"]
+
+
+def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> ChunkAssignment:
+    section_counters = lexical_index["section_counters"]
+    section_titles = lexical_index["section_titles"]
+    chunk_counter = Counter(tokenize(chunk.text))
+    chunk_tokens = set(chunk_counter)
+    scored = []
+
+    for section in sections:
+        cosine = cosine_similarity(chunk_counter, section_counters[section.id])
+        title_tokens = section_titles[section.id]
+        title_overlap = len(chunk_tokens & title_tokens) / max(1, len(title_tokens))
+        score = (cosine * 0.75) + (title_overlap * 0.25)
+        scored.append((section, score))
+
+    return _best_assignment(chunk, scored, min_score=0.07, min_margin=0.01)
+
+
+def _build_summaries_from_aggregates(
+    *,
+    sections: list[CurriculumSection],
+    submissions: list[InstructorSubmission],
+    combined_aggregates: dict,
+    evidence_map: dict,
+    instructor_assets: dict[str, int],
+    instructor_warnings: dict[str, list[str]],
+) -> list[InstructorSummary]:
+    summaries: list[InstructorSummary] = []
+    average_shares: dict[str, float] = {}
+
+    for submission in submissions:
+        aggregate = combined_aggregates.get(
+            submission.name,
+            {"total_tokens": 0, "unmapped_tokens": 0, "section_tokens": {}},
+        )
+        total_tokens = int(aggregate.get("total_tokens", 0))
+        section_tokens = aggregate.get("section_tokens", {})
+        coverages: list[SectionCoverage] = []
+
+        for section in sections:
+            token_count_value = int(section_tokens.get(section.id, 0))
+            share = (token_count_value / total_tokens) if total_tokens else 0.0
+            coverages.append(
+                SectionCoverage(
+                    section_id=section.id,
+                    section_title=section.title,
+                    token_count=token_count_value,
+                    token_share=share,
+                    evidence_snippets=[
+                        EvidenceSnippet(
+                            source_label=evidence.chunk.source_label,
+                            locator=evidence.chunk.locator,
+                            text=safe_snippet(evidence.chunk.text),
+                            score=evidence.score,
+                        )
+                        for evidence in evidence_map.get(submission.name, {}).get(section.id, [])
+                    ],
+                )
+            )
+
+        summaries.append(
+            InstructorSummary(
+                name=submission.name,
+                total_tokens=total_tokens,
+                asset_count=instructor_assets.get(submission.name, 0),
+                section_coverages=coverages,
+                unmapped_tokens=int(aggregate.get("unmapped_tokens", 0)),
+                unmapped_share=(aggregate.get("unmapped_tokens", 0) / total_tokens) if total_tokens else 0.0,
+                warnings=instructor_warnings.get(submission.name, []),
+            )
+        )
+
+    for section in sections:
+        shares = [
+            next((coverage.token_share for coverage in summary.section_coverages if coverage.section_id == section.id), 0.0)
+            for summary in summaries
+        ]
+        average_shares[section.id] = mean(shares) if shares else 0.0
+
+    for summary in summaries:
+        for coverage in summary.section_coverages:
+            coverage.deviation_from_average = coverage.token_share - average_shares[coverage.section_id]
+
+    return summaries
+
+
+def _build_mode_series_from_aggregates(
+    *,
+    sections: list[CurriculumSection],
+    submissions: list[InstructorSubmission],
+    mode_aggregates: dict,
+) -> tuple[dict, dict, dict]:
+    mode_series: dict[str, dict] = {}
+    average_series_by_mode: dict[str, list[dict]] = {}
+    line_series_by_mode: dict[str, dict] = {}
+
+    for mode in ("combined", "material", "speech"):
+        aggregates = mode_aggregates.get(mode, {})
+        average_values: list[dict] = []
+        instructor_values: dict[str, list[dict]] = {}
+
+        for submission in submissions:
+            aggregate = aggregates.get(
+                submission.name,
+                {"total_tokens": 0, "section_tokens": {section.id: 0 for section in sections}},
+            )
+            total_tokens = int(aggregate.get("total_tokens", 0))
+            section_tokens = aggregate.get("section_tokens", {})
+            instructor_values[submission.name] = [
+                {
+                    "section_id": section.id,
+                    "section_title": section.title,
+                    "share": round((int(section_tokens.get(section.id, 0)) / total_tokens), 6) if total_tokens else 0.0,
+                }
+                for section in sections
+            ]
+
+        for section in sections:
+            shares = [
+                next(
+                    (item["share"] for item in instructor_values.get(submission.name, []) if item["section_id"] == section.id),
+                    0.0,
+                )
+                for submission in submissions
+            ]
+            average_values.append(
+                {
+                    "section_id": section.id,
+                    "section_title": section.title,
+                    "share": round(mean(shares), 6) if shares else 0.0,
+                }
+            )
+
+        mode_series[mode] = {
+            "average": average_values,
+            "instructors": instructor_values,
+        }
+        average_series_by_mode[mode] = average_values
+        line_series_by_mode[mode] = {
+            "target": [
+                {
+                    "section_id": section.id,
+                    "section_title": section.title,
+                    "share": round(section.target_weight / 100, 6),
+                }
+                for section in sections
+            ],
+            "instructors": instructor_values,
+        }
+
+    return mode_series, average_series_by_mode, line_series_by_mode
+
+
+def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_curriculum: dict[str, Counter[str]]) -> dict[str, list[dict]]:
+    keywords: dict[str, list[dict]] = {}
+    for instructor_name, counts in grouped.items():
+        top_keywords = counts.most_common(25)
+        top_off_curriculum = grouped_off_curriculum[instructor_name].most_common(15)
+        keywords[instructor_name] = [
+            {"text": token, "value": int(value)}
+            for token, value in top_keywords
+        ]
+        keywords[f"{instructor_name}__off_curriculum"] = [
+            {"text": token, "value": int(value)}
+            for token, value in top_off_curriculum
+        ]
+    return keywords
 
 
 def _normalize_target_weights(sections: list[CurriculumSection]) -> list[CurriculumSection]:
@@ -299,8 +805,27 @@ def _assign_with_openai(chunks, sections, settings: Settings):
 
 
 def _embed_texts(client, texts: list[str], model: str):  # noqa: ANN001
-    response = client.embeddings.create(model=model, input=texts)
-    return [item.embedding for item in response.data]
+    if not texts:
+        return []
+    batches: list[list[str]] = []
+    current_batch: list[str] = []
+    current_batch_tokens = 0
+    for text in texts:
+        estimated_tokens = max(1, count_tokens(text))
+        if current_batch and (current_batch_tokens + estimated_tokens > 120000 or len(current_batch) >= 128):
+            batches.append(current_batch)
+            current_batch = []
+            current_batch_tokens = 0
+        current_batch.append(text)
+        current_batch_tokens += estimated_tokens
+    if current_batch:
+        batches.append(current_batch)
+
+    vectors: list[list[float]] = []
+    for batch in batches:
+        response = client.embeddings.create(model=model, input=batch)
+        vectors.extend(item.embedding for item in response.data)
+    return vectors
 
 
 def _vector_cosine(left: list[float], right: list[float]) -> float:

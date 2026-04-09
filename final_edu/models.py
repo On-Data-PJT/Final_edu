@@ -17,6 +17,43 @@ class CurriculumSection:
 
 
 @dataclass(slots=True)
+class CurriculumPreviewEvidence:
+    page: int | None = None
+    snippet: str = ""
+    reason: str = ""
+
+
+@dataclass(slots=True)
+class CurriculumPreviewSection:
+    id: str
+    title: str
+    description: str
+    target_weight: float | None = None
+    weight_source: str = "none"
+    raw_weight_value: float | None = None
+    confidence: float = 0.0
+    source_pages: list[int] = field(default_factory=list)
+    source_snippets: list[str] = field(default_factory=list)
+    needs_weight_input: bool = False
+
+
+@dataclass(slots=True)
+class CurriculumPreviewResult:
+    decision: str
+    document_kind: str
+    document_confidence: float
+    weight_status: str
+    raw_curriculum_text: str
+    sections: list[CurriculumPreviewSection] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    blocking_reasons: list[str] = field(default_factory=list)
+    evidence: list[CurriculumPreviewEvidence] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class UploadedAsset:
     path: Path
     original_name: str
@@ -177,12 +214,14 @@ class StoredUploadRef:
 class JobInstructorInput:
     name: str
     files: list[StoredUploadRef] = field(default_factory=list)
+    youtube_inputs: list[str] = field(default_factory=list)
     youtube_urls: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "files": [file_ref.to_dict() for file_ref in self.files],
+            "youtube_inputs": list(self.youtube_inputs),
             "youtube_urls": list(self.youtube_urls),
         }
 
@@ -191,6 +230,7 @@ class JobInstructorInput:
         return cls(
             name=payload["name"],
             files=[StoredUploadRef.from_dict(item) for item in payload.get("files", [])],
+            youtube_inputs=list(payload.get("youtube_inputs", payload.get("youtube_urls", []))),
             youtube_urls=list(payload.get("youtube_urls", [])),
         )
 
@@ -204,6 +244,7 @@ class AnalysisJobPayload:
     curriculum_text: str
     instructors: list[JobInstructorInput]
     submitted_at: str
+    analysis_mode: str = "auto"
 
     def to_dict(self) -> dict:
         return {
@@ -213,6 +254,7 @@ class AnalysisJobPayload:
             "course_sections": [asdict(section) for section in self.course_sections],
             "curriculum_text": self.curriculum_text,
             "submitted_at": self.submitted_at,
+            "analysis_mode": self.analysis_mode,
             "instructors": [instructor.to_dict() for instructor in self.instructors],
         }
 
@@ -225,7 +267,69 @@ class AnalysisJobPayload:
             course_sections=[CurriculumSection(**item) for item in payload.get("course_sections", [])],
             curriculum_text=payload["curriculum_text"],
             submitted_at=payload["submitted_at"],
+            analysis_mode=payload.get("analysis_mode", "auto"),
             instructors=[JobInstructorInput.from_dict(item) for item in payload.get("instructors", [])],
+        )
+
+
+@dataclass(slots=True)
+class AnalysisPreparation:
+    request_id: str
+    payload: AnalysisJobPayload
+    created_at: str
+    requires_confirmation: bool
+    recommended_analysis_mode: str
+    estimated_cost_usd: float | None = None
+    estimated_transcript_tokens: int = 0
+    estimated_chunk_count: int = 0
+    estimated_processing_seconds: int = 0
+    expanded_video_count: int = 0
+    total_video_duration_seconds: int = 0
+    caption_probe_sample_count: int = 0
+    caption_probe_success_count: int = 0
+    has_playlist: bool = False
+    playlist_summaries: list[dict] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "request_id": self.request_id,
+            "payload": self.payload.to_dict(),
+            "created_at": self.created_at,
+            "requires_confirmation": self.requires_confirmation,
+            "recommended_analysis_mode": self.recommended_analysis_mode,
+            "estimated_cost_usd": self.estimated_cost_usd,
+            "estimated_transcript_tokens": self.estimated_transcript_tokens,
+            "estimated_chunk_count": self.estimated_chunk_count,
+            "estimated_processing_seconds": self.estimated_processing_seconds,
+            "expanded_video_count": self.expanded_video_count,
+            "total_video_duration_seconds": self.total_video_duration_seconds,
+            "caption_probe_sample_count": self.caption_probe_sample_count,
+            "caption_probe_success_count": self.caption_probe_success_count,
+            "has_playlist": self.has_playlist,
+            "playlist_summaries": list(self.playlist_summaries),
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "AnalysisPreparation":
+        return cls(
+            request_id=payload["request_id"],
+            payload=AnalysisJobPayload.from_dict(payload["payload"]),
+            created_at=payload["created_at"],
+            requires_confirmation=bool(payload.get("requires_confirmation", False)),
+            recommended_analysis_mode=payload.get("recommended_analysis_mode", "lexical"),
+            estimated_cost_usd=payload.get("estimated_cost_usd"),
+            estimated_transcript_tokens=int(payload.get("estimated_transcript_tokens", 0)),
+            estimated_chunk_count=int(payload.get("estimated_chunk_count", 0)),
+            estimated_processing_seconds=int(payload.get("estimated_processing_seconds", 0)),
+            expanded_video_count=int(payload.get("expanded_video_count", 0)),
+            total_video_duration_seconds=int(payload.get("total_video_duration_seconds", 0)),
+            caption_probe_sample_count=int(payload.get("caption_probe_sample_count", 0)),
+            caption_probe_success_count=int(payload.get("caption_probe_success_count", 0)),
+            has_playlist=bool(payload.get("has_playlist", False)),
+            playlist_summaries=list(payload.get("playlist_summaries", [])),
+            warnings=list(payload.get("warnings", [])),
         )
 
 
@@ -250,6 +354,15 @@ class AnalysisJobRecord:
     youtube_url_count: int = 0
     section_count: int = 0
     warning_count: int = 0
+    phase: str | None = None
+    progress_current: int = 0
+    progress_total: int = 0
+    expanded_video_count: int = 0
+    processed_video_count: int = 0
+    caption_success_count: int = 0
+    caption_failure_count: int = 0
+    selected_analysis_mode: str | None = None
+    estimated_cost_usd: float | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -280,4 +393,13 @@ class AnalysisJobRecord:
             youtube_url_count=int(payload.get("youtube_url_count", 0)),
             section_count=int(payload.get("section_count", 0)),
             warning_count=int(payload.get("warning_count", 0)),
+            phase=payload.get("phase"),
+            progress_current=int(payload.get("progress_current", 0)),
+            progress_total=int(payload.get("progress_total", 0)),
+            expanded_video_count=int(payload.get("expanded_video_count", 0)),
+            processed_video_count=int(payload.get("processed_video_count", 0)),
+            caption_success_count=int(payload.get("caption_success_count", 0)),
+            caption_failure_count=int(payload.get("caption_failure_count", 0)),
+            selected_analysis_mode=payload.get("selected_analysis_mode"),
+            estimated_cost_usd=payload.get("estimated_cost_usd"),
         )
