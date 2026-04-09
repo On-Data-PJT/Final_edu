@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -31,6 +32,9 @@ TIME_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:시간|시수|hr|hrs|hour|hours)")
 WEEK_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:주차|주|weeks?)")
 DAY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:일|days?)")
 SECTION_SPLIT_RE = re.compile(r"[|:：]\s*")
+WEEK_ROW_RE = re.compile(r"^\s*(\d+)\s*주\b")
+SESSION_ROW_RE = re.compile(r"^\s*(오전|오후|저녁|야간)\b")
+SCHEDULE_COLUMN_SPLIT_RE = re.compile(r"\s{2,}")
 IGNORE_TOKENS = (
     "강사",
     "평가",
@@ -47,6 +51,7 @@ CURRICULUM_HINT_TOKENS = (
     "강의 계획",
     "강의개요",
     "커리큘럼",
+    "시간표",
     "교육목표",
     "학습목표",
     "과정개요",
@@ -74,6 +79,8 @@ GENERIC_SECTION_TITLES = {
     "교육과정",
     "교육 계획",
 }
+WEEKDAY_HINT_TOKENS = ("월", "화", "수", "목", "금", "토", "일")
+SCHEDULE_CURRICULUM_HINT_TOKENS = ("시간표", "강의", "교육", "과정", "교과목", "커리큘럼", "종합반")
 
 
 class CurriculumClassificationEvidenceSchema(BaseModel):
@@ -98,7 +105,7 @@ class CurriculumExtractionSectionSchema(BaseModel):
     description: str
     source_pages: list[int] = Field(default_factory=list, max_length=6)
     source_snippets: list[str] = Field(default_factory=list, max_length=3)
-    weight_source: Literal["percent", "hours", "weeks", "days", "none"] = "none"
+    weight_source: Literal["percent", "hours", "weeks", "days", "schedule_slots", "none"] = "none"
     raw_weight_value: float | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
@@ -243,11 +250,24 @@ def _extract_pdf_pages(path: Path) -> tuple[list[dict], list[str]]:
     warnings: list[str] = []
     for index, page in enumerate(PdfReader(str(path)).pages, start=1):
         raw_text = page.extract_text() or ""
-        normalized = normalize_text(raw_text)
-        if not normalized:
+        try:
+            raw_layout_text = page.extract_text(extraction_mode="layout") or ""
+        except Exception:  # noqa: BLE001
+            raw_layout_text = ""
+
+        layout_text = _normalize_multiline_text(raw_layout_text or raw_text)
+        flat_text = normalize_text(raw_text or raw_layout_text)
+        if not layout_text and not flat_text:
             warnings.append(f"p.{index}: 텍스트를 읽지 못했습니다.")
             continue
-        page_records.append({"page": index, "text": normalized})
+        page_records.append(
+            {
+                "page": index,
+                "text": layout_text or flat_text,
+                "flat_text": flat_text or normalize_text(layout_text),
+                "raw_layout_text": raw_layout_text or raw_text,
+            }
+        )
     return page_records, warnings
 
 
@@ -293,7 +313,14 @@ def _preview_with_openai(
         fallback_warnings.append(f"커리큘럼 검증 API 호출에 실패해 검토 필요 모드로 전환했습니다. ({exc})")
         return _preview_without_openai(page_records, raw_text, fallback_warnings, max_sections)
 
-    decision = _resolve_preview_decision(classification, settings)
+    schedule_sections, schedule_confidence = _extract_schedule_sections(page_records, max_sections)
+    has_schedule_weights = bool(schedule_sections) and schedule_confidence >= 0.82
+    decision = _resolve_preview_decision(
+        classification,
+        settings,
+        has_local_section_structure=has_schedule_weights,
+        has_local_weight_signals=has_schedule_weights,
+    )
     preview_warnings = list(warnings) + list(classification.warnings)
     blocking_reasons = list(classification.blocking_reasons)
     evidence = [
@@ -301,8 +328,24 @@ def _preview_with_openai(
         for item in classification.evidence
         if item.snippet or item.reason
     ]
+    schedule_override = has_schedule_weights and _has_schedule_curriculum_hint(raw_text)
+    if schedule_override and classification.document_kind in {"not_curriculum", "unreadable"}:
+        decision = "accepted" if schedule_confidence >= 0.9 else "review_required"
+        preview_warnings = list(warnings)
+        blocking_reasons = []
+        evidence = _build_schedule_preview_evidence(schedule_sections)
+        classification = CurriculumClassificationSchema(
+            document_kind="curriculum_like",
+            confidence=max(classification.confidence, schedule_confidence),
+            has_section_structure=True,
+            has_explicit_weight_signals=False,
+            has_derivable_weight_signals=True,
+            warnings=[],
+            blocking_reasons=[],
+            evidence=[],
+        )
 
-    if decision == "rejected":
+    if decision == "rejected" and not schedule_override:
         return CurriculumPreviewResult(
             decision=decision,
             document_kind=classification.document_kind,
@@ -314,6 +357,23 @@ def _preview_with_openai(
             evidence=evidence,
         )
 
+    if has_schedule_weights:
+        preview_sections = _postprocess_extracted_sections(schedule_sections, max_sections)
+        weight_status = _determine_weight_status(preview_sections)
+        if decision == "review_required" and not blocking_reasons:
+            blocking_reasons = ["자동 추출 결과를 그대로 저장하지 말고 대주제와 비중을 검토해 주세요."]
+        return CurriculumPreviewResult(
+            decision=decision,
+            document_kind=classification.document_kind,
+            document_confidence=classification.confidence,
+            weight_status=weight_status,
+            raw_curriculum_text=raw_text,
+            sections=preview_sections,
+            warnings=preview_warnings,
+            blocking_reasons=blocking_reasons,
+            evidence=evidence,
+        )
+
     try:
         extracted = client.responses.parse(
             model=settings.openai_curriculum_model,
@@ -322,6 +382,8 @@ def _preview_with_openai(
                 "Use explicit evidence. Do not invent missing sections. "
                 "Ignore instructor bio, admin notices, evaluation, references, copyright, or personal profile content. "
                 "Each section must have a concise title, a short description, source pages/snippets, and weight evidence when present. "
+                "If the PDF is a weekly timetable or schedule, derive weights from repeated class-slot counts and use "
+                "weight_source 'schedule_slots'. "
                 "If weight evidence is absent for a section, set weight_source to 'none' and raw_weight_value to null."
             ),
             input=(
@@ -376,6 +438,20 @@ def _preview_without_openai(
     warnings: list[str],
     max_sections: int,
 ) -> CurriculumPreviewResult:
+    schedule_sections, schedule_confidence = _extract_schedule_sections(page_records, max_sections)
+    if schedule_sections and schedule_confidence >= 0.82:
+        preview_sections = _postprocess_extracted_sections(schedule_sections, max_sections)
+        return CurriculumPreviewResult(
+            decision="review_required",
+            document_kind="curriculum_like",
+            document_confidence=min(0.74, 0.52 + (schedule_confidence / 4)),
+            weight_status=_determine_weight_status(preview_sections),
+            raw_curriculum_text=raw_text,
+            sections=preview_sections,
+            warnings=warnings,
+            blocking_reasons=["자동 검증 API가 없어서 수동 검토 후 저장해야 합니다."],
+        )
+
     heuristic_sections = _extract_heuristic_sections(raw_text, max_sections)
     curriculum_score = _heuristic_curriculum_score(raw_text)
     if curriculum_score < 2 or not heuristic_sections:
@@ -446,6 +522,168 @@ def _build_preview_candidate_excerpt(page_records: list[dict], settings: Setting
     return "\n".join(parts).strip()
 
 
+def _extract_schedule_sections(
+    page_records: list[dict],
+    max_sections: int,
+) -> tuple[list[CurriculumPreviewSection], float]:
+    subject_counts: Counter[str] = Counter()
+    subject_order: dict[str, int] = {}
+    subject_pages: dict[str, set[int]] = defaultdict(set)
+    subject_snippets: dict[str, list[str]] = defaultdict(list)
+    week_rows = 0
+    session_rows = 0
+    matched_session_rows = 0
+    has_weekday_header = False
+
+    for record in page_records:
+        raw_layout_text = str(record.get("raw_layout_text", "") or "")
+        page = int(record["page"])
+        lines = raw_layout_text.splitlines()
+        has_weekday_header = has_weekday_header or any(_looks_like_weekday_header(line) for line in lines)
+        for raw_line in lines:
+            line = normalize_text(raw_line)
+            if not line:
+                continue
+            if WEEK_ROW_RE.match(line):
+                week_rows += 1
+                continue
+            session_match = SESSION_ROW_RE.match(line)
+            if not session_match:
+                continue
+            session_rows += 1
+            subjects = _extract_schedule_subjects_from_line(raw_line)
+            if not subjects:
+                continue
+            matched_session_rows += 1
+            snippet = normalize_text(raw_line)
+            for subject in subjects:
+                if subject not in subject_order:
+                    subject_order[subject] = len(subject_order)
+                subject_counts[subject] += 1
+                subject_pages[subject].add(page)
+                if snippet and snippet not in subject_snippets[subject] and len(subject_snippets[subject]) < 3:
+                    subject_snippets[subject].append(snippet)
+
+    if not subject_counts:
+        return [], 0.0
+
+    confidence = _schedule_parser_confidence(
+        has_weekday_header=has_weekday_header,
+        week_rows=week_rows,
+        session_rows=session_rows,
+        matched_session_rows=matched_session_rows,
+        distinct_subjects=len(subject_counts),
+        total_slots=sum(subject_counts.values()),
+    )
+    ordered_subjects = sorted(subject_counts, key=lambda item: subject_order[item])
+    sections = [
+        CurriculumPreviewSection(
+            id=f"section-{index}",
+            title=subject,
+            description=f"주차별 시간표에서 총 {subject_counts[subject]}개 수업 슬롯으로 편성됨.",
+            target_weight=float(subject_counts[subject]),
+            weight_source="schedule_slots",
+            raw_weight_value=float(subject_counts[subject]),
+            confidence=confidence,
+            source_pages=sorted(subject_pages[subject]),
+            source_snippets=subject_snippets[subject] or [subject],
+            needs_weight_input=False,
+        )
+        for index, subject in enumerate(ordered_subjects[:max_sections], start=1)
+    ]
+    return sections, confidence
+
+
+def _looks_like_weekday_header(line: str) -> bool:
+    compact = normalize_text(line)
+    return all(token in compact for token in WEEKDAY_HINT_TOKENS)
+
+
+def _extract_schedule_subjects_from_line(raw_line: str) -> list[str]:
+    parts = [normalize_text(part) for part in SCHEDULE_COLUMN_SPLIT_RE.split(raw_line.strip()) if normalize_text(part)]
+    if not parts:
+        return []
+    session_label = parts[0]
+    if session_label not in {"오전", "오후", "저녁", "야간"}:
+        return []
+    subjects: list[str] = []
+    for part in parts[1:]:
+        cleaned = normalize_text(part)
+        if not cleaned:
+            continue
+        if _looks_like_schedule_noise(cleaned):
+            continue
+        subjects.append(cleaned)
+    return subjects
+
+
+def _looks_like_schedule_noise(text: str) -> bool:
+    if _looks_like_weekday_header(text):
+        return True
+    if WEEK_ROW_RE.match(text):
+        return True
+    if re.fullmatch(r"\d{1,2}/\d{1,2}", text):
+        return True
+    return text in {"오전", "오후", "저녁", "야간"}
+
+
+def _schedule_parser_confidence(
+    *,
+    has_weekday_header: bool,
+    week_rows: int,
+    session_rows: int,
+    matched_session_rows: int,
+    distinct_subjects: int,
+    total_slots: int,
+) -> float:
+    score = 0.0
+    if has_weekday_header:
+        score += 0.22
+    if week_rows >= 8:
+        score += 0.24
+    elif week_rows >= 4:
+        score += 0.18
+    elif week_rows >= 2:
+        score += 0.1
+    if session_rows >= max(4, week_rows):
+        score += 0.2
+    elif session_rows >= 2:
+        score += 0.12
+    if matched_session_rows >= max(3, week_rows // 2):
+        score += 0.18
+    elif matched_session_rows >= 2:
+        score += 0.1
+    if distinct_subjects >= 3:
+        score += 0.08
+    elif distinct_subjects >= 2:
+        score += 0.04
+    if total_slots >= max(8, distinct_subjects * 3):
+        score += 0.08
+    return round(min(0.99, score), 2)
+
+
+def _has_schedule_curriculum_hint(text: str) -> bool:
+    normalized = normalize_text(text)
+    return any(token in normalized for token in SCHEDULE_CURRICULUM_HINT_TOKENS)
+
+
+def _build_schedule_preview_evidence(
+    sections: list[CurriculumPreviewSection],
+) -> list[CurriculumPreviewEvidence]:
+    evidence: list[CurriculumPreviewEvidence] = []
+    for section in sections[:3]:
+        if not section.source_snippets:
+            continue
+        evidence.append(
+            CurriculumPreviewEvidence(
+                page=section.source_pages[0] if section.source_pages else None,
+                snippet=section.source_snippets[0],
+                reason=f"{section.title}이(가) 시간표에서 반복 편성되어 비중 산출 근거로 사용됨.",
+            )
+        )
+    return evidence
+
+
 def _candidate_line_score(raw_line: str, line: str) -> int:
     score = _line_score(raw_line, line)
     lowered = line.lower()
@@ -458,18 +696,32 @@ def _candidate_line_score(raw_line: str, line: str) -> int:
     return score
 
 
+def _normalize_multiline_text(text: str) -> str:
+    normalized_lines = [normalize_text(line) for line in str(text or "").splitlines()]
+    return "\n".join(line for line in normalized_lines if line).strip()
+
+
 def _resolve_preview_decision(
     classification: CurriculumClassificationSchema,
     settings: Settings,
+    *,
+    has_local_section_structure: bool = False,
+    has_local_weight_signals: bool = False,
 ) -> str:
     if classification.document_kind in {"not_curriculum", "unreadable"}:
         return "rejected"
     if classification.confidence < settings.curriculum_review_confidence:
         return "rejected"
+    has_section_structure = classification.has_section_structure or has_local_section_structure
+    has_weight_signals = (
+        classification.has_explicit_weight_signals
+        or classification.has_derivable_weight_signals
+        or has_local_weight_signals
+    )
     if (
         classification.confidence < settings.curriculum_accept_confidence
-        or not classification.has_section_structure
-        or not (classification.has_explicit_weight_signals or classification.has_derivable_weight_signals)
+        or not has_section_structure
+        or not has_weight_signals
     ):
         return "review_required"
     return "accepted"
@@ -573,7 +825,7 @@ def _determine_weight_status(sections: list[CurriculumPreviewSection]) -> str:
     source_kinds = {section.weight_source for section in sections}
     has_none = any(section.weight_source == "none" or section.raw_weight_value is None for section in sections)
     has_explicit = any(section.weight_source == "percent" for section in sections)
-    has_derived = any(section.weight_source in {"hours", "weeks", "days"} for section in sections)
+    has_derived = any(section.weight_source in {"hours", "weeks", "days", "schedule_slots"} for section in sections)
     if has_none and (has_explicit or has_derived):
         return "inconsistent"
     if has_none:

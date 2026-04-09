@@ -68,6 +68,7 @@ Last Updated: 2026-04-09
 - preview 결과는 `accepted | review_required | rejected` 세 상태를 가진다.
 - `accepted`면 compact summary 만 보여주고, preview 편집 표는 계속 숨긴다.
 - `accepted`면 상세 경고/근거 블록 없이 `저장 가능` 성격의 짧은 상태 문구만 보여준다.
+- 주차별 시간표형 커리큘럼에서 과목 반복 slot 수를 신뢰할 수 있게 읽은 경우에는 비중을 자동 채워 `accepted`로 올릴 수 있어야 한다.
 - `review_required`면 대주제/설명/비중 편집 표를 노출하고 사용자가 직접 수정할 수 있어야 한다.
 - `review_required`도 상세 판정 근거는 숨기고, `확인 후 저장` 성격의 짧은 상태 문구만 보여준다.
 - `rejected`면 저장을 막고 PDF 교체만 유도해야 한다.

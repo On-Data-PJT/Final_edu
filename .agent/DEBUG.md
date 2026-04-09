@@ -118,6 +118,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/static/app.js`
   Trigger Commands: 과정 preview/save 직후 버튼 상태 갱신
   Must Read When: course modal save button, `setBusy()`, validation disabled 로직 변경
+- `DBG-019` `active` Lane: `Lead / Integration`
+  Tags: `courses`, `preview`, `pdf`, `layout`, `schedule`
+  Related Files: `final_edu/courses.py`
+  Trigger Commands: `POST /courses/preview`, 시간표형 커리큘럼 PDF preview
+  Must Read When: 커리큘럼 preview 추출, PDF text normalization, 시간표형 비중 산출 규칙 변경
 
 ## Active Incidents
 
@@ -318,6 +323,30 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
 - Prevention Rule:
   - drag/drop UI 는 시각적 container 와 실제 drop target 범위를 다르게 두지 말 것
   - lane/capsule 단위 업로드 UX를 설계했다면 이벤트 binding 도 같은 바깥 container 에 걸 것
+
+### DBG-019 `active` 커리큘럼 preview 에서 표 레이아웃을 납작하게 정규화해 시간표형 문서의 비중 근거를 잃음
+
+- Date: `2026-04-09`
+- Agent / Lane: `Lead / Integration`
+- Tags: `courses`, `preview`, `pdf`, `layout`, `schedule`
+- Related Files: `final_edu/courses.py`
+- Trigger Commands: `POST /courses/preview`, 시간표형 커리큘럼 PDF preview
+- Must Read When: 커리큘럼 preview 추출, PDF text normalization, 시간표형 비중 산출 규칙 변경
+- Symptom:
+  - 주차별 시간표 PDF를 커리큘럼으로 인식하면서도 비중은 전부 `직접 입력`으로 떨어질 수 있었음
+  - 같은 문서가 OpenAI classification 에서는 sparse schedule 로 오판돼 `rejected`까지 내려갈 수 있었음
+- Root Cause:
+  - `pypdf` 기본 `extract_text()` 결과를 바로 평탄화해 주차/요일/오전·오후의 행 구조가 거의 한 줄로 눌렸음
+  - preview 는 `%`, `시간`, `주차`, `일수` 같은 직접 지표만 비중 근거로 봤고, 시간표의 반복 slot 수를 비중으로 환산하지 않았음
+  - sparse timetable 은 OpenAI classification 이 syllabus 가 아니라 단순 calendar/schedule 로 보수적으로 판정할 수 있었음
+- Resolution:
+  - `extract_text(extraction_mode="layout")`를 함께 보존해 preview 에서는 줄 구조가 살아 있는 layout text 를 사용하도록 변경
+  - 로컬 schedule parser 를 추가해 `주차 행 + 오전/오후 세션 행`에서 과목 slot 수를 집계하고 `schedule_slots` 비중으로 정규화
+  - OpenAI classification 이 timetable 을 `not_curriculum`으로 오판해도, 로컬 parser 가 주차/요일/세션 구조와 커리큘럼 힌트를 충분히 잡으면 parser 결과를 우선하도록 보강
+- Prevention Rule:
+  - 표/시간표형 PDF는 line-preserving layout text 와 flat text 를 분리해 다룰 것
+  - preview 단계에서 전체 텍스트를 바로 한 줄로 눌러버리지 말고, row/column 구조가 필요한 parser 가 있는지 먼저 판단할 것
+  - OpenAI classification 이 sparse timetable 을 보수적으로 거절할 수 있으므로, 고신뢰 로컬 parser 가 있으면 reject 조건과 충돌하는지 별도 smoke 로 확인할 것
 
 ## Archive
 

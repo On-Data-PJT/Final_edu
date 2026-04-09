@@ -13,6 +13,7 @@ Last Updated: 2026-04-09
 - 현재 과정 기준:
   - `Page 1`에서 과정명, 커리큘럼 PDF, 담당 강사 roster 를 등록
   - `POST /courses/preview`는 커리큘럼 PDF를 `accepted | review_required | rejected`로 판정하고, 자동 저장 가능 여부를 함께 반환함
+  - 주차별 시간표형 커리큘럼은 `layout` 텍스트를 기준으로 로컬 시간표 파서가 과목별 slot 수를 집계해 목표 비중을 자동 산출할 수 있음
   - 비관련 PDF나 unreadable PDF는 기본 대주제를 억지로 만들지 않고 저장 차단 대상으로 처리함
 - `review_required` 상태에서만 대주제/설명/비중 편집 표를 다시 노출해 사용자가 직접 수정 후 저장할 수 있음
 - 과정 등록 modal 의 preview 피드백은 상세 근거/경고 목록 대신 저장 가능 여부를 알려주는 짧은 상태 문구만 표시함
@@ -51,7 +52,7 @@ Last Updated: 2026-04-09
   - `./.codex/skills/final-edu-design/SKILL.md`: repo-local 디자인 구현 스킬
   - `capture_pages.py --backend auto`: `cmux` 우선 / Playwright fallback 디자인 검수 스크립트
   - 협업 규칙 문서는 `.agent/AGENTS.md` 중심으로 단일화되고, 루트 `AGENTS.md`는 bootstrap 으로만 유지
-- 현재 브랜치 상태: `dev...origin/dev`
+- 현재 브랜치 상태: `dev...origin/dev` (dirty)
 - 현재 기준선: Page 1 minimal blue composer 재설계, course instructor roster 저장, 단일 강사 허용, 긴 파일명 안전 처리, 과정별 draft 복원까지 반영된 상태
 - 현재 디자인 검수 경로:
   - macOS + `cmux` 가능 시 desktop/tablet 검수는 `cmux` 브라우저 우선
@@ -279,6 +280,9 @@ Last Updated: 2026-04-09
 - 비중 근거가 없는 섹션은 자동으로 100으로 정규화하지 않고 수동 입력이 필요하도록 변경
 - `/courses` 저장 시 대주제 비중이 비어 있거나 0 이하이면 400으로 거부하도록 서버 검증 추가
 - 과정 preview UI 에서 `확인 필요`, `경고`, `판정 근거` 상세 블록은 제거하고, 단일 상태 문구 + 필요 시 편집 표만 남기도록 단순화
+- `pypdf`의 `layout` 추출 텍스트를 별도로 보존해 시간표형 PDF의 행/열 구조를 preview 단계에서 활용하도록 보강
+- 시간표형 커리큘럼은 로컬 schedule parser 가 `오전/오후` slot 수를 집계해 `schedule_slots` 비중을 자동 산출하고, 신뢰도가 충분하면 `accepted`로 저장 가능 상태까지 올리도록 보강
+- OpenAI classification 이 sparse 시간표를 `not_curriculum`으로 오판해도, 주차/요일/세션 구조와 커리큘럼 힌트가 충분하면 로컬 schedule parser 결과를 우선해 false reject 를 피하도록 보강
 
 ### 2026-04-07
 
