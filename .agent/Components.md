@@ -169,7 +169,6 @@ Last Updated: 2026-04-09
   - 홈으로 돌아가는 링크
   - 현재 결과 페이지 active item
   - 각 패널 anchor 링크
-  - 현재 선택 강사 / 상태 / 대주제 수 / 업데이트 시각
 - `view mode` segmented control 은 상단 공통 toolbar 가 아니라 **Panel 1 우측 상단**에 둔다.
 - mode 는 `combined`, `material`, `speech`를 전환한다.
 - 이 toggle 이 Page 2 전체 dataset source 의 source of truth 다.
