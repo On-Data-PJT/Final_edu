@@ -733,12 +733,24 @@ def _build_mode_series_from_aggregates(
 def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_curriculum: dict[str, Counter[str]]) -> dict[str, list[dict]]:
     keywords: dict[str, list[dict]] = {}
     for instructor_name, counts in grouped.items():
-        top_keywords = counts.most_common(25)
-        top_off_curriculum = grouped_off_curriculum[instructor_name].most_common(15)
+        off_counts = grouped_off_curriculum.get(instructor_name, Counter())
+        
+        # 커리큘럼 기반 단어에 가중치 크게 부여
+        boosted = Counter()
+        for token, count in counts.items():
+            if token not in off_counts:
+                boosted[token] = count * 50
+            else:
+                boosted[token] = count
+                
+        best_tokens = [token for token, _ in boosted.most_common(25)]
+        
         keywords[instructor_name] = [
-            {"text": token, "value": int(value)}
-            for token, value in top_keywords
+            {"text": token, "value": int(counts[token])}
+            for token in best_tokens
         ]
+        
+        top_off_curriculum = off_counts.most_common(15)
         keywords[f"{instructor_name}__off_curriculum"] = [
             {"text": token, "value": int(value)}
             for token, value in top_off_curriculum
