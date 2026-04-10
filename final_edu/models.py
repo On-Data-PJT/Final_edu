@@ -218,6 +218,7 @@ class JobInstructorInput:
     files: list[StoredUploadRef] = field(default_factory=list)
     youtube_inputs: list[str] = field(default_factory=list)
     youtube_urls: list[str] = field(default_factory=list)
+    voc_files: list[StoredUploadRef] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -225,6 +226,7 @@ class JobInstructorInput:
             "files": [file_ref.to_dict() for file_ref in self.files],
             "youtube_inputs": list(self.youtube_inputs),
             "youtube_urls": list(self.youtube_urls),
+            "voc_files": [file_ref.to_dict() for file_ref in self.voc_files],
         }
 
     @classmethod
@@ -234,6 +236,7 @@ class JobInstructorInput:
             files=[StoredUploadRef.from_dict(item) for item in payload.get("files", [])],
             youtube_inputs=list(payload.get("youtube_inputs", payload.get("youtube_urls", []))),
             youtube_urls=list(payload.get("youtube_urls", [])),
+            voc_files=[StoredUploadRef.from_dict(item) for item in payload.get("voc_files", [])],
         )
 
 

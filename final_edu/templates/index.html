@@ -3,298 +3,338 @@
 {% block page_name %}page1{% endblock %}
 {% block title %}Final Edu | 과정 관리{% endblock %}
 {% block header_actions %}
-  <button type="button" class="icon-button page1-header-icon" data-open-course-modal data-testid="open-course-modal" aria-controls="course-modal" aria-expanded="false" aria-label="과정 추가">
-    <span class="icon-button-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" role="img" focusable="false">
-        <path d="M4 6h7l2 2h7v10a2 2 0 0 1-2 2H4V6zm6 4v2H8v2h2v2h2v-2h2v-2h-2v-2h-2zm-6-6h8l2 2H4V4z" />
-      </svg>
-    </span>
-  </button>
-  <button type="button" class="icon-button page1-header-icon" data-open-course-list data-testid="open-course-list" aria-controls="course-list-panel" aria-expanded="false" aria-label="과정 목록">
-    <span class="icon-button-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" role="img" focusable="false">
-        <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
-      </svg>
-    </span>
-  </button>
+<button type="button" class="icon-button page1-header-icon" data-open-course-modal data-testid="open-course-modal"
+  aria-controls="course-modal" aria-expanded="false" aria-label="과정 추가">
+  <span class="icon-button-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" role="img" focusable="false">
+      <path d="M4 6h7l2 2h7v10a2 2 0 0 1-2 2H4V6zm6 4v2H8v2h2v2h2v-2h2v-2h-2v-2h-2zm-6-6h8l2 2H4V4z" />
+    </svg>
+  </span>
+</button>
+<button type="button" class="icon-button page1-header-icon" data-open-course-list data-testid="open-course-list"
+  aria-controls="course-list-panel" aria-expanded="false" aria-label="과정 목록">
+  <span class="icon-button-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" role="img" focusable="false">
+      <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
+    </svg>
+  </span>
+</button>
 {% endblock %}
 
 {% block content %}
-  <script id="page1-courses-data" type="application/json" data-testid="page1-courses-data" hidden>{{ courses_json | safe }}</script>
-  <script id="page1-course-drafts-data" type="application/json" data-testid="page1-course-drafts-data" hidden>{{ course_restore_drafts_json | safe }}</script>
+<script id="page1-courses-data" type="application/json" data-testid="page1-courses-data"
+  hidden>{{ courses_json | safe }}</script>
+<script id="page1-course-drafts-data" type="application/json" data-testid="page1-course-drafts-data"
+  hidden>{{ course_restore_drafts_json | safe }}</script>
 
-  <section class="page1-home">
-    {% if error %}
-      <section class="notice error page1-notice">{{ error }}</section>
-    {% endif %}
+<section class="page1-home">
+  {% if error %}
+  <section class="notice error page1-notice">{{ error }}</section>
+  {% endif %}
 
-    <h1 class="page1-home__title">강의 자료를 올리고, 비교를 시작</h1>
+  <h1 class="page1-home__title">강의 자료를 올리고, 비교를 시작</h1>
 
-    <section class="page1-workspace" id="page1-workspace" data-testid="page1-workspace" data-has-course="{% if selected_course_id %}true{% else %}false{% endif %}">
-      <form id="page1-form" class="analysis-form page1-analysis-form" data-testid="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
-        <input type="hidden" id="selected-course-id" data-testid="selected-course-id" name="course_id" value="{{ selected_course_id }}" />
-        <input type="hidden" id="selected-course-name" data-testid="selected-course-name" name="course_name" value="{{ selected_course_name }}" />
-        <input type="hidden" name="instructor_manifest" id="instructor-manifest" value="[]" />
+  <section class="page1-workspace" id="page1-workspace" data-testid="page1-workspace"
+    data-has-course="{% if selected_course_id %}true{% else %}false{% endif %}">
+    <form id="page1-form" class="analysis-form page1-analysis-form" data-testid="analysis-form" action="/analyze"
+      method="post" enctype="multipart/form-data">
+      <input type="hidden" id="selected-course-id" data-testid="selected-course-id" name="course_id"
+        value="{{ selected_course_id }}" />
+      <input type="hidden" id="selected-course-name" data-testid="selected-course-name" name="course_name"
+        value="{{ selected_course_name }}" />
+      <input type="hidden" name="instructor_manifest" id="instructor-manifest" value="[]" />
 
-        <div class="page1-empty-state {% if selected_course_id %}is-hidden{% endif %}" data-workspace-disabled>
-          <strong>과정을 먼저 선택하거나 추가하세요</strong>
-        </div>
+      <div class="page1-empty-state {% if selected_course_id %}is-hidden{% endif %}" data-workspace-disabled>
+        <strong>과정을 먼저 선택하거나 추가하세요</strong>
+      </div>
 
-        <div id="instructor-blocks" class="composer-lanes" data-testid="instructor-blocks" data-blocks-enabled="{% if selected_course_id %}true{% else %}false{% endif %}">
-          <article class="composer-lane" data-instructor-block data-block-id="primary">
-            <div class="composer-lane__start">
-              <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
-              <div class="lane-mode-menu" data-role="mode-menu" hidden>
-                <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="files">파일 업로드</button>
-                <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="youtube">유튜브 링크</button>
-              </div>
+      <div id="instructor-blocks" class="composer-lanes" data-testid="instructor-blocks"
+        data-blocks-enabled="{% if selected_course_id %}true{% else %}false{% endif %}">
+        <article class="composer-lane" data-instructor-block data-block-id="primary">
+          <div class="composer-lane__start">
+            <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
+            <div class="lane-mode-menu" data-role="mode-menu" hidden>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode"
+                data-mode="files">강의자료</button>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode"
+                data-mode="youtube">강의영상</button>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="voc">강의평가</button>
             </div>
+          </div>
 
-            <div class="composer-lane__main">
-              <div class="lane-surface lane-surface-files" data-role="files-surface">
-                <input class="sr-only" type="file" name="instructor_files__primary" data-role="instructor-files" data-testid="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
-                <button type="button" class="lane-surface__tap" data-action="open-file-picker">
-                  강의 자료를 드래그하거나 클릭해 업로드
-                </button>
-              </div>
-
-              <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
-                <div class="lane-token-shell">
-                  <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
-                </div>
-                <input type="hidden" name="instructor_youtube_urls__primary" data-role="instructor-youtube" data-testid="instructor-youtube" value="" />
-              </div>
-
-              <div class="lane-asset-rail" data-role="asset-rail" hidden>
-                <div class="lane-asset-strip" data-role="asset-list"></div>
-              </div>
-            </div>
-
-            <div class="composer-lane__end">
-              <input type="hidden" id="instructor-select-primary" data-role="instructor-name" data-testid="instructor-name" name="instructor_name__primary" value="" />
-              <button type="button" class="instructor-picker-button" data-action="toggle-instructor-menu" aria-label="강사 선택" aria-haspopup="menu" aria-expanded="false" title="강사 선택">
-                <svg viewBox="0 0 24 24" role="img" focusable="false">
-                  <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.68 0-6.67 1.79-6.67 4v1h13.34v-1c0-2.21-2.99-4-6.67-4Z" />
-                </svg>
+          <div class="composer-lane__main">
+            <div class="lane-surface lane-surface-files" data-role="files-surface">
+              <input class="sr-only" type="file" name="instructor_files__primary" data-role="instructor-files"
+                data-testid="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+                강의 자료를 드래그하거나 클릭해 업로드
               </button>
-              <div class="instructor-picker-menu" data-role="instructor-menu" hidden></div>
-            </div>
-            <div class="composer-lane__meta" data-role="block-status">자료 없음</div>
-          </article>
-        </div>
-
-        <template id="instructor-block-template" data-testid="instructor-block-template">
-          <article class="composer-lane" data-instructor-block>
-            <div class="composer-lane__start">
-              <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
-              <div class="lane-mode-menu" data-role="mode-menu" hidden>
-                <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="files">파일 업로드</button>
-                <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="youtube">유튜브 링크</button>
-              </div>
             </div>
 
-            <div class="composer-lane__main">
-              <div class="lane-surface lane-surface-files" data-role="files-surface">
-                <input class="sr-only" type="file" data-role="instructor-files" data-testid="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
-                <button type="button" class="lane-surface__tap" data-action="open-file-picker">
-                  강의 자료를 드래그하거나 클릭해 업로드
-                </button>
+            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+              <div class="lane-token-shell">
+                <input type="text" class="lane-token-input" data-role="youtube-draft"
+                  placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
               </div>
-
-              <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
-                <div class="lane-token-shell">
-                  <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
-                </div>
-                <input type="hidden" data-role="instructor-youtube" data-testid="instructor-youtube" value="" />
-              </div>
-
-              <div class="lane-asset-rail" data-role="asset-rail" hidden>
-                <div class="lane-asset-strip" data-role="asset-list"></div>
-              </div>
+              <input type="hidden" name="instructor_youtube_urls__primary" data-role="instructor-youtube"
+                data-testid="instructor-youtube" value="" />
             </div>
-
-            <div class="composer-lane__end">
-              <input type="hidden" data-role="instructor-name" data-testid="instructor-name" value="" />
-              <button type="button" class="instructor-picker-button" data-action="toggle-instructor-menu" aria-label="강사 선택" aria-haspopup="menu" aria-expanded="false" title="강사 선택">
-                <svg viewBox="0 0 24 24" role="img" focusable="false">
-                  <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.68 0-6.67 1.79-6.67 4v1h13.34v-1c0-2.21-2.99-4-6.67-4Z" />
-                </svg>
+            <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
+              <input class="sr-only" type="file" name="instructor_voc__primary" data-role="instructor-voc"
+                data-testid="instructor-voc" multiple accept=".pdf,.csv,.txt" />
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+                강의평가서(VOC)를 드래그하거나 클릭해 업로드
               </button>
-              <div class="instructor-picker-menu" data-role="instructor-menu" hidden></div>
             </div>
-            <div class="composer-lane__meta" data-role="block-status">자료 없음</div>
-          </article>
-        </template>
 
-        <div class="composer-actions">
-          <button type="button" id="add-instructor-block" class="micro-icon-button" data-testid="add-instructor-block" data-add-instructor disabled aria-label="자료 입력 줄 추가">+</button>
-          <button type="submit" id="submit-analysis" class="micro-icon-button micro-icon-button-submit" data-testid="submit-analysis" disabled aria-label="다음 단계로 이동">
-            <svg viewBox="0 0 24 24" role="img" focusable="false">
-              <path d="M5 12h12m0 0-4-4m4 4-4 4M5 6v12" />
-            </svg>
-          </button>
-        </div>
-      </form>
-    </section>
-  </section>
+            <div class="lane-asset-rail" data-role="asset-rail" hidden>
+              <div class="lane-asset-strip" data-role="asset-list"></div>
+            </div>
+          </div>
 
-  <section id="course-modal" class="floating-panel modal-shell" data-testid="course-modal" aria-hidden="true" hidden>
-    <div class="panel page1-popup course-modal-card">
-      <div class="block-header">
-        <div class="section-heading">
-          <h2>과정 추가</h2>
-          <p>과정명, 커리큘럼 PDF, 담당 강사를 등록합니다.</p>
-        </div>
-        <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
+          <div class="composer-lane__end">
+            <input type="hidden" id="instructor-select-primary" data-role="instructor-name"
+              data-testid="instructor-name" name="instructor_name__primary" value="" />
+            <button type="button" class="instructor-picker-button" data-action="toggle-instructor-menu"
+              aria-label="강사 선택" aria-haspopup="menu" aria-expanded="false" title="강사 선택">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path
+                  d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.68 0-6.67 1.79-6.67 4v1h13.34v-1c0-2.21-2.99-4-6.67-4Z" />
+              </svg>
+            </button>
+            <div class="instructor-picker-menu" data-role="instructor-menu" hidden></div>
+          </div>
+          <div class="composer-lane__meta" data-role="block-status">자료 없음</div>
+        </article>
+      </div>
+
+      <template id="instructor-block-template" data-testid="instructor-block-template">
+        <article class="composer-lane" data-instructor-block>
+          <div class="composer-lane__start">
+            <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
+            <div class="lane-mode-menu" data-role="mode-menu" hidden>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode"
+                data-mode="files">강의자료</button>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode"
+                data-mode="youtube">강의영상</button>
+              <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="voc">강의평가</button>
+            </div>
+          </div>
+
+          <div class="composer-lane__main">
+            <div class="lane-surface lane-surface-files" data-role="files-surface">
+              <input class="sr-only" type="file" data-role="instructor-files" data-testid="instructor-files" multiple
+                accept=".pdf,.pptx,.txt,.md" />
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+                강의 자료를 드래그하거나 클릭해 업로드
+              </button>
+            </div>
+
+            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+              <div class="lane-token-shell">
+                <input type="text" class="lane-token-input" data-role="youtube-draft"
+                  placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
+              </div>
+              <input type="hidden" data-role="instructor-youtube" data-testid="instructor-youtube" value="" />
+            </div>
+            <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
+              <input class="sr-only" type="file" data-role="instructor-voc" data-testid="instructor-voc" multiple
+                accept=".pdf,.csv,.txt" />
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+                강의평가서(VOC)를 드래그하거나 클릭해 업로드
+              </button>
+            </div>
+
+            <div class="lane-asset-rail" data-role="asset-rail" hidden>
+              <div class="lane-asset-strip" data-role="asset-list"></div>
+            </div>
+          </div>
+
+          <div class="composer-lane__end">
+            <input type="hidden" data-role="instructor-name" data-testid="instructor-name" value="" />
+            <button type="button" class="instructor-picker-button" data-action="toggle-instructor-menu"
+              aria-label="강사 선택" aria-haspopup="menu" aria-expanded="false" title="강사 선택">
+              <svg viewBox="0 0 24 24" role="img" focusable="false">
+                <path
+                  d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.68 0-6.67 1.79-6.67 4v1h13.34v-1c0-2.21-2.99-4-6.67-4Z" />
+              </svg>
+            </button>
+            <div class="instructor-picker-menu" data-role="instructor-menu" hidden></div>
+          </div>
+          <div class="composer-lane__meta" data-role="block-status">자료 없음</div>
+        </article>
+      </template>
+
+      <div class="composer-actions">
+        <button type="button" id="add-instructor-block" class="micro-icon-button" data-testid="add-instructor-block"
+          data-add-instructor disabled aria-label="자료 입력 줄 추가">+</button>
+        <button type="submit" id="submit-analysis" class="micro-icon-button micro-icon-button-submit"
+          data-testid="submit-analysis" disabled aria-label="다음 단계로 이동">
           <svg viewBox="0 0 24 24" role="img" focusable="false">
-            <path d="m7 7 10 10M17 7 7 17" />
+            <path d="M5 12h12m0 0-4-4m4 4-4 4M5 6v12" />
           </svg>
         </button>
       </div>
+    </form>
+  </section>
+</section>
 
-      <form id="course-modal-form" class="course-modal-form page1-course-form" data-testid="course-modal-form" action="/courses" method="post" enctype="multipart/form-data">
-        <label class="field">
-          <span>과정명</span>
-          <input type="text" name="course_name" data-testid="course-name" placeholder="예: Python 기초 과정" />
+<section id="course-modal" class="floating-panel modal-shell" data-testid="course-modal" aria-hidden="true" hidden>
+  <div class="panel page1-popup course-modal-card">
+    <div class="block-header">
+      <div class="section-heading">
+        <h2>과정 추가</h2>
+        <p>과정명, 커리큘럼 PDF, 담당 강사를 등록합니다.</p>
+      </div>
+      <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
+        <svg viewBox="0 0 24 24" role="img" focusable="false">
+          <path d="m7 7 10 10M17 7 7 17" />
+        </svg>
+      </button>
+    </div>
+
+    <form id="course-modal-form" class="course-modal-form page1-course-form" data-testid="course-modal-form"
+      action="/courses" method="post" enctype="multipart/form-data">
+      <label class="field">
+        <span>과정명</span>
+        <input type="text" name="course_name" data-testid="course-name" placeholder="예: Python 기초 과정" />
+      </label>
+
+      <div class="field">
+        <span>커리큘럼 PDF</span>
+        <label class="page1-file-dropzone" data-role="course-dropzone">
+          <input class="sr-only" type="file" name="curriculum_pdf" data-testid="course-curriculum-file" accept=".pdf" />
+          <strong>PDF를 드래그하거나 클릭해 업로드</strong>
+          <small>업로드 후 목표 비중 초안을 자동 생성합니다.</small>
         </label>
-
-        <div class="field">
-          <span>커리큘럼 PDF</span>
-          <label class="page1-file-dropzone" data-role="course-dropzone">
-            <input class="sr-only" type="file" name="curriculum_pdf" data-testid="course-curriculum-file" accept=".pdf" />
-            <strong>PDF를 드래그하거나 클릭해 업로드</strong>
-            <small>업로드 후 목표 비중 초안을 자동 생성합니다.</small>
-          </label>
-          <div id="course-file-tokens" class="lane-asset-strip" data-role="course-file-tokens"></div>
-        </div>
-
-        <div class="field">
-          <span>담당 강사</span>
-          <div class="course-token-shell">
-            <div id="course-instructor-tokens" class="lane-token-list" data-role="course-instructor-tokens"></div>
-            <input type="text" id="course-instructor-input" class="lane-token-input" data-testid="course-instructor-input" placeholder="강사 이름 입력 후 콤마" />
-          </div>
-        </div>
-
-        <input type="hidden" name="sections_json" id="course-sections-json" value="[]" />
-        <input type="hidden" name="raw_curriculum_text" id="course-raw-curriculum-text" value="" />
-        <input type="hidden" name="instructor_names_json" id="course-instructor-names-json" value="[]" />
-        <div id="course-preview-state" class="preview-state" data-testid="course-preview-state">
-          <strong>PDF를 업로드하면 과정 초안이 준비됩니다.</strong>
-        </div>
-        <div id="course-preview-table" class="is-hidden" data-testid="course-preview-table"></div>
-
-        <div class="modal-actions">
-          <button type="button" class="secondary-button" data-close-dialog data-close="course-modal">취소</button>
-          <button type="submit" id="course-save-button" class="primary-button" data-testid="course-save-button" disabled>저장</button>
-        </div>
-      </form>
-    </div>
-  </section>
-
-  <section id="course-list-panel" class="floating-panel modal-shell" data-testid="course-list-panel" aria-hidden="true" hidden>
-    <div class="panel page1-popup page1-course-list-popup">
-      <div class="block-header">
-        <div class="section-heading">
-          <h2>과정 목록</h2>
-          <p>분석 기준으로 사용할 과정을 선택합니다.</p>
-        </div>
-        <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
-          <svg viewBox="0 0 24 24" role="img" focusable="false">
-            <path d="m7 7 10 10M17 7 7 17" />
-          </svg>
-        </button>
+        <div id="course-file-tokens" class="lane-asset-strip" data-role="course-file-tokens"></div>
       </div>
 
-      <div class="course-list" data-role="course-list-items">
-        {% for course in courses %}
-          <button
-            type="button"
-            class="course-list-item {% if course.id == selected_course_id %}is-active{% endif %}"
-            data-course-list-item
-            data-course-select="{{ course.id }}"
-            data-course-item="true"
-            data-course-id="{{ course.id }}"
-            data-course-name="{{ course.name }}"
-          >
-            <div class="course-list-item-head">
-              <strong>{{ course.name }}</strong>
-              <span class="course-state-chip is-sage">선택 가능</span>
-            </div>
-            <span>등록 강사 {{ course.instructor_names | length }}명</span>
-            <small>대주제 {{ course.section_count }}개</small>
-          </button>
-        {% else %}
-          <div class="empty-state">
-            <strong>아직 과정이 없습니다.</strong>
-            <p>새 과정을 추가해 주세요.</p>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
-
-  <section id="analysis-prepare-modal" class="floating-panel modal-shell" data-testid="analysis-prepare-modal" aria-hidden="true" hidden>
-    <div class="panel page1-popup analysis-prepare-card">
-      <div class="block-header">
-        <div class="section-heading">
-          <h2>유튜브 분석 범위 확인</h2>
-          <p>재생목록과 예상 분석 규모를 먼저 확인한 뒤 실제 분석을 시작합니다.</p>
-        </div>
-        <button type="button" class="icon-button" data-close-prepare aria-label="닫기">
-          <svg viewBox="0 0 24 24" role="img" focusable="false">
-            <path d="m7 7 10 10M17 7 7 17" />
-          </svg>
-        </button>
-      </div>
-
-      <div class="analysis-prepare-summary">
-        <div class="analysis-prepare-grid">
-          <article class="analysis-prepare-metric">
-            <span>추천 모드</span>
-            <strong data-role="prepare-mode">lexical</strong>
-          </article>
-          <article class="analysis-prepare-metric">
-            <span>확장 영상 수</span>
-            <strong data-role="prepare-video-count">0개</strong>
-          </article>
-          <article class="analysis-prepare-metric">
-            <span>총 재생시간</span>
-            <strong data-role="prepare-duration">0분</strong>
-          </article>
-          <article class="analysis-prepare-metric">
-            <span>예상 chunk</span>
-            <strong data-role="prepare-chunks">0개</strong>
-          </article>
-          <article class="analysis-prepare-metric">
-            <span>예상 처리시간</span>
-            <strong data-role="prepare-processing">0분</strong>
-          </article>
-          <article class="analysis-prepare-metric">
-            <span>예상 OpenAI 비용</span>
-            <strong data-role="prepare-cost">$0.0000</strong>
-          </article>
-        </div>
-
-        <div class="analysis-prepare-caption" data-role="prepare-caption-probe">
-          자막 샘플 확인 <strong data-role="prepare-caption-success">0</strong>/<span data-role="prepare-caption-total">0</span>
-        </div>
-
-        <div class="analysis-prepare-block" data-role="prepare-playlists-block" hidden>
-          <strong>확장된 재생목록</strong>
-          <div class="analysis-prepare-list" data-role="prepare-playlists"></div>
-        </div>
-
-        <div class="analysis-prepare-block" data-role="prepare-warnings-block" hidden>
-          <strong>주의사항</strong>
-          <ul class="analysis-prepare-warnings" data-role="prepare-warnings"></ul>
+      <div class="field">
+        <span>담당 강사</span>
+        <div class="course-token-shell">
+          <div id="course-instructor-tokens" class="lane-token-list" data-role="course-instructor-tokens"></div>
+          <input type="text" id="course-instructor-input" class="lane-token-input" data-testid="course-instructor-input"
+            placeholder="강사 이름 입력 후 콤마" />
         </div>
       </div>
+
+      <input type="hidden" name="sections_json" id="course-sections-json" value="[]" />
+      <input type="hidden" name="raw_curriculum_text" id="course-raw-curriculum-text" value="" />
+      <input type="hidden" name="instructor_names_json" id="course-instructor-names-json" value="[]" />
+      <div id="course-preview-state" class="preview-state" data-testid="course-preview-state">
+        <strong>PDF를 업로드하면 과정 초안이 준비됩니다.</strong>
+      </div>
+      <div id="course-preview-table" class="is-hidden" data-testid="course-preview-table"></div>
 
       <div class="modal-actions">
-        <button type="button" class="secondary-button" data-close-prepare>취소</button>
-        <button type="button" class="primary-button" data-confirm-prepare>분석 시작</button>
+        <button type="button" class="secondary-button" data-close-dialog data-close="course-modal">취소</button>
+        <button type="submit" id="course-save-button" class="primary-button" data-testid="course-save-button"
+          disabled>저장</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section id="course-list-panel" class="floating-panel modal-shell" data-testid="course-list-panel" aria-hidden="true"
+  hidden>
+  <div class="panel page1-popup page1-course-list-popup">
+    <div class="block-header">
+      <div class="section-heading">
+        <h2>과정 목록</h2>
+        <p>분석 기준으로 사용할 과정을 선택합니다.</p>
+      </div>
+      <button type="button" class="icon-button" data-close-dialog aria-label="닫기">
+        <svg viewBox="0 0 24 24" role="img" focusable="false">
+          <path d="m7 7 10 10M17 7 7 17" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="course-list" data-role="course-list-items">
+      {% for course in courses %}
+      <button type="button" class="course-list-item {% if course.id == selected_course_id %}is-active{% endif %}"
+        data-course-list-item data-course-select="{{ course.id }}" data-course-item="true"
+        data-course-id="{{ course.id }}" data-course-name="{{ course.name }}">
+        <div class="course-list-item-head">
+          <strong>{{ course.name }}</strong>
+          <span class="course-state-chip is-sage">선택 가능</span>
+        </div>
+        <span>등록 강사 {{ course.instructor_names | length }}명</span>
+        <small>대주제 {{ course.section_count }}개</small>
+      </button>
+      {% else %}
+      <div class="empty-state">
+        <strong>아직 과정이 없습니다.</strong>
+        <p>새 과정을 추가해 주세요.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section id="analysis-prepare-modal" class="floating-panel modal-shell" data-testid="analysis-prepare-modal"
+  aria-hidden="true" hidden>
+  <div class="panel page1-popup analysis-prepare-card">
+    <div class="block-header">
+      <div class="section-heading">
+        <h2>유튜브 분석 범위 확인</h2>
+        <p>재생목록과 예상 분석 규모를 먼저 확인한 뒤 실제 분석을 시작합니다.</p>
+      </div>
+      <button type="button" class="icon-button" data-close-prepare aria-label="닫기">
+        <svg viewBox="0 0 24 24" role="img" focusable="false">
+          <path d="m7 7 10 10M17 7 7 17" />
+        </svg>
+      </button>
+    </div>
+
+    <div class="analysis-prepare-summary">
+      <div class="analysis-prepare-grid">
+        <article class="analysis-prepare-metric">
+          <span>추천 모드</span>
+          <strong data-role="prepare-mode">lexical</strong>
+        </article>
+        <article class="analysis-prepare-metric">
+          <span>확장 영상 수</span>
+          <strong data-role="prepare-video-count">0개</strong>
+        </article>
+        <article class="analysis-prepare-metric">
+          <span>총 재생시간</span>
+          <strong data-role="prepare-duration">0분</strong>
+        </article>
+        <article class="analysis-prepare-metric">
+          <span>예상 chunk</span>
+          <strong data-role="prepare-chunks">0개</strong>
+        </article>
+        <article class="analysis-prepare-metric">
+          <span>예상 처리시간</span>
+          <strong data-role="prepare-processing">0분</strong>
+        </article>
+        <article class="analysis-prepare-metric">
+          <span>예상 OpenAI 비용</span>
+          <strong data-role="prepare-cost">$0.0000</strong>
+        </article>
+      </div>
+
+      <div class="analysis-prepare-caption" data-role="prepare-caption-probe">
+        자막 샘플 확인 <strong data-role="prepare-caption-success">0</strong>/<span data-role="prepare-caption-total">0</span>
+      </div>
+
+      <div class="analysis-prepare-block" data-role="prepare-playlists-block" hidden>
+        <strong>확장된 재생목록</strong>
+        <div class="analysis-prepare-list" data-role="prepare-playlists"></div>
+      </div>
+
+      <div class="analysis-prepare-block" data-role="prepare-warnings-block" hidden>
+        <strong>주의사항</strong>
+        <ul class="analysis-prepare-warnings" data-role="prepare-warnings"></ul>
       </div>
     </div>
-  </section>
+
+    <div class="modal-actions">
+      <button type="button" class="secondary-button" data-close-prepare>취소</button>
+      <button type="button" class="primary-button" data-confirm-prepare>분석 시작</button>
+    </div>
+  </div>
+</section>
 {% endblock %}

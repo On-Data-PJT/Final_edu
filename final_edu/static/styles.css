@@ -132,6 +132,12 @@ svg {
   gap: 10px;
 }
 
+.site-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .panel,
 .notice,
 .trend-card,
@@ -428,7 +434,7 @@ button:disabled {
 }
 
 .meta-label,
-.field > span,
+.field>span,
 .metric-label {
   display: block;
   margin-bottom: 8px;
@@ -612,13 +618,13 @@ select:focus {
 }
 
 .course-modal-card,
-.drawer-shell > .panel {
+.drawer-shell>.panel {
   width: min(640px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
 }
 
-.drawer-shell > .panel {
+.drawer-shell>.panel {
   width: min(420px, 100%);
 }
 
@@ -1855,7 +1861,7 @@ body[data-page="page3"] .site-header {
   .page1-stage,
   .panel,
   .course-modal-card,
-  .drawer-shell > .panel {
+  .drawer-shell>.panel {
     padding: 18px;
   }
 
@@ -1952,7 +1958,7 @@ body[data-page="page3"] .site-header {
     align-items: end;
   }
 
-  .drawer-shell > .panel,
+  .drawer-shell>.panel,
   .course-modal-card {
     width: 100%;
     max-height: calc(100vh - 24px);

@@ -1,0 +1,582 @@
+{% extends "base.html" %}
+
+{% block title %}Study Labs | 평가서 분석{% endblock %}
+
+{% block content %}
+<style>
+  body {
+    background: #f1f8f1 !important;
+    font-family: "Pretendard Variable", "Noto Sans KR", sans-serif;
+  }
+
+  .dashboard-wrapper {
+    display: flex;
+    gap: 40px;
+    max-width: 1300px;
+    margin: 0 auto;
+    align-items: flex-start;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 240px;
+    position: sticky;
+    top: 24px;
+    background: #fff;
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 900;
+    font-size: 20px;
+    color: #166534;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .nav-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .nav-label {
+    font-size: 11px;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+    padding-left: 12px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    color: #64748b;
+    font-weight: 700;
+    font-size: 14px;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+
+  .nav-item:hover {
+    background: #f0fdf4;
+    color: #166534;
+  }
+
+  .nav-item.active {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .nav-item svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  /* ── Main ── */
+  .dashboard-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding-bottom: 80px;
+  }
+
+  /* ── 페이지 헤더 ── */
+  .page-header {
+    margin-bottom: 4px;
+  }
+
+  .page-label {
+    font-size: 11px;
+    font-weight: 800;
+    color: #166534;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .page-title {
+    font-size: 26px;
+    font-weight: 900;
+    color: #1e293b;
+    margin: 0 0 6px;
+  }
+
+  .page-desc {
+    font-size: 13px;
+    color: #64748b;
+    margin: 0;
+  }
+
+  /* ── 강사 탭 ── */
+  .inst-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 20px 0 0;
+  }
+
+  .inst-tab {
+    padding: 9px 22px;
+    border-radius: 99px;
+    font-size: 13px;
+    font-weight: 700;
+    border: 2px solid #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.18s;
+  }
+
+  .inst-tab:hover {
+    border-color: #4ade80;
+    color: #166534;
+    background: #f0fdf4;
+  }
+
+  .inst-tab.active {
+    border-color: #18352b;
+    background: #18352b;
+    color: #fff;
+  }
+
+  /* ── 공통 카드 ── */
+  .rv-card {
+    background: #fff;
+    border-radius: 28px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    outline: 1px solid rgba(0, 0, 0, 0.05);
+    padding: 28px 32px;
+    margin-bottom: 0;
+  }
+
+  .rv-card-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #1e293b;
+    margin: 0 0 18px;
+  }
+
+  /* ── 메타 칩 ── */
+  .meta-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 99px;
+  }
+
+  .chip-file {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .chip-date {
+    background: #f1f5f9;
+    color: #475569;
+  }
+
+  .chip-count {
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+
+  /* ── 감성 분석 ── */
+  .sentiment-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .sentiment-box {
+    border-radius: 16px;
+    padding: 18px 20px;
+  }
+
+  .sentiment-box.pos {
+    background: #edf8f0;
+    border: 1px solid #b8d7c1;
+  }
+
+  .sentiment-box.neg {
+    background: #fff3ed;
+    border: 1px solid #eaa487;
+  }
+
+  .sentiment-box-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .sentiment-box.pos .sentiment-box-label {
+    color: #166534;
+  }
+
+  .sentiment-box.neg .sentiment-box-label {
+    color: #9a3412;
+  }
+
+  .kw-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .kw-chip {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 13px;
+    border-radius: 99px;
+    color: #fff;
+  }
+
+  .kw-chip.pos {
+    background: #22c55e;
+  }
+
+  .kw-chip.neg {
+    background: #f97316;
+  }
+
+  /* ── 반복 불만 패턴 ── */
+  .complaint-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    background: #f7faf6;
+    border-radius: 14px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+  }
+
+  .complaint-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .complaint-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 11px;
+    border-radius: 99px;
+    background: #fce6db;
+    color: #9b5c3d;
+    white-space: nowrap;
+  }
+
+  .complaint-text {
+    font-size: 13px;
+    color: #334155;
+    line-height: 1.65;
+  }
+
+  .complaint-week {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 3px;
+  }
+
+  /* ── 개선 포인트 ── */
+  .suggestion-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    background: #f7faf6;
+    border-radius: 14px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+  }
+
+  .suggestion-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .sug-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+
+  .sug-dot.high {
+    background: #e86c6c;
+  }
+
+  .sug-dot.medium {
+    background: #e8a84a;
+  }
+
+  .sug-dot.low {
+    background: #87b37a;
+  }
+
+  .sug-label {
+    font-size: 13px;
+    font-weight: 800;
+    color: #1e293b;
+    margin-bottom: 4px;
+  }
+
+  .sug-body {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.65;
+  }
+
+  /* ── 미업로드 ── */
+  .no-data-wrap {
+    padding: 32px 0;
+    text-align: center;
+  }
+
+  .no-data-chip {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 7px 18px;
+    border-radius: 99px;
+    background: #fefce8;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    margin-bottom: 16px;
+  }
+
+  .no-data-desc {
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.7;
+  }
+
+  .no-data-desc a {
+    color: #166534;
+    font-weight: 700;
+    text-decoration: underline;
+  }
+
+  @media (max-width: 900px) {
+    .dashboard-wrapper {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100%;
+      position: static;
+    }
+
+    .sentiment-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="dashboard-wrapper">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"
+        stroke-linejoin="round" style="width:24px;height:24px;">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+      </svg>
+      Study Labs
+    </div>
+    <nav class="nav-group">
+      <a href="/" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        Home
+      </a>
+    </nav>
+    <nav class="nav-group">
+      <div class="nav-label">Dashboard</div>
+      <a href="/demo" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg>
+        Overview
+      </a>
+      <a href="/review" class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        VOC Analysis
+      </a>
+      <a href="/solution" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
+        </svg>
+        Insights
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="dashboard-container">
+
+    <!-- 페이지 헤더 -->
+    <div class="page-header">
+      <p class="page-label">Evaluation</p>
+      <h1 class="page-title">강의 평가서 분석</h1>
+      <p class="page-desc">강사별 평가서 분석 결과입니다.</p>
+
+      <!-- 강사 탭 -->
+      <div class="inst-tabs">
+        {% for inst in review_payload.instructors %}
+        <button class="inst-tab{% if loop.first %} active{% endif %}" data-idx="{{ loop.index0 }}"
+          onclick="switchTab({{ loop.index0 }})">
+          {{ inst.name }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- 강사별 패널 -->
+    {% for inst in review_payload.instructors %}
+    <div id="panel-{{ loop.index0 }}" style="{{ '' if loop.first else 'display:none' }}">
+
+      {% if inst.file_name %}
+      <div class="meta-chips">
+        <span class="meta-chip chip-file">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+          {{ inst.file_name }}
+        </span>
+        {% if inst.analyzed_at %}
+        <span class="meta-chip chip-date">📅 {{ inst.analyzed_at }}</span>
+        {% endif %}
+        {% if inst.response_count %}
+        <span class="meta-chip chip-count">👥 응답 {{ inst.response_count }}명</span>
+        {% endif %}
+      </div>
+
+      <div class="rv-card" style="margin-bottom:20px">
+        <p class="rv-card-title">감성 분석</p>
+        <div class="sentiment-grid">
+          <div class="sentiment-box pos">
+            <div class="sentiment-box-label">긍정 키워드</div>
+            <div class="kw-chips">
+              {% for kw in inst.sentiment.positive %}
+              <span class="kw-chip pos">{{ kw }}</span>
+              {% else %}
+              <span style="font-size:12px;color:#94a3b8">없음</span>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="sentiment-box neg">
+            <div class="sentiment-box-label">부정 키워드</div>
+            <div class="kw-chips">
+              {% for kw in inst.sentiment.negative %}
+              <span class="kw-chip neg">{{ kw }}</span>
+              {% else %}
+              <span style="font-size:12px;color:#94a3b8">없음</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rv-card" style="margin-bottom:20px">
+        <p class="rv-card-title">반복 불만 패턴</p>
+        {% if inst.repeated_complaints %}
+        {% for c in inst.repeated_complaints %}
+        <div class="complaint-row">
+          <span class="complaint-badge">{{ c.count }}명 언급</span>
+          <div>
+            <div class="complaint-text">{{ c.pattern }}</div>
+            {% if c.week %}<div class="complaint-week">{{ c.week }}</div>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p style="font-size:13px;color:#94a3b8">반복 불만 패턴이 감지되지 않았어요.</p>
+        {% endif %}
+      </div>
+
+      <div class="rv-card">
+        <p class="rv-card-title">다음 기수 개선 포인트</p>
+        {% if inst.next_suggestions %}
+        {% for s in inst.next_suggestions %}
+        <div class="suggestion-row">
+          <div class="sug-dot {{ s.priority if s.priority in ['high','medium','low'] else 'low' }}"></div>
+          <div>
+            <div class="sug-label">{{ s.label }}</div>
+            <div class="sug-body">{{ s.body }}</div>
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p style="font-size:13px;color:#94a3b8">개선 포인트가 없어요.</p>
+        {% endif %}
+      </div>
+
+      {% else %}
+      <div class="rv-card">
+        <div class="no-data-wrap">
+          <div class="no-data-chip">⚠️ 평가서 미업로드 · 분석 대기 중</div>
+          <p class="no-data-desc">
+            <a href="/">Home 페이지</a>에서 파일을 업로드하면<br>분석 결과가 여기에 표시됩니다.
+          </p>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+
+  </div>
+</div>
+
+<script>
+  function switchTab(idx) {
+    document.querySelectorAll('.inst-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('[id^="panel-"]').forEach(p => p.style.display = 'none');
+    document.querySelector(`.inst-tab[data-idx="${idx}"]`).classList.add('active');
+    document.getElementById(`panel-${idx}`).style.display = '';
+  }
+</script>
+{% endblock %}

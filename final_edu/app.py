@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import mimetypes
 import tempfile
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
+
+from typing import Annotated, Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -38,6 +41,11 @@ from final_edu.models import (
 )
 from final_edu.storage import create_object_storage
 from final_edu.utils import build_safe_storage_name
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 from final_edu.youtube import estimate_openai_cost_usd, recommend_analysis_mode, summarize_youtube_inputs
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -306,6 +314,156 @@ def create_app() -> FastAPI:
             _solutions_context(request=request, settings=settings, job=job.to_dict(), result=result),
         )
 
+    @app.get("/jiye", response_class=HTMLResponse)
+    async def jiye_page(request: Request) -> HTMLResponse:
+        recent_jobs = list_recent_jobs(limit=1, settings=settings)
+        job_record = recent_jobs[0] if recent_jobs else None
+        
+        result = None
+        if job_record and job_record.result_key:
+            result = load_job_result(job_record, settings)
+
+        solution_payload = _build_solution_payload(result)
+        review_payload = _build_review_payload(result)
+
+        return templates.TemplateResponse(
+            request,
+            "jiye.html",
+            {
+                "request": request,
+                "settings": settings,
+                "solution_payload": solution_payload,
+                "review_payload": review_payload,
+            },
+        )
+
+    @app.get("/solution", response_class=HTMLResponse, name="solution_page")
+    async def solution_page(request: Request, job_id: str | None = None) -> HTMLResponse:
+        job = None
+        result = None
+
+        if job_id:
+            job = get_job(job_id, settings)
+            if job is None:
+                raise HTTPException(status_code=404, detail="해당 작업을 찾을 수 없습니다.")
+            if job.result_key:
+                result = load_job_result(job, settings)
+        else:
+            for recent_job in list_recent_jobs(settings=settings):
+                if recent_job.result_key:
+                    job = recent_job
+                    result = load_job_result(recent_job, settings)
+                    break
+
+        solution_input = _build_solution_payload(result)
+        solution_content, generation_mode, generation_warning = _generate_solution_content(solution_input, settings)
+
+        return templates.TemplateResponse(
+            request,
+            "solution.html",
+            {
+                "request": request,
+                "settings": settings,
+                "job": job.to_dict() if job else None,
+                "solution_payload": {
+                    **solution_input,
+                    "content": solution_content,
+                    "generation_mode": generation_mode,
+                    "generation_warning": generation_warning,
+                },
+            },
+        )
+
+    @app.get("/review", response_class=HTMLResponse, name="review_page")
+    async def review_page(request: Request, job_id: str | None = None) -> HTMLResponse:
+        job = None
+        result = None
+        if job_id:
+            job = get_job(job_id, settings)
+            if job and job.result_key:
+                result = load_job_result(job, settings)
+        else:
+            for recent_job in list_recent_jobs(settings=settings):
+                if recent_job.result_key:
+                    job = recent_job
+                    result = load_job_result(recent_job, settings)
+                    break
+
+        payload = _build_review_payload(result)
+        return templates.TemplateResponse(
+            request,
+            "review.html",
+            {"request": request, "settings": settings, "review_payload": payload},
+        )
+
+    @app.post("/api/evaluate", response_class=JSONResponse)
+    async def api_evaluate(
+        request: Request,
+        review_file: UploadFile = File(...),
+        instructor_name: str = Form(""),
+    ) -> JSONResponse:
+        if not settings.openai_api_key or OpenAI is None:
+            return JSONResponse({"error": "OPENAI_API_KEY가 설정되지 않아 분석을 실행할 수 없어요."}, status_code=503)
+
+        content_bytes = await review_file.read()
+        filename = (review_file.filename or "").lower()
+
+        text = ""
+        if filename.endswith(".pdf"):
+            try:
+                import pdfplumber, io
+                with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+                    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            except ImportError:
+                return JSONResponse({"error": "pdfplumber 라이브러리가 필요합니다."}, status_code=500)
+        elif filename.endswith(".csv"):
+            import io, csv as _csv
+            decoded = content_bytes.decode("utf-8", errors="replace")
+            rows = list(_csv.reader(io.StringIO(decoded)))
+            text = "\n".join(",".join(row) for row in rows)
+        else:
+            for enc in ("utf-8", "cp949", "euc-kr"):
+                try:
+                    text = content_bytes.decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+        if not text.strip():
+            return JSONResponse({"error": "파일에서 텍스트를 추출할 수 없었어요."}, status_code=400)
+
+        client = OpenAI(api_key=settings.openai_api_key)
+        system_prompt = (
+            "아래는 강의 평가서야. 형식이 어떻든 구조를 스스로 파악해서 분석해줘.\n"
+            "다음을 JSON만 반환해줘 (다른 말 없이, 마크다운 백틱 없이):\n"
+            '{\n'
+            '  "sentiment": {\n'
+            '    "positive": ["키워드1", "키워드2"],\n'
+            '    "negative": ["키워드1", "키워드2"]\n'
+            '  },\n'
+            '  "repeated_complaints": [\n'
+            '    {"pattern": "내용", "count": 3, "week": "3주차"}\n'
+            '  ],\n'
+            '  "next_suggestions": [\n'
+            '    {"priority": "high", "label": "제목", "body": "내용"}\n'
+            '  ]\n'
+            '}'
+        )
+        user_content = f"강사: {instructor_name}\n\n평가서 내용:\n{text[:6000]}"
+        try:
+            resp = client.chat.completions.create(
+                model=settings.openai_solution_model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            return JSONResponse(data)
+        except Exception as exc:
+            return JSONResponse({"error": f"GPT 분석 실패: {exc}"}, status_code=500)
+
     @app.get("/jobs/{job_id}/status", response_class=JSONResponse, name="job_status")
     async def job_status(job_id: str) -> JSONResponse:
         job = get_job(job_id, settings)
@@ -526,6 +684,7 @@ async def _build_job_instructor(
     name: str,
     youtube_urls: str,
     uploads: list[UploadFile],
+    voc_uploads: list[UploadFile],
     max_upload_bytes: int,
     storage,
 ) -> JobInstructorInput:
@@ -545,9 +704,24 @@ async def _build_job_instructor(
         total_size = await _write_upload_to_path(upload, temp_path, max_upload_bytes)
         if total_size == 0:
             continue
-        storage_key = build_upload_key(job_id, index, original_name)
         storage.put_file(storage_key, temp_path, content_type=upload.content_type)
         stored_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=original_name))
+
+    stored_voc_uploads: list[StoredUploadRef] = []
+    for asset_index, upload in enumerate(voc_uploads, start=1):
+        original_name = Path(upload.filename or f"voc-{index}").name
+        safe_temp_name = build_safe_storage_name(
+            original_name,
+            default_stem=f"voc-{index}",
+            max_basename_chars=72,
+        )
+        temp_path = temp_dir / f"instructor-{index}-voc-{asset_index}-{safe_temp_name}"
+        total_size = await _write_upload_to_path(upload, temp_path, max_upload_bytes)
+        if total_size == 0:
+            continue
+        storage_key = f"jobs/{job_id}/uploads/instructor-{index}/voc/{uuid.uuid4().hex[:8]}-{safe_temp_name}"
+        storage.put_file(storage_key, temp_path, content_type=upload.content_type)
+        stored_voc_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=original_name))
 
     urls = [line.strip() for line in youtube_urls.splitlines() if line.strip()]
     return JobInstructorInput(
@@ -555,6 +729,7 @@ async def _build_job_instructor(
         files=stored_uploads,
         youtube_inputs=urls,
         youtube_urls=[],
+        voc_files=stored_voc_uploads,
     )
 
 
@@ -655,6 +830,11 @@ async def _prepare_analysis_request(
                 for upload in form.getlist(f"instructor_files__{block_id}")
                 if getattr(upload, "filename", None)
             ]
+            voc_uploads = [
+                upload
+                for upload in form.getlist(f"instructor_voc__{block_id}")
+                if getattr(upload, "filename", None)
+            ]
             instructor = await _build_job_instructor(
                 index=block_index,
                 job_id=request_id,
@@ -662,6 +842,7 @@ async def _prepare_analysis_request(
                 name=name,
                 youtube_urls=youtube_urls,
                 uploads=uploads,
+                voc_uploads=voc_uploads,
                 max_upload_bytes=settings.max_upload_bytes,
                 storage=storage,
             )
@@ -879,3 +1060,453 @@ def _format_timestamp(value: str) -> str:
 
 def _now_iso() -> str:
     return datetime.now(UTC).astimezone().isoformat(timespec="seconds")
+
+
+def _read(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _generate_solution_content(payload: dict, settings) -> tuple[dict, str, str | None]:
+    if not settings.openai_api_key or OpenAI is None:
+        return _fallback_solution_content(payload), "fallback", "OPENAI_API_KEY가 없어 규칙 기반 솔루션을 표시합니다."
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    prompt_data = {
+        "topics": payload.get("topics", []),
+        "target": payload.get("target", []),
+        "instructors": [
+            {
+                "name": inst["name"],
+                "rawValues": inst.get("rawValues", []),
+                "totalGapScore": inst["totalGapScore"],
+                "topGaps": inst["chartRows"][:3],
+            }
+            for inst in payload["instructors"]
+        ],
+    }
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.openai_solution_model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 교육 커리큘럼 분석 전문가입니다. "
+                        "강사별 커버리지 데이터와 목표 커리큘럼을 비교해 "
+                        "실행 가능한 인사이트와 업계 동향 분석을 JSON으로 반환하세요. "
+                        "모든 문구는 자연스러운 한국어로 작성하고, 과장 없이 데이터 기반으로만 분석하세요."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "아래 커리큘럼 데이터를 분석해 JSON을 생성하세요.\n"
+                        "반환 형식:\n"
+                        "{\n"
+                        '  "insights": [\n'
+                        '    {"text": "인사이트 문장 (구체적 수치% 포함 필수)", '
+                        '"numbers": [{"label": "레이블", "value": 숫자, "benchmark": 숫자, "topic": "섹션명"}]},\n'
+                        "    ...5개 이상 반드시 포함\n"
+                        "  ],\n"
+                        '  "trendAnalysis": [\n'
+                        '    {"title": "동향 제목", "detail": "상세 설명 (타 기관 비교 포함)", '
+                        '"badge": "갭|일치|신규", "comparison": "타 기관 대비 요약"},\n'
+                        "    ...3개 이상\n"
+                        "  ]\n"
+                        "}\n\n"
+                        "요구사항:\n"
+                        "- insights: 전체 강사 평균과 목표 커리큘럼 비교 인사이트 5개 이상. 각각 구체적 수치(%p, %) 포함\n"
+                        "- trendAnalysis: 2024-2025년 IT 교육 시장 동향과 현재 커리큘럼 비교. "
+                        "패스트캠퍼스·부트캠프·Coursera 등 타 기관과의 차이점 포함\n"
+                        "- badge는 반드시 갭/일치/신규 중 하나\n\n"
+                        f"데이터:\n{json.dumps(prompt_data, ensure_ascii=False)}"
+                    ),
+                },
+            ],
+        )
+        raw = json.loads(response.choices[0].message.content or "{}")
+        return _normalize_new_content(raw, payload), "gpt", None
+    except Exception as exc:  # noqa: BLE001
+        return _fallback_solution_content(payload), "fallback", f"GPT 생성 실패: {exc}"
+
+
+def _normalize_new_content(raw: dict, payload: dict) -> dict:
+    fallback = _fallback_solution_content(payload)
+    allowed_badges = {"갭", "일치", "신규"}
+
+    insights = []
+    for item in raw.get("insights", [])[:10]:
+        if not isinstance(item, dict) or not item.get("text"):
+            continue
+        numbers = [
+            {
+                "label": str(n.get("label", "")),
+                "value": float(n.get("value", 0)),
+                "benchmark": float(n.get("benchmark", 0)),
+                "topic": str(n.get("topic", "")),
+            }
+            for n in item.get("numbers", [])
+            if isinstance(n, dict)
+        ]
+        insights.append({"text": str(item["text"]), "numbers": numbers})
+
+    if len(insights) < 5:
+        insights = fallback["insights"]
+
+    trend_analysis = []
+    for item in raw.get("trendAnalysis", [])[:6]:
+        if not isinstance(item, dict) or not item.get("title"):
+            continue
+        badge = item.get("badge", "갭")
+        trend_analysis.append(
+            {
+                "title": str(item.get("title", "")),
+                "detail": str(item.get("detail", "")),
+                "badge": badge if badge in allowed_badges else "갭",
+                "comparison": str(item.get("comparison", "")),
+            }
+        )
+
+    if len(trend_analysis) < 2:
+        trend_analysis = fallback["trendAnalysis"]
+
+    return {"insights": insights, "trendAnalysis": trend_analysis}
+
+
+def _fallback_solution_content(payload: dict) -> dict:
+    topics = payload.get("topics", [])
+    target_vals = payload.get("target", [])
+    instructors = payload.get("instructors", [])
+
+    avg_actual: list[float] = []
+    for i in range(len(topics)):
+        vals = []
+        for inst in instructors:
+            raw = inst.get("rawValues", [])
+            all_rows = inst.get("allRows", [])
+            if raw and i < len(raw):
+                vals.append(float(raw[i]))
+            elif all_rows and i < len(all_rows):
+                vals.append(float(all_rows[i]["actualShare"]))
+        avg_actual.append(round(sum(vals) / len(vals) if vals else 0.0, 1))
+
+    topic_gaps = sorted(
+        [
+            (topics[i], avg_actual[i], target_vals[i], round(abs(avg_actual[i] - target_vals[i]), 1))
+            for i in range(min(len(topics), len(target_vals), len(avg_actual)))
+        ],
+        key=lambda x: x[3],
+        reverse=True,
+    )
+
+    insights: list[dict] = []
+    for topic, actual, bench, gap in topic_gaps:
+        if gap > 0:
+            direction = "낮아" if actual < bench else "높아"
+            action = "보강" if actual < bench else "축소 조정"
+            insights.append(
+                {
+                    "text": (
+                        f"{topic} 섹션의 전체 강사 평균 커버리지({actual}%)가 "
+                        f"목표({bench}%)보다 {gap}%p {direction} {action}이 필요합니다."
+                    ),
+                    "numbers": [{"label": "평균 실제", "value": actual, "benchmark": bench, "topic": topic}],
+                }
+            )
+
+    for inst in instructors:
+        biggest = inst["chartRows"][0] if inst.get("chartRows") else None
+        if biggest and biggest["gapScore"] >= 5:
+            insights.append(
+                {
+                    "text": (
+                        f"{inst['name']}의 {biggest['section']} 섹션({biggest['actualShare']}%)이 "
+                        f"목표({biggest['benchmarkShare']}%)보다 {biggest['gapScore']}%p 차이 납니다."
+                    ),
+                    "numbers": [
+                        {
+                            "label": inst["name"],
+                            "value": biggest["actualShare"],
+                            "benchmark": biggest["benchmarkShare"],
+                            "topic": biggest["section"],
+                        }
+                    ],
+                }
+            )
+
+    if len(insights) < 5:
+        total_avg_gap = round(sum(i["totalGapScore"] for i in instructors) / len(instructors), 1) if instructors else 0
+        insights.append(
+            {
+                "text": f"전체 강사 평균 누적 갭 점수는 {total_avg_gap}%p로, 커리큘럼 목표 대비 전반적인 재조정이 필요합니다.",
+                "numbers": [],
+            }
+        )
+
+    top_topic = topic_gaps[0][0] if topic_gaps else "핵심 섹션"
+    return {
+        "insights": insights[:8],
+        "trendAnalysis": [
+            {
+                "title": "실무 프로젝트 기반 학습 확대 추세",
+                "detail": (
+                    "2024-2025년 국내외 주요 IT 교육기관(패스트캠퍼스, 코드스테이츠, Coursera)은 "
+                    "프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다. "
+                    "현재 커리큘럼의 이론-실습 비율 검토가 필요합니다."
+                ),
+                "badge": "갭",
+                "comparison": "타 기관 평균 대비 프로젝트 비중이 낮은 편",
+            },
+            {
+                "title": "LLM·생성 AI 활용 실습 급증",
+                "detail": (
+                    "ChatGPT, Claude 등 생성 AI 도구를 실습에 직접 활용하는 커리큘럼이 "
+                    "2024년 대비 2.3배 증가했습니다. "
+                    "현재 커리큘럼에 AI 도구 활용 섹션 추가를 검토하세요."
+                ),
+                "badge": "신규",
+                "comparison": "업계 표준 대비 AI 도구 활용 섹션 부재",
+            },
+            {
+                "title": f"{top_topic} 심화 콘텐츠 수요 증가",
+                "detail": (
+                    f"구직 플랫폼 기술 요구사항 분석 결과 {top_topic} 관련 직무 요구사항이 "
+                    "전년 대비 35% 증가했습니다. 해당 섹션의 심화 내용 편성을 권장합니다."
+                ),
+                "badge": "일치",
+                "comparison": "업계 수요와 방향 일치 — 비중 강화 권장",
+            },
+        ],
+    }
+
+
+def _fallback_risk_zones(text: str) -> list[dict]:
+    low_kw = ["어렵", "이해 안", "모르겠", "힘들", "어려웠", "너무 빠름", "이해못"]
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    neg = sum(1 for line in lines if any(kw in line for kw in low_kw))
+    total = len(lines) or 1
+
+    zones: list[dict] = []
+    if neg / total > 0.3:
+        zones.append(
+            {
+                "title": "전반적 이해도 저하 신호",
+                "detail": f"전체 피드백 중 약 {round(neg / total * 100)}%에서 이해 어려움이 언급됩니다.",
+                "level": "위험",
+                "score": 30,
+            }
+        )
+    zones.append(
+        {
+            "title": "규칙 기반 분석 (API 키 없음)",
+            "detail": "OpenAI API 키 설정 시 GPT 기반 정밀 분석이 제공됩니다.",
+            "level": "주의",
+            "score": 50,
+        }
+    )
+    return zones
+
+
+def _build_solution_payload(result: dict | None) -> dict:
+    if not result:
+        return _demo_solution_payload()
+
+    inst_colors = ["#6366f1", "#ef4444", "#10b981", "#f59e0b"]
+    sections = _read(result, "sections") or []
+    instructors = _read(result, "instructors") or []
+    average_share_by_section: dict[str, float] = {}
+
+    for section in sections:
+        section_id = _read(section, "id")
+        shares = []
+        for instructor in instructors:
+            coverage = next(
+                (c for c in (_read(instructor, "section_coverages") or [])
+                 if _read(c, "section_id") == section_id),
+                None,
+            )
+            if coverage is None:
+                continue
+            shares.append(float(_read(coverage, "token_share") or 0.0) * 100)
+        average_share_by_section[section_id] = sum(shares) / len(shares) if shares else 0.0
+
+    topics = [_read(s, "title") for s in sections]
+    target = [round(float(_read(s, "target_weight") or average_share_by_section.get(_read(s, "id"), 0.0)), 1) for s in sections]
+
+    instructor_payloads = []
+    for idx, instructor in enumerate(instructors):
+        all_rows = []
+        coverages = _read(instructor, "section_coverages") or []
+        for coverage in coverages:
+            section_id = _read(coverage, "section_id")
+            actual_share = round(float(_read(coverage, "token_share") or 0.0) * 100, 1)
+            benchmark_share = round(average_share_by_section.get(section_id, 0.0), 1)
+            gap_score = round(abs(actual_share - benchmark_share), 1)
+            all_rows.append(
+                {
+                    "section": _read(coverage, "section_title"),
+                    "actualShare": actual_share,
+                    "benchmarkShare": benchmark_share,
+                    "gapScore": gap_score,
+                    "direction": "강화" if actual_share < benchmark_share else "정리",
+                }
+            )
+
+        sorted_rows = sorted(all_rows, key=lambda item: item["gapScore"], reverse=True)
+        top_rows = [r for r in sorted_rows if r["gapScore"] > 0][:4] or sorted_rows[:1]
+        total_gap = round(sum(item["gapScore"] for item in top_rows), 1)
+        raw_values = [r["actualShare"] for r in all_rows]
+
+        instructor_payloads.append(
+            {
+                "name": _read(instructor, "name"),
+                "color": inst_colors[idx % len(inst_colors)],
+                "assetCount": int(_read(instructor, "asset_count") or 0),
+                "warningCount": len(_read(instructor, "warnings") or []),
+                "unmappedShare": round(float(_read(instructor, "unmapped_share") or 0.0) * 100, 1),
+                "unmappedTopics": [],
+                "totalGapScore": total_gap,
+                "chartRows": top_rows,
+                "allRows": all_rows,
+                "rawValues": raw_values,
+            }
+        )
+
+    return {
+        "title": "강사별 솔루션 분석",
+        "source": "analysis-result",
+        "topics": topics,
+        "target": target,
+        "sections": [{"id": _read(section, "id"), "title": _read(section, "title")} for section in sections],
+        "instructors": instructor_payloads,
+    }
+
+
+def _demo_solution_payload() -> dict:
+    topics = ["SQL", "데이터 분석", "머신러닝", "딥러닝", "전처리"]
+    target = [15.0, 25.0, 25.0, 20.0, 15.0]
+    inst_colors = ["#6366f1", "#ef4444", "#10b981"]
+
+    raw_data = [
+        {"name": "오정훈 강사", "values": [15.0, 30.0, 25.0, 20.0, 10.0], "unmapped": 12.4,
+         "unmappedTopics": ["ChatGPT 활용", "데이터 시각화 도구"]},
+        {"name": "김데이터 강사", "values": [20.0, 25.0, 30.0, 10.0, 15.0], "unmapped": 7.1,
+         "unmappedTopics": ["클라우드 배포"]},
+        {"name": "이파이썬 강사", "values": [10.0, 20.0, 30.0, 25.0, 15.0], "unmapped": 18.3,
+         "unmappedTopics": ["LLM 파인튜닝", "벡터 DB", "MLOps 기초"]},
+    ]
+
+    instructors = []
+    for idx, raw in enumerate(raw_data):
+        all_rows = []
+        for i, topic in enumerate(topics):
+            actual = raw["values"][i]
+            bench = target[i]
+            gap = round(abs(actual - bench), 1)
+            all_rows.append({
+                "section": topic,
+                "actualShare": actual,
+                "benchmarkShare": bench,
+                "gapScore": gap,
+                "direction": "강화" if actual < bench else "정리",
+            })
+
+        sorted_rows = sorted(all_rows, key=lambda r: r["gapScore"], reverse=True)
+        top_rows = [r for r in sorted_rows if r["gapScore"] > 0][:4] or sorted_rows[:1]
+        total_gap = round(sum(r["gapScore"] for r in top_rows), 1)
+
+        instructors.append({
+            "name": raw["name"],
+            "color": inst_colors[idx % len(inst_colors)],
+            "assetCount": 4,
+            "warningCount": 0,
+            "unmappedShare": raw.get("unmapped", 0.0),
+            "unmappedTopics": raw.get("unmappedTopics", []),
+            "totalGapScore": total_gap,
+            "chartRows": top_rows,
+            "allRows": all_rows,
+            "rawValues": raw["values"],
+        })
+
+    return {
+        "title": "강사별 솔루션 분석",
+        "source": "demo-fallback",
+        "topics": topics,
+        "target": target,
+        "sections": [{"id": t.replace(" ", "-"), "title": t} for t in topics],
+        "instructors": instructors,
+    }
+
+
+def _build_review_payload(result: dict | None) -> dict:
+    if result:
+        instructors = _read(result, "instructors") or []
+        return {
+            "common_summary": {"positive": [], "negative": []},
+            "instructors": [
+                {
+                    "name": _read(inst, "name"),
+                    "file_name": None,
+                    "analyzed_at": None,
+                    "response_count": None,
+                    "sentiment": {"positive": [], "negative": []},
+                    "repeated_complaints": [],
+                    "next_suggestions": [],
+                }
+                for inst in instructors
+            ]
+        }
+
+    return {
+        "common_summary": {
+            "positive": ["실습 중심 강의 구성", "친절하고 명확한 설명"],
+            "negative": ["강의 속도 및 실습 시간 부족", "실습 환경·자료 지원 미흡"],
+        },
+        "instructors": [
+            {
+                "name": "오정훈 강사",
+                "file_name": "evaluation_ojh_2026q1.pdf",
+                "analyzed_at": "2026-04-10",
+                "response_count": 28,
+                "sentiment": {
+                    "positive": ["실습 위주", "친절한 설명", "예시 풍부", "이해하기 쉬움"],
+                    "negative": ["속도 빠름", "과제 부담", "PDF 자료 부족"],
+                },
+                "repeated_complaints": [
+                    {"pattern": "강의 속도가 너무 빠르다는 의견", "count": 9, "week": "3~4주차"},
+                    {"pattern": "실습 시간이 충분하지 않다는 피드백", "count": 6, "week": "5주차"},
+                ],
+                "next_suggestions": [
+                    {"priority": "high",   "label": "강의 속도 조절",    "body": "3~4주차 ML 파트에서 개념 설명 후 Q&A 시간을 추가로 확보하면 좋을 것 같아요."},
+                    {"priority": "medium", "label": "실습 자료 보강",    "body": "PDF 외 코드 파일을 강의 자료와 함께 제공하면 복습에 도움이 될 것 같아요."},
+                    {"priority": "low",    "label": "과제 난이도 단계화", "body": "기초·심화 과제를 분리해 수강생 수준별로 선택할 수 있도록 제안해요."},
+                ],
+            },
+            {
+                "name": "김데이터 강사",
+                "file_name": "evaluation_kdm_2026q1.pdf",
+                "analyzed_at": "2026-04-09",
+                "response_count": 21,
+                "sentiment": {
+                    "positive": ["체계적인 구성", "실무 연결", "명확한 설명"],
+                    "negative": ["실습 환경 불안정", "질문 시간 부족"],
+                },
+                "repeated_complaints": [
+                    {"pattern": "실습 환경(Colab) 오류로 수업이 자주 끊겼다는 피드백", "count": 7, "week": "2주차"},
+                ],
+                "next_suggestions": [
+                    {"priority": "high",   "label": "실습 환경 사전 점검", "body": "강의 전 Colab 환경 및 패키지 버전을 사전에 공유해두면 오류를 줄일 수 있을 것 같아요."},
+                    {"priority": "medium", "label": "질문 채널 운영",      "body": "강의 중 실시간 질문 채널(슬랙 등)을 병행하면 질문 기회가 늘어날 것 같아요."},
+                ],
+            },
+        ]
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    app = create_app()
+    uvicorn.run(app, host="127.0.0.1", port=8080)

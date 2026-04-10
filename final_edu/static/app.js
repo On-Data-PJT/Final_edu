@@ -1111,8 +1111,9 @@
       <div class="composer-lane__start">
         <button type="button" class="lane-trigger" data-action="toggle-mode-menu" aria-label="업로드 방식 선택">+</button>
         <div class="lane-mode-menu" data-role="mode-menu" hidden>
-          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="files">파일 업로드</button>
-          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="youtube">유튜브 링크</button>
+          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="files">강의자료</button>
+          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="youtube">강의영상</button>
+          <button type="button" class="lane-mode-menu__item" data-action="switch-mode" data-mode="voc">강의평가</button>
         </div>
       </div>
       <div class="composer-lane__main">
@@ -1125,6 +1126,10 @@
             <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요">
           </div>
           <input type="hidden" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" value="">
+        </div>
+        <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
+          <input class="sr-only" type="file" multiple accept=".pdf,.csv,.txt" data-role="instructor-voc" name="instructor_voc__${blockId}">
+          <button type="button" class="lane-surface__tap" data-action="open-file-picker">강의평가서(VOC)를 드래그하거나 클릭해 업로드</button>
         </div>
         <div class="lane-asset-rail" data-role="asset-rail" hidden>
           <div class="lane-asset-strip" data-role="asset-list"></div>
@@ -1153,6 +1158,7 @@
     const instructorInput = findOne(block, ["[data-role='instructor-name']", "input[type='hidden']"]);
     const fileInput = findOne(block, ["[data-role='instructor-files']", "input[type='file']"]);
     const youtubeInput = findOne(block, ["[data-role='instructor-youtube']", "input[type='hidden']"]);
+    const vocInput = findOne(block, ["[data-role='instructor-voc']", "input[type='file']"]);
     if (instructorInput) {
       instructorInput.name = `instructor_name__${blockId}`;
       instructorInput.id = `instructor-select-${blockId}`;
@@ -1163,10 +1169,14 @@
     if (youtubeInput) {
       youtubeInput.name = `instructor_youtube_urls__${blockId}`;
     }
+    if (vocInput) {
+      vocInput.name = `instructor_voc__${blockId}`;
+    }
     state.page1.blockData[blockId] = state.page1.blockData[blockId] || {
       mode: "files",
       instructorName: "",
       files: [],
+      vocFiles: [],
       youtubeUrls: [],
     };
     renderBlock(block);
@@ -1182,8 +1192,8 @@
       },
       onFiles(files) {
         const blockState = getBlockState(block);
-        blockState.mode = "files";
-        addBlockFiles(block, files);
+        const type = blockState.mode === "voc" ? "voc" : "files";
+        addBlockFiles(block, files, type);
       },
     });
 
@@ -1212,7 +1222,9 @@
         }
         if (actionName === "open-file-picker") {
           event.preventDefault();
-          const fileInput = findOne(block, ["[data-role='instructor-files']"]);
+          const blockState = getBlockState(block);
+          const role = blockState.mode === "voc" ? "instructor-voc" : "instructor-files";
+          const fileInput = findOne(block, [`[data-role='${role}']`]);
           if (fileInput) {
             fileInput.click();
           }
@@ -1232,7 +1244,14 @@
       const removeFileButton = target.closest("[data-remove-file-index]");
       if (removeFileButton) {
         event.preventDefault();
-        removeBlockFile(block, Number(removeFileButton.getAttribute("data-remove-file-index")));
+        removeBlockFile(block, Number(removeFileButton.getAttribute("data-remove-file-index")), "files");
+        return;
+      }
+
+      const removeVocButton = target.closest("[data-remove-voc-index]");
+      if (removeVocButton) {
+        event.preventDefault();
+        removeBlockFile(block, Number(removeVocButton.getAttribute("data-remove-voc-index")), "voc");
         return;
       }
 
@@ -1249,7 +1268,11 @@
         return;
       }
       if (target.matches("[data-role='instructor-files']")) {
-        addBlockFiles(block, Array.from(target.files || []));
+        addBlockFiles(block, Array.from(target.files || []), "files");
+        return;
+      }
+      if (target.matches("[data-role='instructor-voc']")) {
+        addBlockFiles(block, Array.from(target.files || []), "voc");
         return;
       }
     });
@@ -1291,8 +1314,9 @@
 
     const hasName = Boolean(selectedInstructorName);
     const fileCount = Array.isArray(blockState.files) ? blockState.files.length : 0;
+    const vocCount = Array.isArray(blockState.vocFiles) ? blockState.vocFiles.length : 0;
     const youtubeCount = Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.length : 0;
-    const hasAssets = fileCount > 0 || youtubeCount > 0;
+    const hasAssets = fileCount > 0 || youtubeCount > 0 || vocCount > 0;
 
     block.dataset.valid = String(hasName && hasAssets);
     block.dataset.instructorName = selectedInstructorName;
@@ -1305,7 +1329,11 @@
       } else if (!hasName && hasAssets) {
         statusLabel = "강사 선택";
       } else {
-        statusLabel = `파일 ${fileCount}개 · 링크 ${youtubeCount}개`;
+        const parts = [];
+        if (fileCount > 0) parts.push(`파일 ${fileCount}개`);
+        if (youtubeCount > 0) parts.push(`링크 ${youtubeCount}개`);
+        if (vocCount > 0) parts.push(`VOC ${vocCount}개`);
+        statusLabel = parts.join(" · ");
       }
       status.textContent = statusLabel;
       status.setAttribute("data-instructor-name", selectedInstructorName);
@@ -1593,6 +1621,7 @@
       mode: "files",
       instructorName: "",
       files: [],
+      vocFiles: [],
       youtubeUrls: [],
     };
     return state.page1.blockData[blockId];
@@ -1609,12 +1638,15 @@
     const youtubeSurface = findOne(block, ["[data-role='youtube-surface']"]);
     const youtubeDraft = findOne(block, ["[data-role='youtube-draft']"]);
     const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
+    const vocSurface = findOne(block, ["[data-role='voc-surface']"]);
+    const vocHidden = findOne(block, ["[data-role='instructor-voc']"]);
     const assetRail = findOne(block, ["[data-role='asset-rail']"]);
     const assetList = findOne(block, ["[data-role='asset-list']"]);
     const instructorInput = findOne(block, ["[data-role='instructor-name']"]);
     const instructorTrigger = findOne(block, ["[data-action='toggle-instructor-menu']"]);
     const instructorMenu = findOne(block, ["[data-role='instructor-menu']"]);
-    const fileTap = findOne(block, ["[data-action='open-file-picker']"]);
+    const activeSurface = blockState.mode === "voc" ? vocSurface : filesSurface;
+    const activeTap = activeSurface ? findOne(activeSurface, ["[data-action='open-file-picker']"]) : null;
 
     if (trigger) {
       trigger.classList.toggle("is-youtube", blockState.mode === "youtube");
@@ -1633,6 +1665,9 @@
     if (youtubeSurface) {
       youtubeSurface.hidden = blockState.mode !== "youtube";
     }
+    if (vocSurface) {
+      vocSurface.hidden = blockState.mode !== "voc";
+    }
     if (youtubeHidden) {
       youtubeHidden.value = blockState.youtubeUrls.join("\n");
     }
@@ -1642,7 +1677,7 @@
     if (assetList) {
       renderBlockAssets(block, assetList, assetRail);
     }
-    updateBlockPrompts(block, fileTap, youtubeDraft, blockState);
+    updateBlockPrompts(block, activeTap, youtubeDraft, blockState);
     if (instructorInput && instructorTrigger && instructorMenu) {
       populateBlockInstructorMenu(block, instructorInput, instructorTrigger, instructorMenu);
     }
@@ -1653,8 +1688,9 @@
   function updateBlockPrompts(block, fileTap, youtubeDraft, blockState) {
     const hasCourse = Boolean(state.page1.selectedCourseId);
     if (fileTap) {
+      const prompt = blockState.mode === "voc" ? "강의평가서(VOC)" : "강의 자료";
       fileTap.textContent = hasCourse
-        ? "강의 자료를 드래그하거나 클릭해 업로드"
+        ? `${prompt}를 드래그하거나 클릭해 업로드`
         : "과정을 먼저 선택하거나 추가하세요";
     }
     if (youtubeDraft) {
@@ -1673,6 +1709,14 @@
       container.appendChild(createChip(file.name, {
         kind: "file",
         removeAttr: "data-remove-file-index",
+        removeValue: String(index),
+      }));
+    });
+    const vocFiles = Array.isArray(blockState.vocFiles) ? blockState.vocFiles : [];
+    vocFiles.forEach((file, index) => {
+      container.appendChild(createChip(file.name, {
+        kind: "voc",
+        removeAttr: "data-remove-voc-index",
         removeValue: String(index),
       }));
     });
@@ -1769,23 +1813,30 @@
 
   function switchBlockMode(block, mode) {
     const blockState = getBlockState(block);
-    blockState.mode = mode === "youtube" ? "youtube" : "files";
+    if (mode === "youtube") {
+      blockState.mode = "youtube";
+    } else if (mode === "voc") {
+      blockState.mode = "voc";
+    } else {
+      blockState.mode = "files";
+    }
     state.page1.menuOpenBlockId = "";
     state.page1.instructorMenuOpenBlockId = "";
     renderBlock(block);
   }
 
-  function addBlockFiles(block, files) {
+  function addBlockFiles(block, files, type = "files") {
     const blockState = getBlockState(block);
     const nextFiles = Array.isArray(files) ? files.filter(Boolean) : [];
     if (!nextFiles.length) {
       return;
     }
-    const seen = new Set(blockState.files.map(fileIdentity));
+    const targetArr = type === "voc" ? blockState.vocFiles : blockState.files;
+    const seen = new Set(targetArr.map(fileIdentity));
     nextFiles.forEach((file) => {
       const identity = fileIdentity(file);
       if (!seen.has(identity)) {
-        blockState.files.push(file);
+        targetArr.push(file);
         seen.add(identity);
       }
     });
@@ -1793,12 +1844,13 @@
     syncPage1State(page1Refs());
   }
 
-  function removeBlockFile(block, index) {
+  function removeBlockFile(block, index, type = "files") {
     const blockState = getBlockState(block);
     if (Number.isNaN(index)) {
       return;
     }
-    blockState.files.splice(index, 1);
+    const targetArr = type === "voc" ? blockState.vocFiles : blockState.files;
+    targetArr.splice(index, 1);
     renderBlock(block);
     syncPage1State(page1Refs());
   }
@@ -1837,11 +1889,15 @@
 
   function syncBlockFileInput(block) {
     const fileInput = findOne(block, ["[data-role='instructor-files']"]);
-    if (!fileInput) {
-      return;
-    }
+    const vocInput = findOne(block, ["[data-role='instructor-voc']"]);
     const blockState = getBlockState(block);
-    setFilesOnInput(fileInput, blockState.files);
+
+    if (fileInput) {
+      setFilesOnInput(fileInput, blockState.files);
+    }
+    if (vocInput) {
+      setFilesOnInput(vocInput, blockState.vocFiles);
+    }
   }
 
   function setBlockDisabled(block, disabled) {
