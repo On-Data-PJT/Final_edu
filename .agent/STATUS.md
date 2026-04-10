@@ -1,6 +1,6 @@
 # STATUS
 
-Last Updated: 2026-04-10
+Last Updated: 2026-04-11
 
 ## Current Snapshot
 
@@ -42,8 +42,10 @@ Last Updated: 2026-04-10
   - `watch?v=...&list=...`는 단일 영상으로 유지한다.
   - `prepare`와 worker 는 object-storage 기반 shared cache 를 재사용한다.
   - process-local throttle + distributed throttle + cooldown 을 함께 사용한다.
-  - ScraperAPI trial 이 켜져 있으면 metadata/watch/transcript 해석은 ScraperAPI proxy port 를 사용한다.
+  - `yt-dlp` metadata/playlist 해석은 direct 경로 + `ignoreconfig=True` + `process=False` 정책을 사용한다.
+  - ScraperAPI trial 이 켜져 있으면 transcript fetch 에만 ScraperAPI proxy port 를 사용한다.
   - 공개 자막이 없으면 selective STT fallback 이 동작할 수 있다.
+  - 단일 `watch` URL은 metadata 해석이 실패해도 URL에서 video id 를 복구할 수 있으면 계속 진행한다.
   - probe 정책은 `30개 이하 full / 31~200 partial / 200+ skip`이다.
 - lexical 분석 계약:
   - `kiwipiepy` 기반 tokenization 을 사용한다.
@@ -73,6 +75,7 @@ Last Updated: 2026-04-10
 - `job_voc_asset_download`를 추가해 persisted draft 에서 VOC 파일 download URL 을 복원할 수 있게 했다.
 - `pyproject.toml`과 `uv.lock`에 `kiwipiepy` 의존성을 반영했다.
 - `render.yaml`을 현재 ScraperAPI/STT/probe/distributed throttle env 계약과 맞췄다.
+- `yt-dlp` metadata 해석은 더 이상 ScraperAPI proxy 를 타지 않고, metadata-only `process=False` 경로와 단일 영상 fallback 을 사용한다.
 
 ## Verification
 
@@ -87,6 +90,7 @@ Last Updated: 2026-04-10
   - Page 2 dashboard shell 과 dataset mode payload 회귀
   - curriculum preview 회귀
   - watch URL / playlist URL 분기
+  - single watch URL metadata failure fallback
   - metadata cache hit, transcript cache reuse, stale fallback, throttle
   - Kiwi tokenization
   - 강사별 VOC 분석 및 공통 VOC 요약
@@ -117,12 +121,14 @@ Last Updated: 2026-04-10
 - `DBG-015`
 - `DBG-016`
 - `DBG-023`
+- `DBG-026`
 
 ## Recent Updates
 
-### 2026-04-10
+### 2026-04-11
 
 - `dev` 기준으로 `lexical`의 ScraperAPI/STT/Kiwi/YouTube 완화 백엔드를 통합했다.
 - VOC 업로드를 실제 분석 파이프라인과 `/review`, `/solution` 렌더에 연결했다.
 - `/solution`에 별도 `VOC 기반 인사이트` 패널을 추가했다.
 - 운영문서와 Render/env 계약을 현재 구현 기준으로 정리했다.
+- `prepare` 단계의 `yt-dlp` metadata 500 회귀를 막기 위해 metadata direct / transcript proxy 분리와 단일 영상 fallback 을 도입했다.

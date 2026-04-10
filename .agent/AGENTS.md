@@ -216,8 +216,10 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - 명시적 `playlist?list=...`만 playlist 로 확장하고, `watch?v=...&list=...`는 단일 영상으로 유지한다
   - YouTube metadata/playlist 해석과 transcript fetch 는 object-storage shared cache + process-local throttle + distributed throttle 을 함께 사용한다
   - web `prepare`와 worker 본분석은 같은 cache 경로를 재사용해야 하며, 같은 YouTube URL의 반복 호출을 줄이는 것이 기본 정책이다
-  - ScraperAPI trial 이 켜져 있으면 transcript/watch/playlist 해석은 ScraperAPI proxy port 를 통해 수행한다
+  - `yt-dlp` metadata/playlist 해석은 direct 경로 + `ignoreconfig=True` + `process=False` 정책을 사용한다
+  - ScraperAPI trial 이 켜져 있으면 transcript fetch 에만 ScraperAPI proxy port 를 사용한다
   - 공개 자막이 없는 영상은 설정이 켜져 있으면 selective STT fallback 대상이 될 수 있다
+  - 단일 `watch` URL은 metadata 해석이 실패해도 URL에서 video id 를 복구할 수 있으면 계속 진행하고, explicit playlist metadata 실패는 user-facing 오류로 반환한다
   - Job enqueue 후 worker 가 배경 분석을 수행한다
   - `Page 2`: `sidebar + 4 panel` 대시보드 결과 페이지
     - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 dataset source 를 제어

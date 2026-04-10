@@ -1,6 +1,6 @@
 # DEBUG
 
-Last Updated: 2026-04-10
+Last Updated: 2026-04-11
 
 이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.
 preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작업과 맞는 재발 방지 규칙을 빠르게 찾는 것입니다.
@@ -153,6 +153,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/app.py`, `final_edu/config.py`
   Trigger Commands: `GET /solution`, `POST /api/evaluate`
   Must Read When: route-level model 선택, OpenAI settings 필드 변경
+- `DBG-026` `active` Lane: `Lead / Integration`
+  Tags: `youtube`, `yt-dlp`, `metadata`, `proxy`, `prepare-confirm`
+  Related Files: `final_edu/youtube.py`, `final_edu/app.py`
+  Trigger Commands: `POST /analyze/prepare`, `summarize_youtube_inputs()`
+  Must Read When: yt-dlp metadata 옵션, ScraperAPI 적용 범위, prepare 단계 500 회귀 변경
 
 ## Active Incidents
 
@@ -490,6 +495,32 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - route-level LLM 선택 로직을 바꾼 뒤에는 `settings.openai_` 검색으로 선언되지 않은 필드 참조가 없는지 확인할 것
   - 문서/env 계약과 실제 `Settings` 필드를 같이 검토할 것
   - prototype 전용 설정명을 남겨두지 말고, 공용 모델 계약으로 빨리 수렴시킬 것
+
+### DBG-026 `active` ScraperAPI를 탄 `yt-dlp` metadata 해석이 prepare 단계에서 포맷 선택 오류나 장시간 지연을 유발했음
+
+- Date: `2026-04-10`
+- Agent / Lane: `Lead / Integration`
+- Tags: `youtube`, `yt-dlp`, `metadata`, `proxy`, `prepare-confirm`
+- Related Files: `final_edu/youtube.py`, `final_edu/app.py`
+- Trigger Commands: `POST /analyze/prepare`, `summarize_youtube_inputs()`
+- Must Read When: yt-dlp metadata 옵션, ScraperAPI 적용 범위, prepare 단계 500 회귀 변경
+- Symptom:
+  - `POST /analyze/prepare`에서 단일 YouTube `watch` URL도 `500 Internal Server Error`로 실패할 수 있었음
+  - 대표 에러는 `Requested format is not available`였고, 어떤 환경에서는 metadata 조회가 비정상적으로 오래 멈추기도 했음
+  - 반면 같은 영상의 transcript fetch 자체는 별도 경로에서 정상 동작할 수 있었음
+- Root Cause:
+  - `prepare` 단계의 `yt-dlp` metadata/playlist resolution 에 ScraperAPI proxy 를 그대로 붙였고, `extract_info(..., process=True)` 기본 경로로 들어가면서 metadata-only 요청에서도 내부 video processing / format selection 단계가 실행됐음
+  - proxy를 통과한 YouTube 응답은 metadata 조회 목적과 달리 포맷 선택 단계에서 불안정할 수 있어, 단일 영상 메타데이터 조회가 format error 또는 장시간 지연으로 무너졌음
+- Resolution:
+  - `yt-dlp` metadata/playlist resolution 을 direct 경로로 분리
+  - metadata 옵션에 `ignoreconfig=True`, `socket_timeout`, `process=False`를 적용해 local/global config 오염과 format selection 을 차단
+  - 단일 `watch` URL은 metadata 해석이 실패해도 URL에서 `video_id`를 복구하면 fallback 으로 계속 진행
+  - explicit playlist metadata 실패는 `ValueError`로 정리해 route 에서 user-facing 4xx 로 반환되게 함
+- Prevention Rule:
+  - transcript unblock 용 proxy와 `yt-dlp` metadata resolution 경로를 같은 것으로 가정하지 말 것
+  - metadata-only `yt-dlp` 호출은 `process=False`와 `ignoreconfig=True` 여부를 먼저 점검할 것
+  - 단일 YouTube `watch` URL은 metadata 실패만으로 `prepare` 전체가 500으로 끝나지 않게 할 것
+  - `POST /analyze/prepare` 회귀 테스트에는 direct metadata + transcript proxy 분리 시나리오를 남길 것
 
 ## Archive
 

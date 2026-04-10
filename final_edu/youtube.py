@@ -14,8 +14,6 @@ from final_edu.storage import ObjectStorage
 from final_edu.utils import count_tokens
 from final_edu.youtube_cache import (
     YoutubeCache,
-    build_youtube_request_session_seed,
-    build_youtube_scraperapi_proxy_url,
     is_youtube_request_limited_error,
     mark_youtube_request_limited,
     throttle_youtube_requests,
@@ -27,6 +25,8 @@ YOUTUBE_HOSTS = {
     "m.youtube.com",
     "youtu.be",
 }
+
+YOUTUBE_METADATA_SOCKET_TIMEOUT_SECONDS = 15
 
 
 @dataclass(slots=True)
@@ -351,13 +351,20 @@ def _resolve_youtube_input_with_settings(
 
     active_settings = settings or get_settings()
     treat_as_playlist = is_explicit_playlist_url(normalized_url)
-    info = _extract_youtube_info(
-        normalized_url,
-        max_videos=max_videos,
-        treat_as_playlist=treat_as_playlist,
-        settings=active_settings,
-        storage=storage,
-    )
+    try:
+        info = _extract_youtube_info(
+            normalized_url,
+            max_videos=max_videos,
+            treat_as_playlist=treat_as_playlist,
+            settings=active_settings,
+            storage=storage,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if not treat_as_playlist:
+            fallback = _build_single_video_fallback(normalized_url)
+            if fallback is not None:
+                return fallback
+        raise ValueError(_summarize_youtube_metadata_error(normalized_url, exc, treat_as_playlist=treat_as_playlist)) from exc
 
     entries = list(islice(info.get("entries") or [], max_videos + 1))
     if entries:
@@ -425,7 +432,7 @@ def _extract_youtube_info(
     try:
         throttle_youtube_requests(active_settings)
         with YoutubeDL(ydl_options) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(url, download=False, process=False)
     except Exception as exc:  # noqa: BLE001
         if is_youtube_request_limited_error(exc):
             mark_youtube_request_limited(active_settings)
@@ -451,14 +458,9 @@ def _build_ydl_options(*, url: str, max_videos: int, treat_as_playlist: bool, se
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": not treat_as_playlist,
+        "ignoreconfig": True,
+        "socket_timeout": YOUTUBE_METADATA_SOCKET_TIMEOUT_SECONDS,
     }
-    proxy_url = build_youtube_scraperapi_proxy_url(
-        settings,
-        session_seed=build_youtube_request_session_seed(url),
-    )
-    if proxy_url:
-        options["proxy"] = proxy_url
-        options["nocheckcertificate"] = True
     if treat_as_playlist:
         options.update(
             {
@@ -468,6 +470,59 @@ def _build_ydl_options(*, url: str, max_videos: int, treat_as_playlist: bool, se
             }
         )
     return options
+
+
+def _build_single_video_fallback(url: str) -> ResolvedYoutubeInput | None:
+    video_id = _extract_video_id_from_url(url)
+    if not video_id:
+        return None
+    video = ResolvedYoutubeVideo(
+        video_id=video_id,
+        title=f"YouTube Video ({video_id})",
+        url=canonical_youtube_url(video_id),
+        duration_seconds=0,
+    )
+    return ResolvedYoutubeInput(
+        input_url=url,
+        kind="video",
+        title=video.title,
+        source_id=video_id,
+        videos=[video],
+        total_video_count=1,
+    )
+
+
+def _extract_video_id_from_url(url: str) -> str | None:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").lower()
+    query = parse_qs(parsed.query or "")
+
+    video_id = (query.get("v") or [None])[0]
+    if video_id:
+        return str(video_id).strip() or None
+
+    path = (parsed.path or "").strip("/")
+    if host == "youtu.be" and path:
+        return path.split("/", maxsplit=1)[0]
+    for prefix in ("shorts/", "live/", "embed/"):
+        if path.startswith(prefix):
+            remainder = path[len(prefix):].strip("/")
+            if remainder:
+                return remainder.split("/", maxsplit=1)[0]
+    return None
+
+
+def _summarize_youtube_metadata_error(url: str, exc: Exception, *, treat_as_playlist: bool) -> str:
+    compact_reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    if treat_as_playlist:
+        return (
+            f"{url}: YouTube 재생목록 메타데이터를 읽지 못했습니다. 잠시 후 다시 시도하거나 "
+            f"단일 영상 URL로 나눠서 제출해 주세요. ({compact_reason})"
+        )
+    return (
+        f"{url}: YouTube 메타데이터를 읽지 못했고 URL에서 단일 영상 정보를 복구하지 못했습니다. "
+        f"({compact_reason})"
+    )
 
 
 def _serialize_info_for_cache(info: dict | None) -> dict:

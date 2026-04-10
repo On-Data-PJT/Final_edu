@@ -27,6 +27,7 @@ from final_edu.youtube_cache import (
 class _FakeYoutubeDL:
     call_count = 0
     last_options: dict | None = None
+    last_process: bool | None = None
 
     def __init__(self, options: dict) -> None:
         type(self).last_options = dict(options)
@@ -38,8 +39,9 @@ class _FakeYoutubeDL:
     def __exit__(self, exc_type, exc, tb) -> bool:
         return False
 
-    def extract_info(self, url: str, download: bool = False) -> dict:
+    def extract_info(self, url: str, download: bool = False, process: bool = True) -> dict:
         type(self).call_count += 1
+        type(self).last_process = process
         return {
             "id": "U5De-0aglaE",
             "title": "Single Video",
@@ -58,7 +60,7 @@ class _ExplodingYoutubeDL:
     def __exit__(self, exc_type, exc, tb) -> bool:
         return False
 
-    def extract_info(self, url: str, download: bool = False) -> dict:
+    def extract_info(self, url: str, download: bool = False, process: bool = True) -> dict:
         raise AssertionError("yt-dlp should not be called on a metadata cache hit")
 
 
@@ -303,7 +305,7 @@ class YoutubeCacheTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn(YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE, warnings[0])
 
-    def test_scraperapi_proxy_is_applied_to_transcript_and_metadata_fetch(self) -> None:
+    def test_scraperapi_proxy_is_applied_only_to_transcript_fetch(self) -> None:
         url = "https://www.youtube.com/watch?v=U5De-0aglaE"
 
         with tempfile.TemporaryDirectory() as runtime_dir:
@@ -337,8 +339,10 @@ class YoutubeCacheTests(unittest.TestCase):
             settings,
             session_seed="video:U5De-0aglaE",
         )
-        self.assertEqual(_FakeYoutubeDL.last_options["proxy"], expected_proxy_url)
-        self.assertTrue(_FakeYoutubeDL.last_options["nocheckcertificate"])
+        self.assertNotIn("proxy", _FakeYoutubeDL.last_options)
+        self.assertNotIn("nocheckcertificate", _FakeYoutubeDL.last_options)
+        self.assertTrue(_FakeYoutubeDL.last_options["ignoreconfig"])
+        self.assertEqual(_FakeYoutubeDL.last_process, False)
         self.assertIsNotNone(_CountingTranscriptApi.last_http_client)
         self.assertEqual(
             _CountingTranscriptApi.last_http_client.proxies,
