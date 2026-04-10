@@ -1,6 +1,6 @@
 # Components
 
-Last Updated: 2026-04-09
+Last Updated: 2026-04-10
 
 ## Purpose
 
@@ -8,14 +8,15 @@ Last Updated: 2026-04-09
 
 - `Page 1`: 강의 자료 업로드 메인 페이지
 - `Page 2`: 첫 번째 결과 페이지
-- `Page 3`: 솔루션 인사이트 페이지
+- `Page 3`: 강사별 VOC 분석 페이지
+- `Page 4`: 솔루션 인사이트 페이지
 - 시각 톤은 `.agent/DESIGN.md`
 
 ## Shared Data Contracts
 
 - `course`는 과정명, 커리큘럼 PDF, 대주제 목록, 목표 비중, 등록 강사명 목록을 가진다.
 - Page 1 제출 버튼은 `과정 선택 + 유효 강사 1명 이상`일 때만 활성화한다.
-- 결과 페이지는 **샘플 데이터가 아니라** 사용자가 등록한 실제 `course`, 실제 업로드 파일, 실제 YouTube 분석 결과만 사용한다.
+- 결과 페이지는 **샘플 데이터가 아니라** 사용자가 등록한 실제 `course`, 실제 업로드 파일, 실제 YouTube 분석 결과, 실제 VOC 분석 결과만 사용한다.
 - 결과 페이지의 `view mode`는 `combined`, `material`, `speech` 3종이다.
 - `view mode`는 Page 2 첫 패널 우측 상단 toggle 하나로 바꾸고, Page 2 전체 차트에 일관되게 반영된다.
 - Page 2는 최소한 아래 payload 들을 실제 결과 JSON에서 받아 쓴다.
@@ -23,6 +24,8 @@ Last Updated: 2026-04-09
   - `rose_series_by_mode`
   - `keywords_by_mode`
   - `line_series_by_mode`
+- 강사별 VOC 페이지는 강사별 `voc_analysis`를 실제 결과 JSON에서 받아 쓴다.
+- 솔루션 페이지는 기존 insight/trend payload와 별도로 공통 `voc_summary`를 실제 결과 JSON에서 받아 쓴다.
 - 특정 mode 데이터가 비어 있으면 해당 mode 기준 empty 상태를 보여주고 다른 mode 결과로 치환하지 않는다.
 
 ## Page 1. Main Page
@@ -107,17 +110,18 @@ Last Updated: 2026-04-09
   - 우측 강사 icon trigger
 - 좌측 mode trigger 규칙
   - 기본은 `+`
-  - 클릭 시 dropdown 으로 `파일 업로드`, `유튜브 링크` 표시
+  - 클릭 시 dropdown 으로 `파일 업로드`, `유튜브 링크`, `강의평가` 표시
   - `유튜브 링크` 선택 시 trigger 아이콘이 YouTube 아이콘으로 바뀐다.
 - 가운데 surface 규칙
   - 파일 모드에서는 drag/drop + click 업로드 surface
   - 유튜브 모드에서는 comma-token input
+  - VOC 모드에서는 `PDF/CSV/TXT` 평가서 업로드 surface
   - 파일은 여러 개 허용, 개별 삭제 가능
 - 파일 drag/drop 인식 범위는 중앙 안내 텍스트 일부가 아니라 lane 의 흰 capsule 전체여야 한다.
 - 유튜브 모드에서도 lane 의 흰 capsule 전체에 파일을 drop 하면 같은 lane 에 파일이 추가되고 files 모드로 전환되어야 한다.
 - 유튜브 URL은 comma 로 chip 확정, 개별 삭제 가능
-- 파일 토큰과 유튜브 토큰은 현재 모드와 관계없이 lane 하단의 공통 rail 에서 함께 보여야 한다.
-- 공통 rail 의 chip 은 같은 기본 스타일을 유지하고, 작은 파일 / YouTube 표식만으로 타입을 구분한다.
+- 파일 토큰, VOC 토큰, 유튜브 토큰은 현재 모드와 관계없이 lane 하단의 공통 rail 에서 함께 보여야 한다.
+- 공통 rail 의 chip 은 같은 기본 스타일을 유지하고, 작은 파일 / VOC / YouTube 표식만으로 타입을 구분한다.
 - 과정이 선택되지 않았을 때는 별도 empty-state 문구를 두지 않고 lane 중앙 문구를 `과정을 먼저 선택하거나 추가하세요`로 대체한다.
 - 파일 모드의 기본 문구는 lane 중앙 정렬이어야 한다.
 - 상태 메시지는 lane 내부가 아니라 lane 우측 상단 바깥쪽에 붙어 보여야 한다.
@@ -126,8 +130,9 @@ Last Updated: 2026-04-09
 - 우측 강사 아이콘을 클릭하면 dropdown menu 로 현재 선택된 과정의 `instructor_names`만 보여준다.
 - 강사 선택 UI는 아이콘-only 를 유지하고, 항상 select field 처럼 보이면 안 된다.
 - 같은 강사를 여러 lane 에 중복 배치하지 않는다.
-- 한 lane 은 한 강사 전용이며 파일과 유튜브 자산을 함께 누적할 수 있다.
+- 한 lane 은 한 강사 전용이며 파일, VOC, 유튜브 자산을 함께 누적할 수 있다.
 - composer lane 은 현재보다 더 얇은 capsule 밀도를 유지한다.
+- persisted draft restore 는 `files`, `vocFiles`, `youtubeUrls`, `mode`를 모두 복원해야 한다.
 
 ### Submission Controls
 
@@ -150,6 +155,7 @@ Last Updated: 2026-04-09
 - 과정 추가/과정 목록 overlay 는 모두 중앙 popup 으로 열려야 한다.
 - 과정 추가 popup 은 과정명, PDF 1개, 강사명 chip 입력만 가져야 한다.
 - 메인 composer 는 파일/유튜브 모드 전환, 강사 dropdown, lane 추가, submit icon 을 가져야 한다.
+- 메인 composer 는 파일/유튜브/VOC 모드 전환, 강사 dropdown, lane 추가, submit icon 을 가져야 한다.
 - 메인 composer 의 강사 선택은 icon trigger + dropdown menu 방식이어야 한다.
 - 강사 1명만 있어도 유효 lane 하나로 분석 제출이 가능해야 한다.
 
@@ -218,7 +224,28 @@ Last Updated: 2026-04-09
 - fake instructor 이름, fake keyword, fake 비중 배열은 남아 있으면 안 된다.
 - 마지막 비교 패널은 단일 강사와 다중 강사 둘 다 처리해야 한다.
 
-## Page 3. Solution Page
+## Page 3. Review Page
+
+### Page Role
+
+- 이 페이지는 강사별 평가서(VOC) 분석 결과를 보여주는 실제 결과 페이지다.
+- 강사 탭, 파일 메타, 감성 키워드, 반복 불만 패턴, 다음 기수 개선 포인트를 카드형으로 보여준다.
+- VOC가 없는 강사는 placeholder 카드만 보여주고 페이지 구조는 유지한다.
+
+### Layout
+
+- 현재 `dev`의 sidebar, 상단 Evaluation 헤더, 강사 탭 구조를 유지한다.
+- 본문은 강사별 단일 패널 전환형이어야 하며, 탭을 바꾸면 해당 강사의 VOC 카드만 보여야 한다.
+- 메타 칩에는 파일명, 분석 날짜, 응답 수를 우선 노출한다.
+
+### Acceptance Checklist
+
+- 강사 탭 구조와 기존 카드 레이아웃이 유지되어야 한다.
+- 실제 `voc_analysis`가 있으면 placeholder 대신 강사별 결과 카드가 렌더되어야 한다.
+- `sentiment`, `repeated_complaints`, `next_suggestions`가 각각 별도 카드/블록으로 보여야 한다.
+- VOC가 없는 강사는 페이지 전체가 아니라 해당 강사 패널만 빈 상태여야 한다.
+
+## Page 4. Solution Page
 
 ### Page Role
 
@@ -232,6 +259,7 @@ Last Updated: 2026-04-09
 - 핵심 영역은 아래 2개면 충분하다.
   - insight card grid
   - external trend status card
+- 기존 두 영역은 유지하고, 하단에 별도 `VOC 기반 인사이트` 패널을 추가한다.
 
 ### Insight Cards
 
@@ -240,9 +268,10 @@ Last Updated: 2026-04-09
 - 인사이트 1~5는 내부 분석 결과만으로 생성 가능해야 한다.
 - 인사이트 6은 외부 조사 실패 시에도 페이지 전체를 깨뜨리지 않아야 한다.
 
-### Page 3 Acceptance Checklist
+### Page 4 Acceptance Checklist
 
 - Page 2에서 넘어왔을 때 시각 톤이 자연스럽게 이어져야 한다.
 - 솔루션 페이지는 차트보다 카드형 인사이트 중심이어야 한다.
 - insight card 는 읽기 쉬운 card grid 로 유지한다.
 - external trend slot 은 과장 없이 상태 중심으로 보여준다.
+- 기존 insight/trend 2섹션은 유지하고, VOC 결과는 섞지 않고 별도 패널로 보여야 한다.

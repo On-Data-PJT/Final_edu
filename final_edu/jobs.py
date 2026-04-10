@@ -233,7 +233,7 @@ def create_job_record(
 ) -> AnalysisJobRecord:
     created_at, created_at_ts = _now()
     instructor_names = [item.name for item in payload.instructors]
-    asset_count = sum(len(item.files) for item in payload.instructors)
+    asset_count = sum(len(item.files) + len(item.voc_files) for item in payload.instructors)
     youtube_url_count = sum(len(item.youtube_urls) for item in payload.instructors)
     return AnalysisJobRecord(
         id=payload.job_id,
@@ -390,6 +390,7 @@ def _execute_analysis(
 
         for instructor_index, instructor in enumerate(payload.instructors, start=1):
             uploads: list[UploadedAsset] = []
+            voc_uploads: list[UploadedAsset] = []
             for asset_index, asset_ref in enumerate(instructor.files, start=1):
                 safe_destination_name = build_safe_storage_name(
                     asset_ref.original_name,
@@ -399,12 +400,22 @@ def _execute_analysis(
                 destination = root / f"instructor-{instructor_index}-{asset_index}-{safe_destination_name}"
                 storage.download_to_path(asset_ref.storage_key, destination)
                 uploads.append(UploadedAsset(path=destination, original_name=asset_ref.original_name))
+            for asset_index, asset_ref in enumerate(instructor.voc_files, start=1):
+                safe_destination_name = build_safe_storage_name(
+                    asset_ref.original_name,
+                    default_stem=f"voc-{instructor_index}-{asset_index}",
+                    max_basename_chars=72,
+                )
+                destination = root / f"instructor-{instructor_index}-voc-{asset_index}-{safe_destination_name}"
+                storage.download_to_path(asset_ref.storage_key, destination)
+                voc_uploads.append(UploadedAsset(path=destination, original_name=asset_ref.original_name))
 
             submissions.append(
                 InstructorSubmission(
                     name=instructor.name,
                     files=uploads,
                     youtube_urls=list(instructor.youtube_urls or instructor.youtube_inputs),
+                    voc_files=voc_uploads,
                 )
             )
 

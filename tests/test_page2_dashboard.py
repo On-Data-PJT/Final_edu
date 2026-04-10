@@ -208,12 +208,11 @@ class Page2DashboardTests(unittest.TestCase):
             get_settings.cache_clear()
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('class="dashboard-sidebar"', response.text)
         self.assertIn('id="section-donut"', response.text)
-        self.assertIn('data-view-mode="speech"', response.text)
         self.assertIn("강사별 커리큘럼 구성 비중", response.text)
+        self.assertIn("Final Edu Dashboard", response.text)
+        self.assertIn("VOC Analysis", response.text)
         self.assertIn("강사 A", response.text)
-        self.assertNotIn("Study Labs", response.text)
         self.assertNotIn("오정훈 강사", response.text)
 
 

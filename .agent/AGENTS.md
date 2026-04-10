@@ -186,6 +186,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - Worker: `uv run python -m final_edu.worker`
 - 핵심 엔드포인트:
   - `GET /`
+  - `GET /demo`
   - `POST /courses/preview`
   - `POST /courses`
   - `GET /courses`
@@ -194,10 +195,15 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - `POST /analyze/prepare/{request_id}/confirm`
   - `POST /analyze`
   - `GET /jobs/{job_id}`
+  - `GET /jobs/{job_id}/voc-assets/{instructor_index}/{asset_index}`
   - `GET /jobs/{job_id}/solutions`
   - `GET /jobs/{job_id}/status`
+  - `GET /review`
+  - `GET /solution`
+  - `GET /jiye`
+  - `POST /api/evaluate`
   - `GET /health`
-- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `YouTube URL`, `YouTube Playlist URL`
+- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `CSV`, `YouTube URL`, `YouTube Playlist URL`, `VOC PDF/CSV/TXT`
 - 커리큘럼 기준:
   - `Page 1`에서 과정명 + 커리큘럼 PDF를 등록
   - `POST /courses/preview`는 PDF를 `accepted | review_required | rejected`로 판정하고, 대주제/비중 초안의 신뢰도와 저장 가능 여부를 함께 반환
@@ -205,37 +211,51 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - 비관련 PDF나 unreadable PDF는 자동 기본 섹션을 만들지 않고 저장 차단 대상으로 본다
   - 사용자가 수정/저장한 목표 비중이 canonical course contract 가 됨
 - 분석 방식:
-  - `Page 1`: 과정 선택 + 강사 자료 등록
+  - `Page 1`: 과정 선택 + 강사 자료/VOC/YouTube 등록
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행
-  - YouTube metadata/playlist 해석과 transcript fetch 는 process-local throttle 과 object-storage 기반 shared cache 를 사용한다
+  - 명시적 `playlist?list=...`만 playlist 로 확장하고, `watch?v=...&list=...`는 단일 영상으로 유지한다
+  - YouTube metadata/playlist 해석과 transcript fetch 는 object-storage shared cache + process-local throttle + distributed throttle 을 함께 사용한다
   - web `prepare`와 worker 본분석은 같은 cache 경로를 재사용해야 하며, 같은 YouTube URL의 반복 호출을 줄이는 것이 기본 정책이다
-  - Job enqueue
-  - 배경 분석
+  - ScraperAPI trial 이 켜져 있으면 transcript/watch/playlist 해석은 ScraperAPI proxy port 를 통해 수행한다
+  - 공개 자막이 없는 영상은 설정이 켜져 있으면 selective STT fallback 대상이 될 수 있다
+  - Job enqueue 후 worker 가 배경 분석을 수행한다
   - `Page 2`: `sidebar + 4 panel` 대시보드 결과 페이지
     - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 dataset source 를 제어
     - 결과 렌더는 저장된 course 와 실제 업로드/YouTube 분석 결과만 사용
-  - `Page 3`: 솔루션 인사이트 페이지
+  - `GET /review`: 강사별 실제 VOC 결과 페이지
+  - `GET /solution`: 기존 인사이트 2섹션 + 별도 `VOC 기반 인사이트` 패널 페이지
 - 결과 payload contract:
   - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `line_series_by_mode`를 사용
   - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
+  - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있다
+  - top-level 결과에는 `voc_summary`가 포함될 수 있다
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
+  - lexical fallback 은 `kiwipiepy` 기반 tokenization + section title 사용자 사전을 사용한다
   - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
-  - 솔루션 인사이트는 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
+  - 솔루션 인사이트와 VOC 분석은 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
   - 현재 기본 insight model 은 `gpt-5.4-mini`
 - 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
 - YouTube throttle / cache env:
   - `FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS`
+  - `FINAL_EDU_YOUTUBE_DISTRIBUTED_MIN_INTERVAL_SECONDS`
+  - `FINAL_EDU_YOUTUBE_COOLDOWN_SECONDS`
   - `FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS`
   - `FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS`
+  - `FINAL_EDU_PLAYLIST_PROBE_FULL_THRESHOLD`
+  - `FINAL_EDU_PLAYLIST_PROBE_PARTIAL_SAMPLE_SIZE`
+  - `FINAL_EDU_PLAYLIST_PROBE_DISABLE_THRESHOLD`
+  - `FINAL_EDU_YOUTUBE_SCRAPERAPI_ENABLED`
+  - `FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY`
+  - `FINAL_EDU_YOUTUBE_STT_ENABLED`
+  - `FINAL_EDU_YOUTUBE_STT_MODEL`
   - web / worker 둘 다 같은 값을 쓰는 것을 기본값으로 본다
 - 저장소:
   - 프로덕션: `Render Web + Worker + Key Value + Cloudflare R2`
   - 로컬 개발: `inline/local` fallback 허용
 - 의도적 비기능 범위:
-  - 자막 없는 영상 STT fallback 미구현
   - 스캔 PDF OCR 미구현
-  - 외부 동향 인사이트 6 실구현 미완료
+  - 외부 동향 인사이트는 deterministic fallback 중심이며 실검색 기반 확장은 미완료
   - 영구 이력 보관 미구현
 
 이 계약이 바뀌면 `.agent/AGENTS.md` 수정 대상입니다.

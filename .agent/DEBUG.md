@@ -1,6 +1,6 @@
 # DEBUG
 
-Last Updated: 2026-04-09
+Last Updated: 2026-04-10
 
 이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.
 preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작업과 맞는 재발 방지 규칙을 빠르게 찾는 것입니다.
@@ -143,6 +143,16 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/youtube.py`, `final_edu/extractors.py`, `final_edu/youtube_cache.py`, `final_edu/config.py`
   Trigger Commands: `POST /analyze/prepare`, transcript fetch, `uv run python -m final_edu.worker`
   Must Read When: YouTube cache key / TTL / request spacing / prepare-worker parity 변경
+- `DBG-024` `active` Lane: `Lead / Integration`
+  Tags: `voc`, `payload`, `worker`, `review`, `solution`
+  Related Files: `final_edu/app.py`, `final_edu/jobs.py`, `final_edu/models.py`, `final_edu/analysis.py`
+  Trigger Commands: `POST /analyze/prepare`, worker execution, `GET /review`, `GET /solution`
+  Must Read When: 새 입력 타입 추가, result schema 변경, VOC/별도 분석 경로 연결 변경
+- `DBG-025` `active` Lane: `Lead / Integration`
+  Tags: `settings`, `openai`, `solution`, `review`, `config-drift`
+  Related Files: `final_edu/app.py`, `final_edu/config.py`
+  Trigger Commands: `GET /solution`, `POST /api/evaluate`
+  Must Read When: route-level model 선택, OpenAI settings 필드 변경
 
 ## Active Incidents
 
@@ -435,6 +445,51 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - YouTube 완화 정책을 바꿀 때는 prepare / worker 가 같은 cache key 와 같은 storage 경로를 쓰는지 먼저 확인할 것
   - `yt_dlp`와 transcript fetch 둘 다 throttle 을 우회하지 않는지 함께 점검할 것
   - cache hit, stale fallback, minimum interval 이 회귀 테스트로 남아 있는지 확인할 것
+
+### DBG-024 `active` VOC 업로드 UI만 존재하고 payload / worker / result 경로에서 `voc_files`가 빠져 실제 분석이 비어 있었음
+
+- Date: `2026-04-10`
+- Agent / Lane: `Lead / Integration`
+- Tags: `voc`, `payload`, `worker`, `review`, `solution`
+- Related Files: `final_edu/app.py`, `final_edu/jobs.py`, `final_edu/models.py`, `final_edu/analysis.py`
+- Trigger Commands: `POST /analyze/prepare`, worker execution, `GET /review`, `GET /solution`
+- Must Read When: 새 입력 타입 추가, result schema 변경, VOC/별도 분석 경로 연결 변경
+- Symptom:
+  - Page 1에는 VOC 업로드 블록이 있었지만, 실제 분석 결과에서는 강사별 VOC 카드가 placeholder로만 남거나 공통 VOC 인사이트가 비어 있었음
+  - persisted draft restore 에서 VOC 파일은 보이는데 `/review`, `/solution`에는 실데이터가 내려오지 않았음
+- Root Cause:
+  - `voc_files`가 UI submit payload, worker download, result schema, page payload builder 전체를 관통하지 못하고 중간 단계에서 누락됐음
+  - 입력 UI를 추가하면서 `files` / `youtube`와 별도로 grep 하지 않아 payload-builder, worker, serializer, renderer 사이 contract drift 가 생겼음
+- Resolution:
+  - `JobInstructorInput` / `InstructorSubmission` / result schema 에 `voc_files`, `voc_analysis`, `voc_summary`를 추가
+  - `app.py` payload builder 와 persisted draft restore 에 VOC 경로를 포함
+  - worker 가 VOC 파일을 다운로드하고 `analysis.py`가 강사별 VOC 분석과 공통 VOC 요약을 저장하도록 연결
+  - `/review`, `/solution`이 실제 result JSON 기반 VOC 데이터를 렌더하도록 수정
+- Prevention Rule:
+  - 새 입력 타입을 추가할 때는 UI, submit payload, worker download, result schema, page renderer 를 한 세트로 grep 해서 연결 여부를 함께 확인할 것
+  - placeholder UI가 있더라도 실제 JSON source 가 연결됐는지 route payload builder 기준으로 확인할 것
+  - Page 1 입력과 Review/Solution 출력 사이에 별도 asset class 가 생기면 dedicated round-trip 테스트를 추가할 것
+
+### DBG-025 `active` 존재하지 않는 `settings.openai_solution_model` 참조로 route-level 모델 선택이 drift 했음
+
+- Date: `2026-04-10`
+- Agent / Lane: `Lead / Integration`
+- Tags: `settings`, `openai`, `solution`, `review`, `config-drift`
+- Related Files: `final_edu/app.py`, `final_edu/config.py`
+- Trigger Commands: `GET /solution`, `POST /api/evaluate`
+- Must Read When: route-level model 선택, OpenAI settings 필드 변경
+- Symptom:
+  - `solution` 또는 ad-hoc evaluation 경로가 별도 모델을 쓰는 것처럼 보였지만, 실제 `Settings`에는 해당 필드가 없어 route-level config drift 가능성이 있었음
+  - 환경 변수 문서와 라우트 코드의 모델 선택 계약이 일치하지 않았음
+- Root Cause:
+  - 초기 prototype 단계의 `openai_solution_model` 참조가 남아 있었고, 이후 설정 체계가 `OPENAI_INSIGHT_MODEL` 중심으로 정리되면서 코드 일부만 갱신됐음
+- Resolution:
+  - 솔루션 인사이트와 VOC 분석 경로의 모델 선택을 `OPENAI_INSIGHT_MODEL`로 통일
+  - `config.py`, `.env.example`, 라우트 코드를 같은 설정 계약으로 정리
+- Prevention Rule:
+  - route-level LLM 선택 로직을 바꾼 뒤에는 `settings.openai_` 검색으로 선언되지 않은 필드 참조가 없는지 확인할 것
+  - 문서/env 계약과 실제 `Settings` 필드를 같이 검토할 것
+  - prototype 전용 설정명을 남겨두지 말고, 공용 모델 계약으로 빨리 수렴시킬 것
 
 ## Archive
 

@@ -21,16 +21,42 @@ services:
         value: "7200"
       - key: FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS
         value: "1.5"
+      - key: FINAL_EDU_YOUTUBE_DISTRIBUTED_MIN_INTERVAL_SECONDS
+        value: "2.5"
+      - key: FINAL_EDU_YOUTUBE_COOLDOWN_SECONDS
+        value: "900"
       - key: FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS
         value: "86400"
       - key: FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS
         value: "604800"
+      - key: FINAL_EDU_PLAYLIST_PROBE_FULL_THRESHOLD
+        value: "30"
+      - key: FINAL_EDU_PLAYLIST_PROBE_PARTIAL_SAMPLE_SIZE
+        value: "3"
+      - key: FINAL_EDU_PLAYLIST_PROBE_DISABLE_THRESHOLD
+        value: "200"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_ENABLED
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_PROXY_PORT
+        value: "8001"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_SESSION_STICKY
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_STT_ENABLED
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_STT_MODEL
+        value: gpt-4o-mini-transcribe
+      - key: FINAL_EDU_YOUTUBE_STT_MAX_FILE_BYTES
+        value: "25000000"
+      - key: FINAL_EDU_YOUTUBE_STT_MONTHLY_MINUTES_BUDGET
+        value: "500"
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: final-edu-kv
           property: connectionString
       - key: OPENAI_API_KEY
+        sync: false
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY
         sync: false
       - key: R2_ENDPOINT_URL
         sync: false
@@ -63,16 +89,42 @@ services:
         value: "7200"
       - key: FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS
         value: "1.5"
+      - key: FINAL_EDU_YOUTUBE_DISTRIBUTED_MIN_INTERVAL_SECONDS
+        value: "2.5"
+      - key: FINAL_EDU_YOUTUBE_COOLDOWN_SECONDS
+        value: "900"
       - key: FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS
         value: "86400"
       - key: FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS
         value: "604800"
+      - key: FINAL_EDU_PLAYLIST_PROBE_FULL_THRESHOLD
+        value: "30"
+      - key: FINAL_EDU_PLAYLIST_PROBE_PARTIAL_SAMPLE_SIZE
+        value: "3"
+      - key: FINAL_EDU_PLAYLIST_PROBE_DISABLE_THRESHOLD
+        value: "200"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_ENABLED
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_PROXY_PORT
+        value: "8001"
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_SESSION_STICKY
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_STT_ENABLED
+        value: "true"
+      - key: FINAL_EDU_YOUTUBE_STT_MODEL
+        value: gpt-4o-mini-transcribe
+      - key: FINAL_EDU_YOUTUBE_STT_MAX_FILE_BYTES
+        value: "25000000"
+      - key: FINAL_EDU_YOUTUBE_STT_MONTHLY_MINUTES_BUDGET
+        value: "500"
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: final-edu-kv
           property: connectionString
       - key: OPENAI_API_KEY
+        sync: false
+      - key: FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY
         sync: false
       - key: R2_ENDPOINT_URL
         sync: false

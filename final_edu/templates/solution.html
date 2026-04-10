@@ -371,6 +371,99 @@
         color: #1d4ed8;
     }
 
+    .voc-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .voc-box {
+        border-radius: 16px;
+        padding: 18px 20px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+
+    .voc-box-label {
+        font-size: 11px;
+        font-weight: 800;
+        color: #166534;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+    }
+
+    .voc-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .voc-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .voc-chip.pos {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .voc-chip.neg {
+        background: #ffedd5;
+        color: #9a3412;
+    }
+
+    .voc-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 18px;
+    }
+
+    .voc-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+
+    .voc-count {
+        flex-shrink: 0;
+        font-size: 11px;
+        font-weight: 800;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #ecfccb;
+        color: #3f6212;
+    }
+
+    .voc-row-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #1e293b;
+    }
+
+    .voc-row-body {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #64748b;
+        line-height: 1.6;
+    }
+
+    .voc-empty {
+        font-size: 13px;
+        color: #64748b;
+        line-height: 1.7;
+    }
+
     @media (max-width: 900px) {
         .dashboard-wrapper {
             flex-direction: column;
@@ -379,6 +472,10 @@
         .sidebar {
             width: 100%;
             position: static;
+        }
+
+        .voc-grid {
+            grid-template-columns: 1fr;
         }
     }
 </style>
@@ -437,6 +534,7 @@
             </a>
             <a href="#section-insights" class="sub-nav-item">분석 결과 기반 인사이트</a>
             <a href="#section-trends" class="sub-nav-item">업계 동향 분석</a>
+            <a href="#section-voc" class="sub-nav-item">VOC 기반 인사이트</a>
         </nav>
     </aside>
 
@@ -467,6 +565,66 @@
                 </div>
             </div>
             <div class="trend-list" id="trends-list"></div>
+        </div>
+
+        <div class="chart-panel" id="section-voc">
+            <div class="panel-header">
+                <div>
+                    <h2 class="panel-title">VOC 기반 인사이트</h2>
+                    <p class="panel-subtitle">강사별 평가서에서 반복된 피드백을 묶어 공통 개선 포인트를 정리했습니다.</p>
+                </div>
+                <span class="source-badge">
+                    {% if solution_payload.voc_summary and (solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
+                    실제 VOC 결과
+                    {% else %}
+                    대기 중
+                    {% endif %}
+                </span>
+            </div>
+
+            {% if solution_payload.voc_summary and (solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
+            <div class="voc-grid">
+                <div class="voc-box">
+                    <div class="voc-box-label">공통 긍정 피드백</div>
+                    <div class="voc-chips">
+                        {% for item in solution_payload.voc_summary.positive %}
+                        <span class="voc-chip pos">{{ item }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="voc-box">
+                    <div class="voc-box-label">공통 부정 피드백</div>
+                    <div class="voc-chips">
+                        {% for item in solution_payload.voc_summary.negative %}
+                        <span class="voc-chip neg">{{ item }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="voc-list">
+                {% for item in solution_payload.voc_summary.repeated_complaints %}
+                <div class="voc-row">
+                    <span class="voc-count">{{ item.count }}건</span>
+                    <div>
+                        <div class="voc-row-title">{{ item.pattern }}</div>
+                        <div class="voc-row-body">{% if item.week %}집중 구간: {{ item.week }}{% else %}반복적으로 등장한 VOC 패턴입니다.{% endif %}</div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% for item in solution_payload.voc_summary.next_suggestions %}
+                <div class="voc-row">
+                    <span class="voc-count">{{ item.priority|upper }}</span>
+                    <div>
+                        <div class="voc-row-title">{{ item.label }}</div>
+                        <div class="voc-row-body">{{ item.body }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="voc-empty">VOC 파일이 업로드되면 이 영역에 공통 피드백 요약과 다음 기수 개선 포인트가 표시됩니다.</p>
+            {% endif %}
         </div>
 
     </div>

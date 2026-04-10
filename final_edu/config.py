@@ -26,11 +26,25 @@ class Settings:
     max_evidence_per_section: int
     playlist_hard_limit: int
     playlist_probe_sample_size: int
+    playlist_probe_full_threshold: int
+    playlist_probe_partial_sample_size: int
+    playlist_probe_disable_threshold: int
     youtube_batch_size: int
     youtube_fetch_concurrency: int
     youtube_request_min_interval_seconds: float
+    youtube_distributed_min_interval_seconds: float
+    youtube_cooldown_seconds: float
     youtube_metadata_cache_ttl_seconds: int
     youtube_transcript_cache_ttl_seconds: int
+    youtube_scraperapi_enabled: bool
+    youtube_scraperapi_key: str | None
+    youtube_scraperapi_proxy_port: int
+    youtube_scraperapi_session_sticky: bool
+    youtube_scraperapi_max_cost: int | None
+    youtube_stt_enabled: bool
+    youtube_stt_model: str
+    youtube_stt_max_file_bytes: int
+    youtube_stt_monthly_minutes_budget: int
     small_youtube_video_threshold: int
     medium_youtube_video_threshold: int
     small_youtube_chunk_threshold: int
@@ -95,6 +109,32 @@ def _load_dotenv(dotenv_path: Path = DOTENV_PATH) -> None:
 def get_settings() -> Settings:
     _load_dotenv()
     max_upload_mb = int(os.getenv("FINAL_EDU_MAX_UPLOAD_MB", "20"))
+    youtube_scraperapi_enabled = os.getenv(
+        "FINAL_EDU_YOUTUBE_SCRAPERAPI_ENABLED",
+        "false",
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    youtube_scraperapi_session_sticky = os.getenv(
+        "FINAL_EDU_YOUTUBE_SCRAPERAPI_SESSION_STICKY",
+        "true",
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    youtube_stt_enabled = os.getenv("FINAL_EDU_YOUTUBE_STT_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    youtube_scraperapi_max_cost_raw = os.getenv("FINAL_EDU_YOUTUBE_SCRAPERAPI_MAX_COST", "").strip()
+    youtube_scraperapi_max_cost = int(youtube_scraperapi_max_cost_raw) if youtube_scraperapi_max_cost_raw else None
     return Settings(
         app_name="Final Edu",
         host=os.getenv("FINAL_EDU_HOST", "127.0.0.1"),
@@ -114,16 +154,34 @@ def get_settings() -> Settings:
         max_evidence_per_section=3,
         playlist_hard_limit=int(os.getenv("FINAL_EDU_PLAYLIST_HARD_LIMIT", "500")),
         playlist_probe_sample_size=int(os.getenv("FINAL_EDU_PLAYLIST_PROBE_SAMPLE_SIZE", "20")),
+        playlist_probe_full_threshold=int(os.getenv("FINAL_EDU_PLAYLIST_PROBE_FULL_THRESHOLD", "30")),
+        playlist_probe_partial_sample_size=int(os.getenv("FINAL_EDU_PLAYLIST_PROBE_PARTIAL_SAMPLE_SIZE", "3")),
+        playlist_probe_disable_threshold=int(os.getenv("FINAL_EDU_PLAYLIST_PROBE_DISABLE_THRESHOLD", "200")),
         youtube_batch_size=int(os.getenv("FINAL_EDU_YOUTUBE_BATCH_SIZE", "20")),
         youtube_fetch_concurrency=int(os.getenv("FINAL_EDU_YOUTUBE_FETCH_CONCURRENCY", "6")),
         youtube_request_min_interval_seconds=float(
             os.getenv("FINAL_EDU_YOUTUBE_REQUEST_MIN_INTERVAL_SECONDS", "1.5")
         ),
+        youtube_distributed_min_interval_seconds=float(
+            os.getenv("FINAL_EDU_YOUTUBE_DISTRIBUTED_MIN_INTERVAL_SECONDS", "2.5")
+        ),
+        youtube_cooldown_seconds=float(os.getenv("FINAL_EDU_YOUTUBE_COOLDOWN_SECONDS", "900")),
         youtube_metadata_cache_ttl_seconds=int(
             os.getenv("FINAL_EDU_YOUTUBE_METADATA_CACHE_TTL_SECONDS", "86400")
         ),
         youtube_transcript_cache_ttl_seconds=int(
             os.getenv("FINAL_EDU_YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS", "604800")
+        ),
+        youtube_scraperapi_enabled=youtube_scraperapi_enabled,
+        youtube_scraperapi_key=os.getenv("FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY"),
+        youtube_scraperapi_proxy_port=int(os.getenv("FINAL_EDU_YOUTUBE_SCRAPERAPI_PROXY_PORT", "8001")),
+        youtube_scraperapi_session_sticky=youtube_scraperapi_session_sticky,
+        youtube_scraperapi_max_cost=youtube_scraperapi_max_cost,
+        youtube_stt_enabled=youtube_stt_enabled,
+        youtube_stt_model=os.getenv("FINAL_EDU_YOUTUBE_STT_MODEL", "gpt-4o-mini-transcribe"),
+        youtube_stt_max_file_bytes=int(os.getenv("FINAL_EDU_YOUTUBE_STT_MAX_FILE_BYTES", "25000000")),
+        youtube_stt_monthly_minutes_budget=int(
+            os.getenv("FINAL_EDU_YOUTUBE_STT_MONTHLY_MINUTES_BUDGET", "500")
         ),
         small_youtube_video_threshold=int(os.getenv("FINAL_EDU_SMALL_YOUTUBE_VIDEO_THRESHOLD", "50")),
         medium_youtube_video_threshold=int(os.getenv("FINAL_EDU_MEDIUM_YOUTUBE_VIDEO_THRESHOLD", "200")),

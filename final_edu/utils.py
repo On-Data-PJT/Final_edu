@@ -6,12 +6,15 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from kiwipiepy import Kiwi
+
 from final_edu.models import ExtractedChunk, RawTextSegment
 
-WORD_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 WHITESPACE_RE = re.compile(r"\s+")
 SAFE_FILENAME_RE = re.compile(r"[^0-9A-Za-z._-]+")
 SAFE_EXTENSION_RE = re.compile(r"\.[a-z0-9]{1,16}")
+KIWI_USER_TERM_RE = re.compile(r"[^A-Za-z가-힣]+")
+KIWI_VALID_TAGS = {"NNG", "NNP", "SL", "SN"}
 STOP_WORDS = {
     "the",
     "a",
@@ -146,15 +149,79 @@ STOP_WORDS = {
     "어떤가요",
     "어떠신가요",
 }
+_KIWI: Kiwi | None = None
+_REGISTERED_KIWI_TERMS: set[str] = set()
 
 
 def normalize_text(text: str) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()
 
 
+def _get_kiwi() -> Kiwi:
+    global _KIWI
+    if _KIWI is None:
+        _KIWI = Kiwi(num_workers=1)
+    return _KIWI
+
+
+def _append_chunk_token(tokens: list[str], current_chunk: list[str]) -> None:
+    if not current_chunk:
+        return
+    chunk = "".join(current_chunk).strip()
+    current_chunk.clear()
+    if len(chunk) <= 1:
+        return
+    lowered = chunk.lower()
+    if lowered not in STOP_WORDS:
+        tokens.append(lowered)
+
+
+def _token_span_length(token) -> int:
+    token_len = getattr(token, "len", None)
+    if isinstance(token_len, int) and token_len > 0:
+        return token_len
+    return len(str(getattr(token, "form", "")))
+
+
+def build_custom_dictionary(titles: list[str]) -> None:
+    kiwi = _get_kiwi()
+    for title in titles:
+        clean_title = KIWI_USER_TERM_RE.sub(" ", str(title or "")).strip()
+        if not clean_title:
+            continue
+        for term in clean_title.split():
+            if len(term) < 2:
+                continue
+            term_key = term.lower()
+            if term_key in _REGISTERED_KIWI_TERMS:
+                continue
+            kiwi.add_user_word(term, "NNP", 10.0)
+            _REGISTERED_KIWI_TERMS.add(term_key)
+
+
 def tokenize(text: str) -> list[str]:
-    tokens = [token.lower() for token in WORD_RE.findall(text)]
-    return [token for token in tokens if token not in STOP_WORDS and len(token) > 1]
+    kiwi = _get_kiwi()
+    clean_text = re.sub(r"([A-Za-z가-힣])-([0-9])", r"\1\2", str(text or ""))
+    tokens: list[str] = []
+    current_chunk: list[str] = []
+    previous_end = 0
+
+    for token in kiwi.tokenize(clean_text):
+        token_start = getattr(token, "start", previous_end)
+        if not isinstance(token_start, int):
+            token_start = previous_end
+        if current_chunk and token_start > previous_end:
+            _append_chunk_token(tokens, current_chunk)
+
+        if getattr(token, "tag", "") in KIWI_VALID_TAGS:
+            current_chunk.append(str(getattr(token, "form", "")))
+        else:
+            _append_chunk_token(tokens, current_chunk)
+
+        previous_end = token_start + _token_span_length(token)
+
+    _append_chunk_token(tokens, current_chunk)
+    return tokens
 
 
 def count_tokens(text: str) -> int:

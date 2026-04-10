@@ -12,7 +12,14 @@ from final_edu.config import Settings, get_settings
 from final_edu.extractors import extract_youtube_asset
 from final_edu.storage import ObjectStorage
 from final_edu.utils import count_tokens
-from final_edu.youtube_cache import YoutubeCache, is_youtube_request_limited_error, throttle_youtube_requests
+from final_edu.youtube_cache import (
+    YoutubeCache,
+    build_youtube_request_session_seed,
+    build_youtube_scraperapi_proxy_url,
+    is_youtube_request_limited_error,
+    mark_youtube_request_limited,
+    throttle_youtube_requests,
+)
 
 YOUTUBE_HOSTS = {
     "www.youtube.com",
@@ -127,12 +134,17 @@ def summarize_youtube_inputs(
 
     expanded_video_count = len(expanded_urls)
     total_duration_seconds = sum(item.total_duration_seconds for item in resolved_inputs)
+    probe_sample_size, probe_policy_warnings = _resolve_probe_sample_size(
+        expanded_video_count=expanded_video_count,
+        settings=settings,
+    )
     probe = probe_transcript_samples(
         resolved_inputs,
-        sample_size=settings.playlist_probe_sample_size,
+        sample_size=probe_sample_size,
         settings=settings,
         storage=storage,
     )
+    warnings.extend(probe_policy_warnings)
     warnings.extend(probe["warnings"])
     warnings = _dedupe_strings(warnings)
     estimated_tokens = _estimate_transcript_tokens(probe, total_duration_seconds, expanded_video_count)
@@ -251,6 +263,7 @@ def probe_transcript_samples(
             "__probe__",
             settings=settings,
             storage=storage,
+            allow_stt_fallback=False,
         )
         fetch_times.append(max(0.0, time.perf_counter() - started))
         warnings.extend(sample_warnings)
@@ -311,7 +324,9 @@ def _normalize_video_entry(entry: dict | None) -> ResolvedYoutubeVideo:
 
 
 def _sample_videos(videos: list[ResolvedYoutubeVideo], sample_size: int) -> list[ResolvedYoutubeVideo]:
-    if sample_size <= 0 or len(videos) <= sample_size:
+    if sample_size <= 0:
+        return []
+    if len(videos) <= sample_size:
         return videos
     picked: list[ResolvedYoutubeVideo] = []
     for offset in range(sample_size):
@@ -334,12 +349,13 @@ def _resolve_youtube_input_with_settings(
     if not normalized_url:
         raise ValueError("빈 YouTube URL입니다.")
 
+    active_settings = settings or get_settings()
     treat_as_playlist = is_explicit_playlist_url(normalized_url)
     info = _extract_youtube_info(
         normalized_url,
         max_videos=max_videos,
         treat_as_playlist=treat_as_playlist,
-        settings=settings,
+        settings=active_settings,
         storage=storage,
     )
 
@@ -350,19 +366,21 @@ def _resolve_youtube_input_with_settings(
             raise ValueError(
                 f"{normalized_url}: 재생목록 영상 수가 현재 지원 상한 {max_videos}개를 초과합니다."
             )
-        videos = [_normalize_video_entry(entry) for entry in entries]
+        videos = [video for video in (_normalize_video_entry(entry) for entry in entries) if video.video_id]
+        _seed_single_video_metadata_cache(videos=videos, settings=active_settings, storage=storage)
         return ResolvedYoutubeInput(
             input_url=normalized_url,
             kind="playlist",
             title=str(info.get("title") or "YouTube Playlist"),
             source_id=str(info.get("id") or ""),
-            videos=[video for video in videos if video.video_id],
+            videos=videos,
             total_video_count=total_count,
         )
 
     video = _normalize_video_entry(info)
     if not video.video_id:
         raise ValueError(f"{normalized_url}: 올바른 YouTube 영상 ID를 찾지 못했습니다.")
+    _seed_single_video_metadata_cache(videos=[video], settings=active_settings, storage=storage)
     return ResolvedYoutubeInput(
         input_url=normalized_url,
         kind="video",
@@ -398,12 +416,19 @@ def _extract_youtube_info(
         treat_as_playlist=treat_as_playlist,
         allow_stale=True,
     )
-    ydl_options = _build_ydl_options(max_videos=max_videos, treat_as_playlist=treat_as_playlist)
+    ydl_options = _build_ydl_options(
+        url=url,
+        max_videos=max_videos,
+        treat_as_playlist=treat_as_playlist,
+        settings=active_settings,
+    )
     try:
         throttle_youtube_requests(active_settings)
         with YoutubeDL(ydl_options) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:  # noqa: BLE001
+        if is_youtube_request_limited_error(exc):
+            mark_youtube_request_limited(active_settings)
         if stale_info is not None and is_youtube_request_limited_error(exc):
             return dict(stale_info.value or {})
         raise
@@ -420,13 +445,20 @@ def _extract_youtube_info(
     return serialized
 
 
-def _build_ydl_options(*, max_videos: int, treat_as_playlist: bool) -> dict:
+def _build_ydl_options(*, url: str, max_videos: int, treat_as_playlist: bool, settings: Settings) -> dict:
     options = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": not treat_as_playlist,
     }
+    proxy_url = build_youtube_scraperapi_proxy_url(
+        settings,
+        session_seed=build_youtube_request_session_seed(url),
+    )
+    if proxy_url:
+        options["proxy"] = proxy_url
+        options["nocheckcertificate"] = True
     if treat_as_playlist:
         options.update(
             {
@@ -460,6 +492,49 @@ def _serialize_info_for_cache(info: dict | None) -> dict:
         "title": str(payload.get("title") or payload.get("alt_title") or "YouTube Video"),
         "duration": int(payload.get("duration") or payload.get("duration_seconds") or 0),
     }
+
+
+def _resolve_probe_sample_size(*, expanded_video_count: int, settings: Settings) -> tuple[int, list[str]]:
+    if expanded_video_count <= 0:
+        return 0, []
+    if expanded_video_count > settings.playlist_probe_disable_threshold:
+        return 0, [
+            (
+                "대용량 재생목록이라 준비 단계의 샘플 자막 확인을 생략했습니다. "
+                "실분석은 worker 에서 계속 진행됩니다."
+            )
+        ]
+    if expanded_video_count > settings.playlist_probe_full_threshold:
+        return settings.playlist_probe_partial_sample_size, [
+            (
+                "재생목록 규모가 커서 준비 단계의 샘플 자막 확인을 일부 영상으로 축소했습니다."
+            )
+        ]
+    return settings.playlist_probe_sample_size, []
+
+
+def _seed_single_video_metadata_cache(
+    *,
+    videos: list[ResolvedYoutubeVideo],
+    settings: Settings,
+    storage: ObjectStorage | None = None,
+) -> None:
+    if not videos:
+        return
+    cache = YoutubeCache(settings, storage=storage)
+    for video in videos:
+        if not video.url or not video.video_id:
+            continue
+        cache.put_metadata(
+            url=video.url,
+            max_videos=1,
+            treat_as_playlist=False,
+            value={
+                "id": video.video_id,
+                "title": video.title,
+                "duration": int(video.duration_seconds or 0),
+            },
+        )
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:

@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from youtube_transcript_api._errors import IpBlocked
+from youtube_transcript_api._errors import IpBlocked, TranscriptsDisabled
 
 from final_edu import youtube_cache as youtube_cache_module
 from final_edu.analysis import analyze_submissions
@@ -19,14 +19,17 @@ from final_edu.youtube_cache import (
     YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE,
     YOUTUBE_STALE_TRANSCRIPT_WARNING,
     YoutubeCache,
+    build_youtube_scraperapi_proxy_url,
     throttle_youtube_requests,
 )
 
 
 class _FakeYoutubeDL:
     call_count = 0
+    last_options: dict | None = None
 
     def __init__(self, options: dict) -> None:
+        type(self).last_options = dict(options)
         self.options = dict(options)
 
     def __enter__(self) -> "_FakeYoutubeDL":
@@ -61,9 +64,10 @@ class _ExplodingYoutubeDL:
 
 class _CountingTranscriptApi:
     fetch_count = 0
+    last_http_client = None
 
     def __init__(self, proxy_config=None, http_client=None) -> None:
-        pass
+        type(self).last_http_client = http_client
 
     def fetch(self, video_id: str, languages=None):
         type(self).fetch_count += 1
@@ -83,6 +87,83 @@ class _ExplodingTranscriptApi:
         raise AssertionError("transcript api should not be instantiated on a transcript cache hit")
 
 
+class _NoTranscriptApi:
+    def __init__(self, proxy_config=None, http_client=None) -> None:
+        pass
+
+    def fetch(self, video_id: str, languages=None):
+        raise TranscriptsDisabled(video_id)
+
+
+class _FakeDownloadedYoutubeDL:
+    last_options: dict | None = None
+
+    def __init__(self, options: dict) -> None:
+        type(self).last_options = dict(options)
+        self.options = dict(options)
+
+    def __enter__(self) -> "_FakeDownloadedYoutubeDL":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def extract_info(self, url: str, download: bool = False) -> dict:
+        output = Path(str(self.options["outtmpl"]).replace("%(id)s", "U5De-0aglaE").replace("%(ext)s", "m4a"))
+        output.write_bytes(b"fake-audio")
+        return {
+            "id": "U5De-0aglaE",
+            "duration": 120,
+            "requested_downloads": [{"filepath": str(output)}],
+        }
+
+
+class _ExplodingYoutubeDownload:
+    def __init__(self, options: dict) -> None:
+        self.options = dict(options)
+
+    def __enter__(self) -> "_ExplodingYoutubeDownload":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def extract_info(self, url: str, download: bool = False) -> dict:
+        raise AssertionError("yt-dlp download should not run for this test")
+
+
+class _FakeOpenAITranscriptionClient:
+    last_model = None
+
+    def __init__(self, api_key: str | None = None) -> None:
+        self.audio = self
+        self.transcriptions = self
+
+    def create(self, *, file, model: str, response_format: str = "text", **kwargs):
+        type(self).last_model = model
+        return "딥러닝 실습 데이터 분석"
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def set(self, key: str, value, nx: bool = False, ex: int | None = None):
+        if nx and key in self.store:
+            return False
+        self.store[key] = str(value)
+        return True
+
+    def get(self, key: str):
+        return self.store.get(key)
+
+    def eval(self, script: str, numkeys: int, key: str, token: str):
+        if self.store.get(key) == token:
+            self.store.pop(key, None)
+            return 1
+        return 0
+
+
 def _sample_sections() -> list[CurriculumSection]:
     return [
         CurriculumSection(
@@ -97,6 +178,8 @@ def _sample_sections() -> list[CurriculumSection]:
 class YoutubeCacheTests(unittest.TestCase):
     def setUp(self) -> None:
         youtube_cache_module._NEXT_REQUEST_AT = 0.0
+        youtube_cache_module._COOLDOWN_UNTIL = 0.0
+        youtube_cache_module._REDIS_CLIENTS.clear()
 
     def test_metadata_cache_hit_skips_ytdlp(self) -> None:
         with tempfile.TemporaryDirectory() as runtime_dir:
@@ -219,6 +302,135 @@ class YoutubeCacheTests(unittest.TestCase):
         self.assertEqual(segments, [])
         self.assertEqual(len(warnings), 1)
         self.assertIn(YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE, warnings[0])
+
+    def test_scraperapi_proxy_is_applied_to_transcript_and_metadata_fetch(self) -> None:
+        url = "https://www.youtube.com/watch?v=U5De-0aglaE"
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            settings = replace(
+                get_settings(),
+                runtime_dir=Path(runtime_dir),
+                youtube_request_min_interval_seconds=0.0,
+                youtube_distributed_min_interval_seconds=0.0,
+                youtube_scraperapi_enabled=True,
+                youtube_scraperapi_key="scraperapi-key",
+                youtube_scraperapi_proxy_port=8001,
+                youtube_scraperapi_session_sticky=True,
+                youtube_scraperapi_max_cost=1,
+            )
+            storage = create_object_storage(settings)
+            _CountingTranscriptApi.last_http_client = None
+
+            with patch("final_edu.youtube.YoutubeDL", _FakeYoutubeDL), patch(
+                "final_edu.extractors.YouTubeTranscriptApi",
+                _CountingTranscriptApi,
+            ):
+                summarize_youtube_inputs(
+                    [url],
+                    settings=settings,
+                    instructor_count=1,
+                    section_count=1,
+                    storage=storage,
+                )
+
+        expected_proxy_url = build_youtube_scraperapi_proxy_url(
+            settings,
+            session_seed="video:U5De-0aglaE",
+        )
+        self.assertEqual(_FakeYoutubeDL.last_options["proxy"], expected_proxy_url)
+        self.assertTrue(_FakeYoutubeDL.last_options["nocheckcertificate"])
+        self.assertIsNotNone(_CountingTranscriptApi.last_http_client)
+        self.assertEqual(
+            _CountingTranscriptApi.last_http_client.proxies,
+            {"http": expected_proxy_url, "https": expected_proxy_url},
+        )
+        self.assertFalse(_CountingTranscriptApi.last_http_client.verify)
+
+    def test_selective_stt_fallback_runs_for_missing_transcript(self) -> None:
+        url = "https://www.youtube.com/watch?v=U5De-0aglaE"
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            settings = replace(
+                get_settings(),
+                runtime_dir=Path(runtime_dir),
+                youtube_request_min_interval_seconds=0.0,
+                youtube_distributed_min_interval_seconds=0.0,
+                openai_api_key="test-key",
+                youtube_stt_enabled=True,
+                youtube_stt_max_file_bytes=1024 * 1024,
+                youtube_scraperapi_enabled=True,
+                youtube_scraperapi_key="scraperapi-key",
+            )
+            storage = create_object_storage(settings)
+            _FakeDownloadedYoutubeDL.last_options = None
+
+            with patch("final_edu.extractors.YouTubeTranscriptApi", _NoTranscriptApi), patch(
+                "final_edu.extractors.YoutubeDL",
+                _FakeDownloadedYoutubeDL,
+            ), patch("final_edu.extractors.OpenAI", _FakeOpenAITranscriptionClient):
+                _source, segments, warnings = extract_youtube_asset(
+                    url,
+                    "강사 A",
+                    settings=settings,
+                    storage=storage,
+                )
+
+        self.assertEqual(len(segments), 1)
+        self.assertTrue(any("STT fallback" in warning for warning in warnings))
+        self.assertEqual(_FakeOpenAITranscriptionClient.last_model, settings.youtube_stt_model)
+        self.assertNotIn("proxy", _FakeDownloadedYoutubeDL.last_options)
+
+    def test_rate_limited_transcript_does_not_trigger_stt_fallback(self) -> None:
+        url = "https://www.youtube.com/watch?v=U5De-0aglaE"
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            settings = replace(
+                get_settings(),
+                runtime_dir=Path(runtime_dir),
+                youtube_request_min_interval_seconds=0.0,
+                youtube_distributed_min_interval_seconds=0.0,
+                openai_api_key="test-key",
+                youtube_stt_enabled=True,
+            )
+            storage = create_object_storage(settings)
+
+            with patch("final_edu.extractors.YouTubeTranscriptApi", _BlockedTranscriptApi), patch(
+                "final_edu.extractors.YoutubeDL",
+                _ExplodingYoutubeDownload,
+            ):
+                _source, segments, warnings = extract_youtube_asset(
+                    url,
+                    "강사 A",
+                    settings=settings,
+                    storage=storage,
+                )
+
+        self.assertEqual(segments, [])
+        self.assertTrue(any(YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE in warning for warning in warnings))
+
+    def test_distributed_throttle_uses_redis_shared_next_request(self) -> None:
+        fake_redis = _FakeRedis()
+        now = [100.0]
+        slept: list[float] = []
+        settings = replace(
+            get_settings(),
+            youtube_request_min_interval_seconds=0.0,
+            youtube_distributed_min_interval_seconds=2.5,
+            redis_url="redis://example.test:6379/0",
+        )
+
+        def _fake_sleep(seconds: float) -> None:
+            slept.append(seconds)
+            now[0] += seconds
+
+        with patch("final_edu.youtube_cache._get_redis_client", return_value=fake_redis), patch(
+            "final_edu.youtube_cache.time.time",
+            side_effect=lambda: now[0],
+        ), patch("final_edu.youtube_cache.time.sleep", side_effect=_fake_sleep):
+            throttle_youtube_requests(settings)
+            throttle_youtube_requests(settings)
+
+        self.assertEqual(slept, [2.5])
 
     def test_throttle_enforces_minimum_interval(self) -> None:
         settings = replace(

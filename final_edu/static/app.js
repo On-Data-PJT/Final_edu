@@ -759,15 +759,32 @@
     const youtubeUrls = Array.isArray(block.youtube_urls || block.youtubeUrls)
       ? (block.youtube_urls || block.youtubeUrls).map((item) => String(item || "").trim()).filter(Boolean)
       : [];
+    const vocFiles = Array.isArray(block.voc_files || block.vocFiles)
+      ? (block.voc_files || block.vocFiles)
+        .map((file) => {
+          if (file instanceof File) {
+            return file;
+          }
+          if (!file || typeof file !== "object") {
+            return null;
+          }
+          return {
+            originalName: String(file.original_name || file.originalName || file.name || ""),
+            downloadUrl: String(file.download_url || file.downloadUrl || ""),
+          };
+        })
+        .filter((file) => file && (file instanceof File || file.originalName))
+      : [];
     const instructorName = String(block.instructor_name || block.instructorName || "").trim();
-    const mode = block.mode === "youtube" ? "youtube" : "files";
-    if (!instructorName && !files.length && !youtubeUrls.length) {
+    const mode = block.mode === "youtube" ? "youtube" : (block.mode === "voc" ? "voc" : "files");
+    if (!instructorName && !files.length && !youtubeUrls.length && !vocFiles.length) {
       return null;
     }
     return {
-      mode: files.length ? mode : (youtubeUrls.length ? "youtube" : mode),
+      mode: files.length ? mode : (youtubeUrls.length ? "youtube" : (vocFiles.length ? "voc" : mode)),
       instructorName,
       files,
+      vocFiles,
       youtubeUrls,
     };
   }
@@ -783,7 +800,7 @@
   function snapshotCurrentCourseDraft() {
     const blocks = state.page1.blocks
       .map((block) => snapshotBlockState(getBlockState(block), block))
-      .filter((block) => block.instructorName || block.files.length || block.youtubeUrls.length);
+      .filter((block) => block.instructorName || block.files.length || block.vocFiles.length || block.youtubeUrls.length);
     return {
       blocks: blocks.length ? blocks : [createEmptyDraftBlock()],
     };
@@ -791,9 +808,10 @@
 
   function snapshotBlockState(blockState, block = null) {
     return {
-      mode: blockState.mode === "youtube" ? "youtube" : "files",
+      mode: blockState.mode === "youtube" ? "youtube" : (blockState.mode === "voc" ? "voc" : "files"),
       instructorName: resolveBlockInstructorName(block, blockState),
       files: Array.isArray(blockState.files) ? blockState.files.slice() : [],
+      vocFiles: Array.isArray(blockState.vocFiles) ? blockState.vocFiles.slice() : [],
       youtubeUrls: Array.isArray(blockState.youtubeUrls) ? blockState.youtubeUrls.slice() : [],
     };
   }
@@ -803,6 +821,7 @@
       mode: "files",
       instructorName: "",
       files: [],
+      vocFiles: [],
       youtubeUrls: [],
     };
   }
@@ -836,6 +855,9 @@
       const restoredFiles = await Promise.all(
         (Array.isArray(block.files) ? block.files : []).map((file) => restoreDraftFile(file)),
       );
+      const restoredVocFiles = await Promise.all(
+        (Array.isArray(block.vocFiles) ? block.vocFiles : []).map((file) => restoreDraftFile(file)),
+      );
       if (restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== courseId) {
         return null;
       }
@@ -844,14 +866,19 @@
         usedFallbackNames.add(instructorName);
       }
       resolvedBlocks.push({
-        mode: block.mode === "youtube" ? "youtube" : (restoredFiles.length ? "files" : "youtube"),
+        mode: block.mode === "youtube"
+          ? "youtube"
+          : (block.mode === "voc" ? "voc" : (restoredFiles.length ? "files" : (restoredVocFiles.length ? "voc" : "youtube"))),
         instructorName,
         files: restoredFiles.filter((file) => file instanceof File),
+        vocFiles: restoredVocFiles.filter((file) => file instanceof File),
         youtubeUrls: Array.isArray(block.youtubeUrls) ? block.youtubeUrls.slice() : [],
       });
     }
 
-    const meaningfulBlocks = resolvedBlocks.filter((block) => block && (block.instructorName || block.files.length || block.youtubeUrls.length));
+    const meaningfulBlocks = resolvedBlocks.filter(
+      (block) => block && (block.instructorName || block.files.length || block.vocFiles.length || block.youtubeUrls.length),
+    );
     if (!meaningfulBlocks.length) {
       return null;
     }
@@ -1605,8 +1632,12 @@
       bindInstructorBlock(block, index + 1);
       const blockState = getBlockState(block);
       blockState.mode = snapshot?.mode === "youtube" ? "youtube" : "files";
+      if (snapshot?.mode === "voc") {
+        blockState.mode = "voc";
+      }
       blockState.instructorName = String(snapshot?.instructorName || "").trim();
       blockState.files = Array.isArray(snapshot?.files) ? snapshot.files.slice() : [];
+      blockState.vocFiles = Array.isArray(snapshot?.vocFiles) ? snapshot.vocFiles.slice() : [];
       blockState.youtubeUrls = Array.isArray(snapshot?.youtubeUrls) ? snapshot.youtubeUrls.slice() : [];
       renderBlock(block);
     });

@@ -14,3 +14,4 @@ htmlcov/
 .idea/
 .vscode/
 .final_edu_runtime/
+.codex/config.toml

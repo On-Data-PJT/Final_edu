@@ -64,6 +64,7 @@ class InstructorSubmission:
     name: str
     files: list[UploadedAsset] = field(default_factory=list)
     youtube_urls: list[str] = field(default_factory=list)
+    voc_files: list[UploadedAsset] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -140,6 +141,8 @@ class InstructorSummary:
     unmapped_tokens: int = 0
     unmapped_share: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    voc_file_count: int = 0
+    voc_analysis: dict = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -158,6 +161,7 @@ class AnalysisRun:
     rose_series_by_mode: dict = field(default_factory=dict)
     line_series_by_mode: dict = field(default_factory=dict)
     insights: list[dict] = field(default_factory=list)
+    voc_summary: dict = field(default_factory=dict)
     insight_generation_mode: str = "deterministic-fallback"
     external_trends_status: str = "planned"
 

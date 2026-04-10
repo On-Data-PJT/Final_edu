@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
+from final_edu.analysis import analyze_voc_assets
 from final_edu.config import get_settings
 from final_edu.courses import (
     LocalCourseRepository,
@@ -38,6 +39,7 @@ from final_edu.models import (
     CourseRecord,
     JobInstructorInput,
     StoredUploadRef,
+    UploadedAsset,
 )
 from final_edu.storage import create_object_storage
 from final_edu.utils import build_safe_storage_name
@@ -285,6 +287,47 @@ def create_app() -> FastAPI:
             headers={"Content-Disposition": content_disposition},
         )
 
+    @app.get(
+        "/jobs/{job_id}/voc-assets/{instructor_index}/{asset_index}",
+        response_class=Response,
+        name="job_voc_asset_download",
+    )
+    async def job_voc_asset_download(job_id: str, instructor_index: int, asset_index: int) -> Response:
+        job = get_job(job_id, settings)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾지 못했습니다.")
+
+        payload = load_job_payload(job, settings)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="작업 입력을 찾지 못했습니다.")
+
+        try:
+            instructor = payload.instructors[instructor_index - 1]
+            asset_ref = instructor.voc_files[asset_index - 1]
+        except IndexError as exc:
+            raise HTTPException(status_code=404, detail="업로드 VOC 파일을 찾지 못했습니다.") from exc
+
+        original_name = Path(asset_ref.original_name or f"voc-{instructor_index}-{asset_index}").name
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / build_safe_storage_name(
+                original_name,
+                default_stem=f"job-voc-{instructor_index}-{asset_index}",
+                max_basename_chars=72,
+            )
+            storage.download_to_path(asset_ref.storage_key, temp_path)
+            payload_bytes = temp_path.read_bytes()
+
+        media_type = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        ascii_name = Path(build_safe_storage_name(original_name, default_stem="download", max_basename_chars=48)).name
+        content_disposition = (
+            f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(original_name)}'
+        )
+        return Response(
+            content=payload_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition},
+        )
+
     @app.get("/jobs/{job_id}", response_class=HTMLResponse, name="job_detail")
     async def job_detail(request: Request, job_id: str) -> HTMLResponse:
         job = get_job(job_id, settings)
@@ -402,67 +445,31 @@ def create_app() -> FastAPI:
         review_file: UploadFile = File(...),
         instructor_name: str = Form(""),
     ) -> JSONResponse:
-        if not settings.openai_api_key or OpenAI is None:
-            return JSONResponse({"error": "OPENAI_API_KEY가 설정되지 않아 분석을 실행할 수 없어요."}, status_code=503)
-
-        content_bytes = await review_file.read()
-        filename = (review_file.filename or "").lower()
-
-        text = ""
-        if filename.endswith(".pdf"):
-            try:
-                import pdfplumber, io
-                with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
-                    text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-            except ImportError:
-                return JSONResponse({"error": "pdfplumber 라이브러리가 필요합니다."}, status_code=500)
-        elif filename.endswith(".csv"):
-            import io, csv as _csv
-            decoded = content_bytes.decode("utf-8", errors="replace")
-            rows = list(_csv.reader(io.StringIO(decoded)))
-            text = "\n".join(",".join(row) for row in rows)
-        else:
-            for enc in ("utf-8", "cp949", "euc-kr"):
-                try:
-                    text = content_bytes.decode(enc)
-                    break
-                except UnicodeDecodeError:
-                    continue
-
-        if not text.strip():
-            return JSONResponse({"error": "파일에서 텍스트를 추출할 수 없었어요."}, status_code=400)
-
-        client = OpenAI(api_key=settings.openai_api_key)
-        system_prompt = (
-            "아래는 강의 평가서야. 형식이 어떻든 구조를 스스로 파악해서 분석해줘.\n"
-            "다음을 JSON만 반환해줘 (다른 말 없이, 마크다운 백틱 없이):\n"
-            '{\n'
-            '  "sentiment": {\n'
-            '    "positive": ["키워드1", "키워드2"],\n'
-            '    "negative": ["키워드1", "키워드2"]\n'
-            '  },\n'
-            '  "repeated_complaints": [\n'
-            '    {"pattern": "내용", "count": 3, "week": "3주차"}\n'
-            '  ],\n'
-            '  "next_suggestions": [\n'
-            '    {"priority": "high", "label": "제목", "body": "내용"}\n'
-            '  ]\n'
-            '}'
-        )
-        user_content = f"강사: {instructor_name}\n\n평가서 내용:\n{text[:6000]}"
         try:
-            resp = client.chat.completions.create(
-                model=settings.openai_solution_model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-            )
-            data = json.loads(resp.choices[0].message.content or "{}")
-            return JSONResponse(data)
-        except Exception as exc:
-            return JSONResponse({"error": f"GPT 분석 실패: {exc}"}, status_code=500)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                safe_name = build_safe_storage_name(
+                    review_file.filename or "review.txt",
+                    default_stem="review-upload",
+                    max_basename_chars=72,
+                )
+                temp_path = Path(temp_dir) / safe_name
+                size = await _write_upload_to_path(review_file, temp_path, settings.max_upload_bytes)
+                if size == 0:
+                    return JSONResponse({"error": "비어 있는 파일은 분석할 수 없어요."}, status_code=400)
+
+                analysis, warnings = analyze_voc_assets(
+                    instructor_name=instructor_name.strip() or "강사",
+                    uploads=[UploadedAsset(path=temp_path, original_name=review_file.filename or safe_name)],
+                    settings=settings,
+                )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"VOC 분석 실패: {exc}"}, status_code=500)
+
+        if warnings:
+            analysis["warnings"] = warnings
+        return JSONResponse(analysis)
 
     @app.get("/jobs/{job_id}/status", response_class=JSONResponse, name="job_status")
     async def job_status(job_id: str) -> JSONResponse:
@@ -704,6 +711,7 @@ async def _build_job_instructor(
         total_size = await _write_upload_to_path(upload, temp_path, max_upload_bytes)
         if total_size == 0:
             continue
+        storage_key = build_upload_key(job_id, index, original_name)
         storage.put_file(storage_key, temp_path, content_type=upload.content_type)
         stored_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=original_name))
 
@@ -871,11 +879,11 @@ async def _prepare_analysis_request(
                     }
                     for summary in youtube_summary["playlist_summaries"]
                 )
-            if instructor.files or instructor.youtube_urls:
+            if instructor.files or instructor.youtube_urls or instructor.voc_files:
                 instructors.append(instructor)
 
     if len(instructors) < 1:
-        raise ValueError("강사명과 자료가 있는 강사 1명 이상이 필요합니다.")
+        raise ValueError("강사명과 자료 또는 VOC가 있는 강사 1명 이상이 필요합니다.")
 
     recommended_analysis_mode = (
         recommend_analysis_mode(
@@ -983,7 +991,11 @@ def _serialize_course_restore_drafts(request: Request, settings, jobs) -> dict: 
             "blocks": [
                 {
                     "instructor_name": instructor.name,
-                    "mode": "files" if instructor.files else "youtube",
+                    "mode": (
+                        "files"
+                        if instructor.files
+                        else ("youtube" if instructor.youtube_urls else ("voc" if instructor.voc_files else "files"))
+                    ),
                     "youtube_urls": list(instructor.youtube_inputs or instructor.youtube_urls),
                     "files": [
                         {
@@ -998,6 +1010,20 @@ def _serialize_course_restore_drafts(request: Request, settings, jobs) -> dict: 
                             ),
                         }
                         for asset_index, asset_ref in enumerate(instructor.files, start=1)
+                    ],
+                    "voc_files": [
+                        {
+                            "original_name": asset_ref.original_name,
+                            "download_url": str(
+                                request.url_for(
+                                    "job_voc_asset_download",
+                                    job_id=job.id,
+                                    instructor_index=str(instructor_index),
+                                    asset_index=str(asset_index),
+                                )
+                            ),
+                        }
+                        for asset_index, asset_ref in enumerate(instructor.voc_files, start=1)
                     ],
                 }
                 for instructor_index, instructor in enumerate(payload.instructors, start=1)
@@ -1089,7 +1115,7 @@ def _generate_solution_content(payload: dict, settings) -> tuple[dict, str, str 
 
     try:
         response = client.chat.completions.create(
-            model=settings.openai_solution_model,
+            model=settings.openai_insight_model,
             response_format={"type": "json_object"},
             messages=[
                 {
@@ -1383,6 +1409,7 @@ def _build_solution_payload(result: dict | None) -> dict:
         "target": target,
         "sections": [{"id": _read(section, "id"), "title": _read(section, "title")} for section in sections],
         "instructors": instructor_payloads,
+        "voc_summary": _read(result, "voc_summary") or {},
     }
 
 
@@ -1439,6 +1466,16 @@ def _demo_solution_payload() -> dict:
         "target": target,
         "sections": [{"id": t.replace(" ", "-"), "title": t} for t in topics],
         "instructors": instructors,
+        "voc_summary": {
+            "positive": ["실습 중심", "친절한 설명"],
+            "negative": ["강의 속도", "자료 부족"],
+            "repeated_complaints": [
+                {"pattern": "강의 속도 조절 필요", "count": 2, "week": "3~4주차"},
+            ],
+            "next_suggestions": [
+                {"priority": "high", "label": "강의 속도 조절", "body": "핵심 개념 뒤 체크포인트와 질의 시간을 추가해 보세요."},
+            ],
+        },
     }
 
 
@@ -1446,16 +1483,21 @@ def _build_review_payload(result: dict | None) -> dict:
     if result:
         instructors = _read(result, "instructors") or []
         return {
-            "common_summary": {"positive": [], "negative": []},
+            "common_summary": _read(result, "voc_summary") or {"positive": [], "negative": []},
             "instructors": [
                 {
                     "name": _read(inst, "name"),
-                    "file_name": None,
-                    "analyzed_at": None,
-                    "response_count": None,
-                    "sentiment": {"positive": [], "negative": []},
-                    "repeated_complaints": [],
-                    "next_suggestions": [],
+                    "file_name": _read(_read(inst, "voc_analysis") or {}, "file_name"),
+                    "analyzed_at": _read(_read(inst, "voc_analysis") or {}, "analyzed_at"),
+                    "response_count": _read(_read(inst, "voc_analysis") or {}, "response_count"),
+                    "sentiment": _read(_read(inst, "voc_analysis") or {}, "sentiment")
+                    or {"positive": [], "negative": []},
+                    "repeated_complaints": list(
+                        _read(_read(inst, "voc_analysis") or {}, "repeated_complaints") or []
+                    ),
+                    "next_suggestions": list(
+                        _read(_read(inst, "voc_analysis") or {}, "next_suggestions") or []
+                    ),
                 }
                 for inst in instructors
             ]

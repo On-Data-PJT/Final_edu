@@ -6,6 +6,7 @@ import re
 import time
 from collections import Counter, defaultdict
 from dataclasses import replace
+from datetime import UTC, datetime
 from statistics import mean
 
 try:
@@ -32,6 +33,8 @@ from final_edu.youtube_cache import (
 )
 from final_edu.utils import (
     build_chunks,
+    build_custom_dictionary,
+    count_tokens,
     cosine_similarity,
     normalize_text,
     safe_snippet,
@@ -48,7 +51,67 @@ MODE_SOURCE_FILTERS = {
     "material": MATERIAL_SOURCE_TYPES,
     "speech": SPEECH_SOURCE_TYPES,
 }
-NO_ANALYZABLE_TEXT_ERROR_MESSAGE = "분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막 있는 YouTube URL을 사용해 주세요."
+NO_ANALYZABLE_TEXT_ERROR_MESSAGE = (
+    "분석 가능한 텍스트를 추출하지 못했습니다. 텍스트형 PDF/PPTX 또는 자막/STT 가능한 YouTube URL을 사용해 주세요."
+)
+VOC_NEGATIVE_RULES = [
+    ("강의 속도 조절 필요", ("속도", "빠르", "진도")),
+    ("실습 시간과 환경 보완 필요", ("실습", "환경", "오류", "colab", "실행")),
+    ("자료 보강 필요", ("자료", "교안", "pdf", "파일")),
+    ("질문과 피드백 채널 보완 필요", ("질문", "답변", "피드백")),
+    ("난이도와 과제 부담 조절 필요", ("어렵", "난이도", "과제", "부담")),
+]
+VOC_POSITIVE_HINTS = {
+    "친절": "친절한 설명",
+    "실습": "실습 중심",
+    "체계": "체계적 구성",
+    "예시": "예시 풍부",
+    "이해": "이해하기 쉬움",
+    "피드백": "피드백 충실",
+    "복습": "복습 친화적",
+}
+VOC_NEGATIVE_HINTS = {
+    "속도": "강의 속도",
+    "빠르": "강의 속도",
+    "실습": "실습 시간 부족",
+    "환경": "실습 환경",
+    "오류": "실습 환경",
+    "자료": "자료 부족",
+    "질문": "질문 시간 부족",
+    "답변": "질문 시간 부족",
+    "과제": "과제 부담",
+    "부담": "과제 부담",
+    "어렵": "난이도 부담",
+    "난이도": "난이도 부담",
+}
+VOC_SUGGESTION_MAP = {
+    "강의 속도 조절 필요": {
+        "priority": "high",
+        "label": "강의 속도 조절",
+        "body": "핵심 개념 뒤 체크포인트와 짧은 질의 시간을 추가해 이해 격차를 줄여 보세요.",
+    },
+    "실습 시간과 환경 보완 필요": {
+        "priority": "high",
+        "label": "실습 환경 보강",
+        "body": "실습 전 환경 점검 체크리스트와 추가 실습 시간을 함께 제공해 오류와 대기 시간을 줄여 보세요.",
+    },
+    "자료 보강 필요": {
+        "priority": "medium",
+        "label": "복습 자료 보강",
+        "body": "교안, 코드 파일, 실습 결과 예시를 함께 배포해 수강생이 복습 경로를 놓치지 않게 하세요.",
+    },
+    "질문과 피드백 채널 보완 필요": {
+        "priority": "medium",
+        "label": "질문 채널 운영",
+        "body": "수업 중 질문 채널이나 종료 후 Q&A 시간을 정례화해 피드백 밀도를 높여 보세요.",
+    },
+    "난이도와 과제 부담 조절 필요": {
+        "priority": "medium",
+        "label": "난이도 단계화",
+        "body": "기초/심화 과제를 분리하고 선행지식 안내를 명확히 해 부담을 분산해 보세요.",
+    },
+}
+VOC_WEEK_RE = re.compile(r"(\d+\s*(?:주차|주|차시))")
 
 
 class InsightCardSchema(BaseModel):
@@ -83,9 +146,19 @@ def analyze_submissions(
 ) -> AnalysisRun:
     started = time.perf_counter()
     normalized_sections = _normalize_target_weights(sections)
-    active_submissions = [submission for submission in submissions if submission.files or submission.youtube_urls]
+    build_custom_dictionary([section.title for section in normalized_sections])
+    active_submissions = [
+        submission
+        for submission in submissions
+        if submission.files or submission.youtube_urls or submission.voc_files
+    ]
     if len(active_submissions) < 1:
         raise ValueError("최소 1명의 강사 자료가 필요합니다.")
+
+    voc_analyses_by_instructor, voc_summary, voc_analysis_warnings = _analyze_voc_submissions(
+        submissions=active_submissions,
+        settings=settings,
+    )
 
     normalized_mode = str(analysis_mode or "auto").strip().lower()
     if normalized_mode == "lexical":
@@ -98,10 +171,13 @@ def analyze_submissions(
             storage=storage,
             started=started,
             progress_callback=progress_callback,
+            voc_analyses_by_instructor=voc_analyses_by_instructor,
+            voc_summary=voc_summary,
+            voc_analysis_warnings=voc_analysis_warnings,
         )
 
     all_chunks = []
-    warnings: list[str] = []
+    warnings: list[str] = list(voc_analysis_warnings)
     instructor_assets: dict[str, int] = defaultdict(int)
     instructor_warnings: dict[str, list[str]] = defaultdict(list)
     total_youtube_videos = sum(len(submission.youtube_urls) for submission in active_submissions)
@@ -181,6 +257,18 @@ def analyze_submissions(
     deduped_chunks, dedupe_warnings = _dedupe_chunks(all_chunks)
     warnings.extend(dedupe_warnings)
     if not deduped_chunks:
+        if voc_analyses_by_instructor:
+            return _build_voc_only_run(
+                course_id=course_id,
+                course_name=course_name,
+                sections=normalized_sections,
+                submissions=active_submissions,
+                warnings=warnings,
+                started=started,
+                scorer_mode="voc-only",
+                voc_analyses_by_instructor=voc_analyses_by_instructor,
+                voc_summary=voc_summary,
+            )
         raise ValueError(_analysis_no_text_error(warnings))
 
     _emit_progress(
@@ -241,8 +329,12 @@ def analyze_submissions(
     duration_ms = int((time.perf_counter() - started) * 1000)
     return AnalysisRun(
         sections=normalized_sections,
-        instructors=summaries,
-        warnings=warnings,
+        instructors=_attach_voc_to_summaries(
+            summaries=summaries,
+            submissions=active_submissions,
+            voc_analyses_by_instructor=voc_analyses_by_instructor,
+        ),
+        warnings=_dedupe_messages(warnings),
         scorer_mode=scorer_mode,
         duration_ms=duration_ms,
         course={
@@ -266,6 +358,7 @@ def analyze_submissions(
         rose_series_by_mode=rose_series_by_mode,
         line_series_by_mode=line_series_by_mode,
         insights=insights,
+        voc_summary=voc_summary,
         insight_generation_mode=insight_generation_mode,
         external_trends_status="planned",
     )
@@ -281,8 +374,11 @@ def _analyze_submissions_lexical_streaming(
     storage: ObjectStorage | None,
     started: float,
     progress_callback=None,
+    voc_analyses_by_instructor: dict[str, dict] | None = None,
+    voc_summary: dict | None = None,
+    voc_analysis_warnings: list[str] | None = None,
 ) -> AnalysisRun:
-    warnings: list[str] = []
+    warnings: list[str] = list(voc_analysis_warnings or [])
     instructor_assets: dict[str, int] = defaultdict(int)
     instructor_warnings: dict[str, list[str]] = defaultdict(list)
     total_youtube_videos = sum(len(submission.youtube_urls) for submission in submissions)
@@ -383,6 +479,18 @@ def _analyze_submissions_lexical_streaming(
 
     combined_aggregates = mode_aggregates["combined"]
     if not any(combined_aggregates.get(submission.name, {}).get("total_tokens", 0) for submission in submissions):
+        if voc_analyses_by_instructor:
+            return _build_voc_only_run(
+                course_id=course_id,
+                course_name=course_name,
+                sections=sections,
+                submissions=submissions,
+                warnings=warnings,
+                started=started,
+                scorer_mode="voc-only",
+                voc_analyses_by_instructor=voc_analyses_by_instructor,
+                voc_summary=voc_summary or {},
+            )
         raise ValueError(_analysis_no_text_error(warnings))
 
     _emit_progress(
@@ -441,8 +549,12 @@ def _analyze_submissions_lexical_streaming(
     duration_ms = int((time.perf_counter() - started) * 1000)
     return AnalysisRun(
         sections=sections,
-        instructors=summaries,
-        warnings=warnings,
+        instructors=_attach_voc_to_summaries(
+            summaries=summaries,
+            submissions=submissions,
+            voc_analyses_by_instructor=voc_analyses_by_instructor or {},
+        ),
+        warnings=_dedupe_messages(warnings),
         scorer_mode="lexical-streaming",
         duration_ms=duration_ms,
         course={
@@ -466,9 +578,410 @@ def _analyze_submissions_lexical_streaming(
         rose_series_by_mode=rose_series_by_mode,
         line_series_by_mode=line_series_by_mode,
         insights=insights,
+        voc_summary=voc_summary or {},
         insight_generation_mode=insight_generation_mode,
         external_trends_status="planned",
     )
+
+
+def analyze_voc_assets(
+    *,
+    instructor_name: str,
+    uploads: list,
+    settings: Settings,
+) -> tuple[dict, list[str]]:
+    warnings: list[str] = []
+    collected_segments = []
+    analyzed_files: list[str] = []
+    response_count = 0
+
+    for upload in uploads:
+        source, segments, source_warnings = extract_file_asset(upload, instructor_name)
+        warnings.extend(source_warnings)
+        if not segments:
+            continue
+        analyzed_files.append(upload.original_name)
+        collected_segments.extend(segments)
+        response_count += _estimate_voc_response_count(source.asset_type, segments)
+
+    if not collected_segments:
+        raise ValueError("VOC 파일에서 분석 가능한 텍스트를 추출하지 못했습니다.")
+
+    structured, generation_warning = _generate_voc_analysis(
+        instructor_name=instructor_name,
+        segments=collected_segments,
+        settings=settings,
+    )
+    if generation_warning:
+        warnings.append(generation_warning)
+
+    file_name = ""
+    if len(analyzed_files) == 1:
+        file_name = analyzed_files[0]
+    elif analyzed_files:
+        file_name = f"{analyzed_files[0]} 외 {len(analyzed_files) - 1}개"
+
+    analysis = {
+        "file_name": file_name,
+        "analyzed_at": datetime.now(UTC).astimezone().strftime("%Y-%m-%d"),
+        "response_count": max(response_count, len(collected_segments)),
+        "sentiment": structured["sentiment"],
+        "repeated_complaints": structured["repeated_complaints"],
+        "next_suggestions": structured["next_suggestions"],
+    }
+    return analysis, _dedupe_messages(warnings)
+
+
+def _analyze_voc_submissions(
+    *,
+    submissions: list[InstructorSubmission],
+    settings: Settings,
+) -> tuple[dict[str, dict], dict, list[str]]:
+    analyses: dict[str, dict] = {}
+    warnings: list[str] = []
+
+    for submission in submissions:
+        if not submission.voc_files:
+            continue
+        try:
+            analysis, analysis_warnings = analyze_voc_assets(
+                instructor_name=submission.name,
+                uploads=submission.voc_files,
+                settings=settings,
+            )
+            analyses[submission.name] = analysis
+            warnings.extend(analysis_warnings)
+        except ValueError as exc:
+            warnings.append(f"{submission.name}: {exc}")
+
+    return analyses, _build_voc_summary(analyses), _dedupe_messages(warnings)
+
+
+def _build_voc_only_run(
+    *,
+    course_id: str,
+    course_name: str,
+    sections: list[CurriculumSection],
+    submissions: list[InstructorSubmission],
+    warnings: list[str],
+    started: float,
+    scorer_mode: str,
+    voc_analyses_by_instructor: dict[str, dict],
+    voc_summary: dict,
+) -> AnalysisRun:
+    summaries = _attach_voc_to_summaries(
+        summaries=_build_instructor_summaries(
+            sections=sections,
+            submissions=submissions,
+            assignments=[],
+            instructor_assets=defaultdict(int),
+            instructor_warnings=defaultdict(list),
+            max_evidence=0,
+        ),
+        submissions=submissions,
+        voc_analyses_by_instructor=voc_analyses_by_instructor,
+    )
+    mode_series, average_series_by_mode, line_series_by_mode = _build_mode_series(
+        sections=sections,
+        submissions=submissions,
+        assignments=[],
+    )
+    rose_series_by_mode = _build_rose_series_by_mode(
+        mode_series=mode_series,
+        sections=sections,
+    )
+    keywords_by_mode = _empty_keywords_by_mode(submissions)
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return AnalysisRun(
+        sections=sections,
+        instructors=summaries,
+        warnings=_dedupe_messages(
+            list(warnings) + ["커버리지 분석 자료가 없어 VOC 결과만 생성했습니다."]
+        ),
+        scorer_mode=scorer_mode,
+        duration_ms=duration_ms,
+        course={
+            "id": course_id,
+            "name": course_name,
+            "sections": [
+                {
+                    "id": section.id,
+                    "title": section.title,
+                    "description": section.description,
+                    "target_weight": section.target_weight,
+                }
+                for section in sections
+            ],
+        },
+        mode_series=mode_series,
+        average_series_by_mode=average_series_by_mode,
+        keywords_by_instructor=keywords_by_mode.get("combined", {}),
+        keywords_by_mode=keywords_by_mode,
+        rose_series_by_instructor=rose_series_by_mode.get("combined", {}),
+        rose_series_by_mode=rose_series_by_mode,
+        line_series_by_mode=line_series_by_mode,
+        insights=[],
+        voc_summary=voc_summary,
+        insight_generation_mode="deterministic-fallback",
+        external_trends_status="planned",
+    )
+
+
+def _attach_voc_to_summaries(
+    *,
+    summaries: list[InstructorSummary],
+    submissions: list[InstructorSubmission],
+    voc_analyses_by_instructor: dict[str, dict],
+) -> list[InstructorSummary]:
+    voc_counts = {submission.name: len(submission.voc_files) for submission in submissions}
+    return [
+        replace(
+            summary,
+            voc_file_count=voc_counts.get(summary.name, 0),
+            voc_analysis=voc_analyses_by_instructor.get(summary.name, {}),
+        )
+        for summary in summaries
+    ]
+
+
+def _empty_keywords_by_mode(submissions: list[InstructorSubmission]) -> dict[str, dict[str, list[dict]]]:
+    payload: dict[str, dict[str, list[dict]]] = {}
+    for mode in RESULT_MODES:
+        payload[mode] = {}
+        for submission in submissions:
+            payload[mode][submission.name] = []
+            payload[mode][f"{submission.name}__off_curriculum"] = []
+    return payload
+
+
+def _estimate_voc_response_count(source_type: str, segments: list) -> int:
+    if source_type == "csv":
+        return len(segments)
+    if source_type == "text":
+        return sum(max(1, len([line for line in segment.text.split("|") if line.strip()])) for segment in segments)
+    return len(segments)
+
+
+def _generate_voc_analysis(
+    *,
+    instructor_name: str,
+    segments: list,
+    settings: Settings,
+) -> tuple[dict, str | None]:
+    lines = [normalize_text(segment.text) for segment in segments if normalize_text(segment.text)]
+    fallback = _fallback_voc_analysis(lines)
+    if not settings.openai_api_key or OpenAI is None:
+        return fallback, None
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    compact_text = "\n".join(lines[:120])
+    try:
+        response = client.chat.completions.create(
+            model=settings.openai_insight_model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 교육 과정 VOC 분석가입니다. 강의 평가서 내용을 읽고 JSON만 반환하세요. "
+                        "반환 형식은 sentiment, repeated_complaints, next_suggestions 필드를 반드시 포함해야 합니다. "
+                        "positive와 negative는 짧은 한국어 키워드 배열이고, complaints는 최대 3개, suggestions는 최대 3개만 반환하세요."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"강사명: {instructor_name}\n"
+                        "아래 VOC를 분석해서 JSON만 반환하세요.\n"
+                        f"{compact_text[:12000]}"
+                    ),
+                },
+            ],
+        )
+        raw = json.loads(response.choices[0].message.content or "{}")
+        return _normalize_voc_analysis_payload(raw, fallback), None
+    except Exception as exc:  # noqa: BLE001
+        return fallback, f"VOC LLM 분석에 실패해 규칙 기반 결과를 사용했습니다. ({exc})"
+
+
+def _normalize_voc_analysis_payload(raw: dict, fallback: dict) -> dict:
+    sentiment = raw.get("sentiment", {}) if isinstance(raw, dict) else {}
+    complaints = raw.get("repeated_complaints", []) if isinstance(raw, dict) else []
+    suggestions = raw.get("next_suggestions", []) if isinstance(raw, dict) else []
+
+    normalized = {
+        "sentiment": {
+            "positive": [str(item).strip() for item in sentiment.get("positive", []) if str(item).strip()][:6],
+            "negative": [str(item).strip() for item in sentiment.get("negative", []) if str(item).strip()][:6],
+        },
+        "repeated_complaints": [
+            {
+                "pattern": str(item.get("pattern", "")).strip(),
+                "count": max(1, int(item.get("count", 1))),
+                "week": str(item.get("week", "")).strip(),
+            }
+            for item in complaints
+            if isinstance(item, dict) and str(item.get("pattern", "")).strip()
+        ][:3],
+        "next_suggestions": [
+            {
+                "priority": str(item.get("priority", "low")).strip().lower() or "low",
+                "label": str(item.get("label", "")).strip(),
+                "body": str(item.get("body", "")).strip(),
+            }
+            for item in suggestions
+            if isinstance(item, dict) and str(item.get("label", "")).strip() and str(item.get("body", "")).strip()
+        ][:3],
+    }
+
+    if not normalized["sentiment"]["positive"]:
+        normalized["sentiment"]["positive"] = fallback["sentiment"]["positive"]
+    if not normalized["sentiment"]["negative"]:
+        normalized["sentiment"]["negative"] = fallback["sentiment"]["negative"]
+    if not normalized["repeated_complaints"]:
+        normalized["repeated_complaints"] = fallback["repeated_complaints"]
+    if not normalized["next_suggestions"]:
+        normalized["next_suggestions"] = fallback["next_suggestions"]
+    return normalized
+
+
+def _fallback_voc_analysis(lines: list[str]) -> dict:
+    combined = " ".join(lines)
+    tokens = tokenize(combined)
+    token_counts = Counter(tokens)
+
+    positive_counts: Counter[str] = Counter()
+    negative_counts: Counter[str] = Counter()
+    complaint_counts: Counter[str] = Counter()
+    complaint_weeks: dict[str, str] = {}
+
+    for line in lines:
+        for needle, label in VOC_POSITIVE_HINTS.items():
+            if needle in line:
+                positive_counts[label] += 1
+        for needle, label in VOC_NEGATIVE_HINTS.items():
+            if needle in line:
+                negative_counts[label] += 1
+        for label, needles in VOC_NEGATIVE_RULES:
+            if any(needle in line for needle in needles):
+                complaint_counts[label] += 1
+                complaint_weeks.setdefault(label, _extract_voc_week(line))
+
+    positive = [label for label, _count in positive_counts.most_common(4)]
+    negative = [label for label, _count in negative_counts.most_common(4)]
+    if not positive:
+        positive = [token for token, _count in token_counts.most_common(4)]
+    if not negative:
+        negative = ["강의 속도", "자료 부족"] if lines else []
+
+    repeated_complaints = [
+        {
+            "pattern": label,
+            "count": count,
+            "week": complaint_weeks.get(label, ""),
+        }
+        for label, count in complaint_counts.most_common(3)
+    ]
+    if not repeated_complaints and negative:
+        repeated_complaints = [
+            {
+                "pattern": f"{negative[0]} 관련 피드백 반복",
+                "count": max(1, len(lines) // 3),
+                "week": "",
+            }
+        ]
+
+    next_suggestions = []
+    for complaint in repeated_complaints:
+        suggestion = VOC_SUGGESTION_MAP.get(complaint["pattern"])
+        if suggestion:
+            next_suggestions.append(suggestion)
+    if not next_suggestions:
+        next_suggestions = [
+            {
+                "priority": "medium",
+                "label": "VOC 정기 점검",
+                "body": "반복 피드백이 쌓이는 구간을 기준으로 수업 속도와 자료 구성을 다시 점검해 보세요.",
+            }
+        ]
+
+    return {
+        "sentiment": {
+            "positive": positive[:4],
+            "negative": negative[:4],
+        },
+        "repeated_complaints": repeated_complaints[:3],
+        "next_suggestions": next_suggestions[:3],
+    }
+
+
+def _build_voc_summary(analyses: dict[str, dict]) -> dict:
+    positive_counts: Counter[str] = Counter()
+    negative_counts: Counter[str] = Counter()
+    complaint_counts: Counter[str] = Counter()
+    complaint_weeks: dict[str, str] = {}
+    suggestion_counts: Counter[str] = Counter()
+    suggestion_payloads: dict[str, dict] = {}
+
+    for analysis in analyses.values():
+        sentiment = analysis.get("sentiment", {})
+        positive_counts.update(sentiment.get("positive", []))
+        negative_counts.update(sentiment.get("negative", []))
+        for item in analysis.get("repeated_complaints", []):
+            pattern = str(item.get("pattern", "")).strip()
+            if not pattern:
+                continue
+            complaint_counts[pattern] += int(item.get("count", 1) or 1)
+            complaint_weeks.setdefault(pattern, str(item.get("week", "")).strip())
+        for item in analysis.get("next_suggestions", []):
+            label = str(item.get("label", "")).strip()
+            body = str(item.get("body", "")).strip()
+            if not label or not body:
+                continue
+            suggestion_counts[label] += 1
+            suggestion_payloads.setdefault(
+                label,
+                {
+                    "priority": str(item.get("priority", "low")).strip().lower() or "low",
+                    "label": label,
+                    "body": body,
+                },
+            )
+
+    return {
+        "positive": [label for label, _count in positive_counts.most_common(6)],
+        "negative": [label for label, _count in negative_counts.most_common(6)],
+        "repeated_complaints": [
+            {
+                "pattern": pattern,
+                "count": count,
+                "week": complaint_weeks.get(pattern, ""),
+            }
+            for pattern, count in complaint_counts.most_common(4)
+        ],
+        "next_suggestions": [
+            suggestion_payloads[label]
+            for label, _count in suggestion_counts.most_common(4)
+            if label in suggestion_payloads
+        ],
+    }
+
+
+def _extract_voc_week(text: str) -> str:
+    match = VOC_WEEK_RE.search(str(text or ""))
+    return match.group(1) if match else ""
+
+
+def _dedupe_messages(messages: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for message in messages:
+        normalized = str(message or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def parse_curriculum_sections(curriculum_text: str, max_sections: int) -> list[CurriculumSection]:
