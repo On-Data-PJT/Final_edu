@@ -1,0 +1,15 @@
+﻿2026-04-10 15:04:14 +0900 refs/remotes/origin/jiye docs: add jiye_app_patch.py for team integration guide
+2026-04-10 11:38:43 +0900 refs/remotes/origin/review chore: change GPT model to gpt-5.4-mini for both insight and review
+2026-04-09 20:58:29 +0900 refs/heads/dev 일단 워드클라우드에 대단원에 나온 단어 위주로 뽑도록 하고, lexiical만 이용하도록 되어있다는 답변을 들음.
+2026-04-09 20:58:29 +0900 refs/heads/yeon_copy 일단 워드클라우드에 대단원에 나온 단어 위주로 뽑도록 하고, lexiical만 이용하도록 되어있다는 답변을 들음.
+2026-04-09 20:58:29 +0900 refs/remotes/origin/yeon_copy 일단 워드클라우드에 대단원에 나온 단어 위주로 뽑도록 하고, lexiical만 이용하도록 되어있다는 답변을 들음.
+2026-04-09 19:01:52 +0900 refs/remotes/origin/dev chore: revise the 1 result page
+2026-04-09 18:38:48 +0900 refs/remotes/origin/1page can i push it
+2026-04-09 18:38:05 +0900 refs/heads/solution feat: redesign insight page with grouped sections and softer tone
+2026-04-09 18:38:05 +0900 refs/remotes/origin/solution feat: redesign insight page with grouped sections and softer tone
+2026-04-09 15:16:54 +0900 refs/heads/test edit
+2026-04-08 18:17:47 +0900 refs/remotes/origin/test redesign
+2026-04-08 14:07:13 +0900 refs/heads/feat/mvp-curriculum-coverage docs: reorganize agent workspace docs
+2026-04-07 15:59:46 +0900 refs/remotes/origin/feat/mvp-curriculum-coverage docs: refresh status after windows startup fix
+2026-04-06 16:23:59 +0900 refs/heads/main add: .gitignore
+2026-04-06 16:23:59 +0900 refs/remotes/origin/HEAD add: .gitignore

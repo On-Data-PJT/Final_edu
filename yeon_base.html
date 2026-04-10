@@ -1,0 +1,27 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Final Edu{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ request.url_for('static', path='styles.css') }}" />
+  </head>
+  <body data-page="{% block page_name %}generic{% endblock %}">
+    <div class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="final_edu 홈">final_edu</a>
+        <div class="site-header-actions" aria-label="페이지 도구">
+          {% block header_actions %}{% endblock %}
+        </div>
+      </header>
+      <main id="page-root">{% block content %}{% endblock %}</main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js" defer></script>
+    <script src="{{ request.url_for('static', path='app.js') }}" defer></script>
+    {% block body_end %}{% endblock %}
+  </body>
+</html>

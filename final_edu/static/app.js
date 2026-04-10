@@ -742,19 +742,19 @@
     }
     const files = Array.isArray(block.files)
       ? block.files
-          .map((file) => {
-            if (file instanceof File) {
-              return file;
-            }
-            if (!file || typeof file !== "object") {
-              return null;
-            }
-            return {
-              originalName: String(file.original_name || file.originalName || file.name || ""),
-              downloadUrl: String(file.download_url || file.downloadUrl || ""),
-            };
-          })
-          .filter((file) => file && (file instanceof File || file.originalName))
+        .map((file) => {
+          if (file instanceof File) {
+            return file;
+          }
+          if (!file || typeof file !== "object") {
+            return null;
+          }
+          return {
+            originalName: String(file.original_name || file.originalName || file.name || ""),
+            downloadUrl: String(file.download_url || file.downloadUrl || ""),
+          };
+        })
+        .filter((file) => file && (file instanceof File || file.originalName))
       : [];
     const youtubeUrls = Array.isArray(block.youtube_urls || block.youtubeUrls)
       ? (block.youtube_urls || block.youtubeUrls).map((item) => String(item || "").trim()).filter(Boolean)
@@ -1423,10 +1423,10 @@
     syncPreviewSectionsFromTable(refs.previewTable);
     return Boolean(
       courseName
-        && state.page1.preview
-        && state.page1.previewFile
-        && state.page1.draftInstructorNames.length >= 1
-        && isSavableCoursePreview(state.page1.preview),
+      && state.page1.preview
+      && state.page1.previewFile
+      && state.page1.draftInstructorNames.length >= 1
+      && isSavableCoursePreview(state.page1.preview),
     );
   }
 
@@ -1900,7 +1900,7 @@
     if (!node) {
       return;
     }
-    const onFiles = typeof options.onFiles === "function" ? options.onFiles : () => {};
+    const onFiles = typeof options.onFiles === "function" ? options.onFiles : () => { };
     const canAccept = typeof options.canAccept === "function" ? options.canAccept : () => true;
     const hasTransferFiles = (event) => {
       const dataTransfer = event?.dataTransfer;
@@ -2041,9 +2041,9 @@
     const roseData = (data.length
       ? data
       : sections.map((section) => ({
-          name: section.title,
-          value: 0,
-        }))
+        name: section.title,
+        value: 0,
+      }))
     ).sort((left, right) => Number(right.value || 0) - Number(left.value || 0));
 
     return {
@@ -2073,7 +2073,16 @@
             borderWidth: 2,
           },
           label: {
-            show: false,
+            show: true,
+            position: "outside",
+            formatter: "{b}\n({d}%)",
+            color: "#475569",
+            fontWeight: 600,
+          },
+          labelLine: {
+            show: true,
+            length: 15,
+            length2: 10,
           },
           data: roseData.map((item, index) => ({
             name: item.name || sections[index]?.title || `대주제 ${index + 1}`,

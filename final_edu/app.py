@@ -66,6 +66,14 @@ def create_app() -> FastAPI:
             ),
         )
 
+    @app.get("/demo", response_class=HTMLResponse)
+    async def demo(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "demo.html",
+            _demo_context(request=request, settings=settings),
+        )
+
     @app.get("/health", response_class=JSONResponse)
     async def health() -> JSONResponse:
         return JSONResponse(
@@ -376,6 +384,137 @@ def _solutions_context(*, request: Request, settings, job: dict, result: dict) -
         },
         "result": result,
         "result_json": json.dumps(result, ensure_ascii=False),
+    }
+
+
+def _demo_context(*, request: Request, settings) -> dict:
+    # Simplified sample data focusing on the Overview
+    sections = [
+        {"id": "python-core", "title": "Python 핵심 문법", "description": "기초 데이터 타입 및 제어 흐름", "target_weight": 15.0},
+        {"id": "data-viz", "title": "데이터 시각화", "description": "Matplotlib 및 Seaborn 실습", "target_weight": 20.0},
+        {"id": "ml-theory", "title": "머신러닝 이론", "description": "지도 학습과 비지도 학습 알고리즘", "target_weight": 20.0},
+        {"id": "deep-learning", "title": "딥러닝 응용", "description": "CNN, RNN 기반 실무 적용", "target_weight": 25.0},
+        {"id": "nlp-basics", "title": "자연어 처리 기초", "description": "텍스트 전처리 및 임베딩 모델", "target_weight": 10.0},
+        {"id": "deployment", "title": "모델 배포/운영", "description": "FastAPI 및 Docker 기반 서빙", "target_weight": 10.0},
+    ]
+    
+    instructor_names = ["전체 평균", "오정훈 강사", "김데이터 강사", "이파이썬 강사"]
+    
+    inst_data = []
+    for i, name in enumerate(instructor_names):
+        # Base values with some variance
+        results = {
+            "python-core": 12 + i * 2,
+            "data-viz": 18 + (i % 3) * 3,
+            "ml-theory": 22 - i * 2,
+            "deep-learning": 20 + (i % 2) * 8,
+            "nlp-basics": 8 + i,
+            "deployment": 15 - i * 3
+        }
+        total = sum(results.values())
+        normalized = {k: round(v * 100 / total, 1) for k, v in results.items()}
+        
+        keywords = [
+            {"text": "Python", "value": 25 - i},
+            {"text": "Pandas", "value": 20 + i},
+            {"text": "TensorFlow", "value": 15 + i*2},
+            {"text": "실무 예제", "value": 30 - i*3},
+            {"text": "수학 원리", "value": 10 + i*4}
+        ]
+        inst_data.append({"name": name, "results": normalized, "keywords": keywords})
+
+    result = {
+        "course_id": "demo-curriculum-2026",
+        "course_name": "2026 실무 인공지능 마스터 클래스",
+        "sections": sections,
+        "instructors": [
+            {
+                "name": inst["name"],
+                "results": [{"section_id": sid, "value": val} for sid, val in inst["results"].items()],
+                "keywords": inst["keywords"]
+            }
+            for inst in inst_data
+        ],
+        "rose_series_by_instructor": {
+            inst["name"]: [{"section_id": sid, "value": val} for sid, val in inst["results"].items()]
+            for inst in inst_data
+        },
+        "rose_series_by_mode": {
+            "combined": {
+                inst["name"]: [{"section_id": sid, "value": val} for sid, val in inst["results"].items()]
+                for inst in inst_data
+            },
+            "material": {
+                inst["name"]: [{"section_id": sid, "value": round(val * 0.75, 1)} for sid, val in inst["results"].items()]
+                for inst in inst_data
+            },
+            "speech": {
+                inst["name"]: [{"section_id": sid, "value": round(val * 0.25, 1)} for sid, val in inst["results"].items()]
+                for inst in inst_data
+            }
+        },
+        "keywords_by_instructor": {
+            inst["name"]: inst["keywords"]
+            for inst in inst_data
+        },
+        "keywords_by_mode": {
+            "combined": {inst["name"]: inst["keywords"] for inst in inst_data},
+            "material": {inst["name"]: inst["keywords"][:3] for inst in inst_data},
+            "speech": {inst["name"]: inst["keywords"][2:] for inst in inst_data}
+        },
+        # Necessary for average and comparison visuals even if simplified
+        "mode_series": {
+            "combined": {
+                "average": [
+                    {"section_id": s["id"], "section_title": s["title"], "share": sum(inst["results"][s["id"]] for inst in inst_data) / (len(inst_data) * 100)}
+                    for s in sections
+                ],
+                "instructors": {
+                    inst["name"]: [{"section_id": sid, "share": val / 100} for sid, val in inst["results"].items()]
+                    for inst in inst_data
+                }
+            }
+        },
+        "line_series_by_mode": {
+            "combined": {
+                "target": [{"section_id": s["id"], "share": s["target_weight"] / 100} for s in sections],
+                "instructors": {
+                    inst["name"]: [{"section_id": sid, "share": val / 100} for sid, val in inst["results"].items()]
+                    for inst in inst_data
+                }
+            }
+        },
+        "selected_instructor": "전체 평균",
+        "external_trends_status": "reflected",
+        "insights": [
+            {
+                "title": "딥러닝 강조 수준",
+                "category": "강점",
+                "issue": f"{inst_data[0]['name']}는 딥러닝 응용 부문에서 매우 상세한 커버리지를 보입니다.",
+                "evidence": f"전체 강의의 {inst_data[0]['results']['deep-learning']}%를 딥러닝 실무에 할당함.",
+                "recommendation": "기초 문법 대비 심화 학습 비율이 우수하여 고급 과정으로 적합합니다.",
+                "icon": "spark"
+            }
+        ]
+    }
+
+    return {
+        "request": request,
+        "settings": settings,
+        "job": {
+            "id": "job-demo-full",
+            "course_name": "2026 실무 인공지능 마스터 클래스",
+            "status": "completed",
+            "status_label": "완료",
+            "section_count": len(sections),
+            "updated_at_label": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "is_active": False,
+            "is_failed": False,
+            "is_completed": True,
+        },
+        "result": result,
+        "result_json": json.dumps(result, ensure_ascii=False),
+        "selected_instructor": inst_data[0]["name"],
     }
 
 
