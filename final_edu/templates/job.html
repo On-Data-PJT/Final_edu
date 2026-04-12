@@ -691,7 +691,6 @@
   let currentIndex = 0;
   let currentMode = "combined";
   const sourceModeStats = rawData.source_mode_stats || {};
-  const modeUnmappedSeries = rawData.mode_unmapped_series || {};
   const availableSourceModes = new Set(
     Array.isArray(rawData.available_source_modes) && rawData.available_source_modes.length
       ? rawData.available_source_modes
@@ -705,15 +704,13 @@
   const avgBarChart = echarts.init(document.getElementById('avgBarChart'));
   const multiBarChart = echarts.init(document.getElementById('multiBarChart'));
   const radarChart = echarts.init(document.getElementById('radarChart'));
-  const panelContent = {
+  const coveragePanelContent = {
     donut: document.getElementById('donutPanelContent'),
-    wordcloud: document.getElementById('wordcloudPanelContent'),
     comparison: document.getElementById('comparisonPanelContent'),
     radar: document.getElementById('radarPanelContent'),
   };
-  const panelEmptyStates = {
+  const coveragePanelEmptyStates = {
     donut: document.getElementById('donutEmptyState'),
-    wordcloud: document.getElementById('wordcloudEmptyState'),
     comparison: document.getElementById('comparisonEmptyState'),
     radar: document.getElementById('radarEmptyState'),
   };
@@ -754,11 +751,13 @@
       return {
         asset_count: inferredActivity > 0 ? 1 : 0,
         total_tokens: inferredActivity > 0 ? 1 : 0,
+        mapped_tokens: inferredActivity > 0 ? 1 : 0,
       };
     }
     return {
       asset_count: Number(stat?.asset_count || 0),
       total_tokens: Number(stat?.total_tokens || 0),
+      mapped_tokens: Number(stat?.mapped_tokens || 0),
     };
   }
 
@@ -809,16 +808,20 @@
     if (!firstAvailableMode()) {
       return "강의자료와 강의(발화) 데이터가 없어 커리큘럼 커버리지 차트를 표시할 수 없습니다.";
     }
-    return sourceModeReason(currentMode) || `${sourceModeLabel(currentMode)} 데이터가 없어 이 모드를 표시할 수 없습니다.`;
+    const sourceReason = sourceModeReason(currentMode);
+    if (sourceReason) {
+      return sourceReason || `${sourceModeLabel(currentMode)} 데이터가 없어 이 모드를 표시할 수 없습니다.`;
+    }
+    return "커리큘럼과 직접 연관된 내용을 찾지 못했습니다.";
   }
 
   function toggleCoverageEmptyState(visible, message) {
-    Object.values(panelContent).forEach((node) => {
+    Object.values(coveragePanelContent).forEach((node) => {
       if (node) {
         node.hidden = visible;
       }
     });
-    Object.values(panelEmptyStates).forEach((node) => {
+    Object.values(coveragePanelEmptyStates).forEach((node) => {
       if (node) {
         node.hidden = !visible;
         if (visible) {
@@ -828,8 +831,12 @@
     });
     if (visible) {
       donutLegend.innerHTML = '';
-      [donutChart, wordcloudChart, avgBarChart, multiBarChart, radarChart].forEach((chart) => chart.clear());
+      [donutChart, avgBarChart, multiBarChart, radarChart].forEach((chart) => chart.clear());
     }
+  }
+
+  function modeHasMappedCoverage(mode) {
+    return sourceModeStat(mode).mapped_tokens > 0;
   }
 
   function getActiveData() {
@@ -844,8 +851,6 @@
 
   function getActiveDonutData() {
     let pieData;
-    let unmappedValue = 0;
-
     if (currentIndex === 0) {
       pieData = (rawData.mode_series[currentMode]?.average || []).map((item, index) => ({
         value: Number(item.share || 0) * 100,
@@ -853,7 +858,6 @@
         section_id: item.section_id,
         itemStyle: { color: topicColors[index % topicColors.length] }
       }));
-      unmappedValue = Number(modeUnmappedSeries[currentMode]?.average || 0) * 100;
     } else {
       const instName = navInstructors[currentIndex];
       pieData = (rawData.rose_series_by_mode[currentMode]?.[instName] || []).map((item, index) => ({
@@ -862,16 +866,6 @@
         section_id: item.section_id,
         itemStyle: { color: topicColors[index % topicColors.length] }
       }));
-      unmappedValue = Number(modeUnmappedSeries[currentMode]?.instructors?.[instName] || 0) * 100;
-    }
-
-    if (unmappedValue > 0) {
-      pieData.push({
-        value: unmappedValue,
-        name: '미분류',
-        section_id: '__unmapped__',
-        itemStyle: { color: '#D7DEE8' }
-      });
     }
 
     return pieData;
@@ -1128,6 +1122,11 @@
     document.getElementById('instructorIcon').style.filter = currentIndex === 0 ? "grayscale(100%)" : "none";
     if (!modeIsAvailable(currentMode)) {
       toggleCoverageEmptyState(true, coverageModeMessage());
+      return;
+    }
+    if (!modeHasMappedCoverage(currentMode)) {
+      toggleCoverageEmptyState(true, coverageModeMessage());
+      renderWordcloud();
       return;
     }
     toggleCoverageEmptyState(false, "");

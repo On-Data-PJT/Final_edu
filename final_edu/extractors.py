@@ -77,11 +77,13 @@ def extract_youtube_asset(
 ) -> tuple[SourceAsset, list[RawTextSegment], list[str]]:
     settings = settings or get_settings()
     video_id = _extract_video_id(url)
+    active_storage = storage or create_object_storage(settings)
+    video_title = _lookup_cached_youtube_title(url, video_id, settings, active_storage)
     source = SourceAsset(
         id=uuid.uuid4().hex[:12],
         instructor_name=instructor_name,
         asset_type="youtube",
-        label=f"YouTube {video_id or 'unknown'}",
+        label=video_title or f"YouTube {video_id or 'unknown'}",
         origin=url,
     )
 
@@ -92,7 +94,7 @@ def extract_youtube_asset(
 
     warnings: list[str] = []
     try:
-        transcript, fetch_warnings = _fetch_youtube_transcript(video_id, settings, storage=storage)
+        transcript, fetch_warnings = _fetch_youtube_transcript(video_id, settings, storage=active_storage)
         warnings.extend(fetch_warnings)
     except Exception as exc:  # noqa: BLE001
         if is_youtube_stt_fallback_error(exc):
@@ -109,7 +111,7 @@ def extract_youtube_asset(
                 source,
                 instructor_name,
                 settings,
-                storage=storage,
+                storage=active_storage,
             )
             if stt_segments:
                 source.warnings.extend(stt_warnings)
@@ -517,6 +519,34 @@ def _lookup_cached_youtube_duration(
         except (TypeError, ValueError, AttributeError):
             continue
     return 0
+
+
+def _lookup_cached_youtube_title(
+    url: str,
+    video_id: str | None,
+    settings: Settings,
+    storage: ObjectStorage,
+) -> str:
+    cache = YoutubeCache(settings, storage=storage)
+    candidate_urls = [str(url or "").strip()]
+    if video_id:
+        candidate_urls.append(_video_url(video_id))
+
+    for candidate_url in candidate_urls:
+        if not candidate_url:
+            continue
+        cached = cache.get_metadata(
+            url=candidate_url,
+            max_videos=1,
+            treat_as_playlist=False,
+            allow_stale=True,
+        )
+        if cached is None:
+            continue
+        title = normalize_text(str((cached.value or {}).get("title") or ""))
+        if title:
+            return title
+    return ""
 
 
 def _stt_budget_exceeded(duration_seconds: int, settings: Settings, storage: ObjectStorage) -> bool:

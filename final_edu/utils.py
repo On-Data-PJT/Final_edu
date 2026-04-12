@@ -16,6 +16,23 @@ SAFE_FILENAME_RE = re.compile(r"[^0-9A-Za-z._-]+")
 SAFE_EXTENSION_RE = re.compile(r"\.[a-z0-9]{1,16}")
 KIWI_USER_TERM_RE = re.compile(r"[^A-Za-z가-힣]+")
 KIWI_VALID_TAGS = {"NNG", "NNP", "SL", "SN"}
+MATERIAL_SOURCE_TYPES = {"pdf", "pptx", "text"}
+MATERIAL_SEMANTIC_SPLIT_RE = re.compile(
+    r"(?=(?:■|□|▪|▫|▷|▶|◆|◇|Q\d+\s*[.:]|(?:\d+\s*주차)|(?:주차\s*\d+)|(?:chapter\s*\d+)|(?:part\s*\d+)))",
+    re.IGNORECASE,
+)
+MATERIAL_QUESTION_RE = re.compile(r"(?:^|\s)Q\d+\s*[.:]", re.IGNORECASE)
+MATERIAL_ANSWER_RE = re.compile(r"(?:답\s*[:：]|정답)")
+MATERIAL_PLACEHOLDER_RE = re.compile(r"[_＿]{3,}")
+MATERIAL_SUBCHUNK_MAX_TOKENS = 36
+MATERIAL_NOISE_PHRASES = (
+    "확인 문제",
+    "빈칸 채우기",
+    "필기 공간",
+    "자유 메모",
+    "check point",
+    "checkpoint",
+)
 STOP_WORDS = {
     "the",
     "a",
@@ -339,11 +356,47 @@ def build_preserved_segment_chunks(
         text = normalize_text(segment.text)
         if not text:
             continue
+        if str(segment.source_type or "").lower() in MATERIAL_SOURCE_TYPES:
+            chunks.extend(_split_material_segment_into_chunks(segment, target_tokens))
+            continue
         if count_tokens(text) <= target_tokens:
             chunks.append(_chunk_from_segments([segment]))
             continue
         chunks.extend(_split_segment_into_chunks(segment, target_tokens))
     return chunks
+
+
+def _split_material_segment_into_chunks(
+    segment: RawTextSegment,
+    target_tokens: int,
+) -> list[ExtractedChunk]:
+    normalized_text = normalize_text(segment.text)
+    if not normalized_text:
+        return []
+
+    if not _should_semantically_split_material(normalized_text, target_tokens):
+        return [_chunk_from_segments([segment])]
+
+    semantic_target = max(18, min(target_tokens, MATERIAL_SUBCHUNK_MAX_TOKENS))
+    semantic_blocks = _split_material_text_into_blocks(normalized_text)
+    filtered_parts: list[str] = []
+
+    for block in semantic_blocks:
+        cleaned_block = _filter_material_block_text(block)
+        if not cleaned_block:
+            continue
+        if count_tokens(cleaned_block) <= semantic_target:
+            filtered_parts.append(cleaned_block)
+            continue
+        filtered_parts.extend(_split_text_by_token_budget(cleaned_block, semantic_target))
+
+    normalized_parts = [normalize_text(part) for part in filtered_parts if normalize_text(part)]
+    if not normalized_parts:
+        return []
+    if len(normalized_parts) == 1 and normalized_parts[0] == normalized_text:
+        return [_chunk_from_segments([segment])]
+
+    return _chunks_from_split_parts(segment, normalized_parts)
 
 
 def _split_segment_into_chunks(
@@ -354,6 +407,10 @@ def _split_segment_into_chunks(
     if len(parts) <= 1:
         return [_chunk_from_segments([segment])]
 
+    return _chunks_from_split_parts(segment, parts)
+
+
+def _chunks_from_split_parts(segment: RawTextSegment, parts: list[str]) -> list[ExtractedChunk]:
     chunks: list[ExtractedChunk] = []
     total_parts = len(parts)
     for index, part in enumerate(parts, start=1):
@@ -362,11 +419,57 @@ def _split_segment_into_chunks(
             instructor_name=segment.instructor_name,
             source_label=segment.source_label,
             source_type=segment.source_type,
-            locator=f"{segment.locator} ({index}/{total_parts})",
+            locator=segment.locator if total_parts == 1 else f"{segment.locator} ({index}/{total_parts})",
             text=part,
         )
         chunks.append(_chunk_from_segments([split_segment]))
     return chunks
+
+
+def _should_semantically_split_material(text: str, target_tokens: int) -> bool:
+    semantic_target = max(18, min(target_tokens, MATERIAL_SUBCHUNK_MAX_TOKENS))
+    return (
+        bool(MATERIAL_SEMANTIC_SPLIT_RE.search(text))
+        or any(phrase in text.lower() for phrase in MATERIAL_NOISE_PHRASES)
+        or count_tokens(text) > semantic_target * 2
+    )
+
+
+def _split_material_text_into_blocks(text: str) -> list[str]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+
+    if MATERIAL_SEMANTIC_SPLIT_RE.search(normalized):
+        candidates = [
+            normalize_text(part)
+            for part in MATERIAL_SEMANTIC_SPLIT_RE.split(normalized)
+            if normalize_text(part)
+        ]
+    else:
+        candidates = [normalized]
+
+    blocks: list[str] = []
+    for candidate in candidates:
+        blocks.extend(_split_text_by_token_budget(candidate, MATERIAL_SUBCHUNK_MAX_TOKENS))
+    return [block for block in blocks if block]
+
+
+def _filter_material_block_text(text: str) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+
+    lowered = normalized.lower()
+    if any(phrase in lowered for phrase in MATERIAL_NOISE_PHRASES):
+        return ""
+    if MATERIAL_QUESTION_RE.search(normalized) and (
+        MATERIAL_ANSWER_RE.search(normalized) or MATERIAL_PLACEHOLDER_RE.search(normalized)
+    ):
+        return ""
+    if MATERIAL_PLACEHOLDER_RE.search(normalized) and MATERIAL_ANSWER_RE.search(normalized):
+        return ""
+    return normalized
 
 
 def _split_text_by_token_budget(text: str, target_tokens: int) -> list[str]:

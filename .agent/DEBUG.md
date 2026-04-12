@@ -183,6 +183,21 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
   Trigger Commands: `/jobs/{job_id}` Page 2 material toggle, material PDF/PPTX 분석
   Must Read When: material chunking, Page 2 donut 비율 표시, `미분류` series 계약을 바꿀 때
+- `DBG-034` `active` Lane: `Web / Demo Agent`
+  Tags: `page2`, `mapped-only`, `coverage`, `wordcloud`, `empty-state`
+  Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `/jobs/{job_id}` Page 2 source toggle, 강의자료/발화 커버리지 비중 검토
+  Must Read When: Page 2 coverage share 분모, `mapped_tokens`, word cloud/coverage 역할 분리를 바꿀 때
+- `DBG-035` `active` Lane: `Web / Demo Agent`
+  Tags: `material`, `chunking`, `aliases`, `worksheet-noise`, `assignment`
+  Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: material PDF/PPTX section assignment, `Deep Learning and Boltzmann` 0% 조사
+  Must Read When: material semantic subchunk, section alias glossary, worksheet noise filtering, single-label assignment 규칙을 바꿀 때
+- `DBG-036` `active` Lane: `Web / Demo Agent`
+  Tags: `speech`, `youtube`, `title-prior`, `decision-tree`, `mismatch`
+  Related Files: `final_edu/analysis.py`, `final_edu/extractors.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `/jobs/{job_id}` speech coverage, YouTube chapter playlist 분석, decision-tree 0% 조사
+  Must Read When: speech assignment alias, YouTube title reuse, title rescue prior, transcript/title mismatch warning 규칙을 바꿀 때
 
 ## Active Incidents
 
@@ -884,3 +899,83 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - material 문서는 transcript처럼 여러 page/slide를 overlap으로 이어 붙이지 말 것
   - Page 2 비율 시각화는 visible slice끼리 재정규화하지 말고, raw share와 미분류를 명시적으로 함께 보여줄 것
   - material 분석 회귀에는 실제로 여러 주차가 섞인 multi-page fixture를 넣어 section 분산 여부를 확인할 것
+
+### DBG-034 `active` Page 2 커버리지 차트를 raw total token 기준으로 계산하면 미사여구/주변 발화 때문에 `미분류`가 차트를 잠식함
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page2`, `mapped-only`, `coverage`, `wordcloud`, `empty-state`
+- Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{job_id}` Page 2 source toggle, 강의자료/발화 커버리지 비중 검토
+- Must Read When: Page 2 coverage share 분모, `mapped_tokens`, word cloud/coverage 역할 분리를 바꿀 때
+- Symptom:
+  - 강의자료나 발화에 커리큘럼과 직접 상관없는 연결 멘트, 추임새, 주변 설명이 많으면 `미분류`가 크게 늘어나고 실제 대단원 비중이 작게 눌려 보였음
+  - 사용자는 커리큘럼 비중 차트가 `전체 텍스트 대비 비중`보다 `커리큘럼에 연관된 내용들 안에서의 비중`을 보여주길 원했음
+- Root Cause:
+  - 기존 coverage share는 `section_tokens / total_tokens`로 계산돼, mapped token보다 unmapped token이 많으면 실제 section 비중이 과소평가됐음
+  - 상단 도넛에 `미분류`를 함께 넣으면서 차트 목적이 `커리큘럼 구성 비교`보다 `분류 성공률 표시`에 가까워졌음
+- Resolution:
+  - coverage share 분모를 `mapped_tokens = total_tokens - unmapped_tokens`로 변경
+  - `source_mode_stats`에 `mapped_tokens`를 추가해 source 존재와 coverage 성립 여부를 분리
+  - 도넛/bar/radar는 mapped-only share만 표시하고, `미분류` slice는 제거
+  - source는 있지만 mapped coverage가 0인 mode는 toggle을 유지한 채 coverage empty state를 렌더
+  - word cloud는 raw tokens를 유지해 비커리큘럼 표현과 주변 발화는 별도로 관찰하게 함
+- Prevention Rule:
+  - 커리큘럼 비교 차트와 raw 텍스트 관찰 도구를 같은 분모로 섞지 말 것
+  - coverage chart를 설계할 때는 `source 존재`, `분석 가능한 텍스트 존재`, `커리큘럼에 실제 매칭된 텍스트 존재`를 각각 분리해 다룰 것
+  - source는 있지만 mapped coverage가 0인 회귀 케이스를 반드시 테스트에 포함할 것
+
+### DBG-035 `active` `Deep Learning and Boltzmann` 관련 키워드가 material PDF에 있어도 page-level single-label assignment 때문에 0%로 사라짐
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `material`, `chunking`, `aliases`, `worksheet-noise`, `assignment`
+- Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: material PDF/PPTX section assignment, `Deep Learning and Boltzmann` 0% 조사
+- Must Read When: material semantic subchunk, section alias glossary, worksheet noise filtering, single-label assignment 규칙을 바꿀 때
+- Symptom:
+  - PDF `p.8` 같은 페이지에 `딥 러닝`, `제한적 볼츠만 기계`, `오토인코더`가 같이 있어도 `Deep Learning and Boltzmann Machine`은 0%로 남고 `랜덤 포레스트 / 오토인코더`만 커졌음
+  - `Q1.`, `답: _____`, `확인 문제` 같은 workbook 문구가 별도 개념 chunk 로 섞여 엉뚱한 section 으로 튀었음
+- Root Cause:
+  - section assignment 가 title/description 원문만 써서, 영어 중심 section 은 한국어 교안 표현과 직접 맞물리지 않았음
+  - material PDF는 page boundary 는 보존했지만 페이지 내부를 의미 단위로 다시 쪼개지 않아 mixed-topic page 가 단일 section 으로 통째로 배정됐음
+  - worksheet question/answer block 을 coverage assignment 입력에서 그대로 사용해 semantic score 를 흐렸음
+- Resolution:
+  - section assignment text 에 bilingual alias glossary 를 추가해 `딥 러닝`, `제한적 볼츠만 기계`, `RBM`, `오토인코더` 같은 교안 표현을 embedding/lexical scorer 가 함께 보게 함
+  - material preserving chunk 경로에 semantic subchunk 를 추가해 `■/▷/Q1` marker 와 token budget 기준으로 페이지 내부를 더 작게 나눔
+  - `확인 문제`, `빈칸 채우기`, `답:`, `필기 공간`, placeholder underscore 는 coverage assignment 입력에서 제외함
+  - `tests.test_page2_dashboard`에 material semantic split 회귀와 deep-learning/autoencoder 동시 배정 회귀를 추가함
+- Prevention Rule:
+  - material page-level single-label assignment 결과가 의심스러우면 먼저 page 내부 semantic split 여부를 확인할 것
+  - 영어 section title 만으로 교안 한글 표현을 설명하지 말고 alias glossary 를 함께 유지할 것
+  - workbook question block 이 coverage assignment 에 들어가지 않도록 fixture 기반 회귀를 유지할 것
+
+### DBG-036 `active` Decision Tree chapter 영상이 플레이리스트에 있어도 speech coverage 에서 0%가 나옴
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `speech`, `youtube`, `title-prior`, `decision-tree`, `mismatch`
+- Related Files: `final_edu/analysis.py`, `final_edu/extractors.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{job_id}` speech coverage, YouTube chapter playlist 분석, decision-tree 0% 조사
+- Must Read When: speech assignment alias, YouTube title reuse, title rescue prior, transcript/title mismatch warning 규칙을 바꿀 때
+- Symptom:
+  - 재생목록 title 기준으로는 `[2-3] Introduction to Decision Trees`, `[2-4] Entropy and Information Gain`, `[2-5] How to create a decision tree...`가 분명히 있는데 Page 2 speech coverage 에서 `결정 트리`가 `0%`로 보였음
+  - 실제 transcript 를 확인하면 decision-tree 발화가 있었지만 `Other / Unmapped`로 보류되거나 다른 section 과 near-tie 상태였음
+  - 후속 보정 뒤에는 반대로 `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum / 인접 주제가 `결정 트리`로 과매핑돼 speech coverage 가 `65%+`까지 치솟는 회귀가 생겼음
+- Root Cause:
+  - speech assignment 는 transcript 텍스트만 사용했고, YouTube metadata cache 에 있는 chapter title 을 전혀 활용하지 않았음
+  - `결정 트리` section alias 가 `decision tree` 정도로만 얇아 `entropy`, `information gain`, `gini`, `pruning` 같은 핵심 강의 용어를 충분히 설명하지 못했음
+  - extraction 단계에서 source label 이 `YouTube <video_id>`라 evidence/warning 에도 실제 chapter title 이 남지 않았음
+  - 이후 rescue 보정은 transcript anchor 가 없는 chunk 도 nearest-neighbor 로 확정했고, substring 기반 anchor match 가 `지니고 -> 지니`처럼 한국어 어절 내부를 잘못 잡아 false positive 를 만들었음
+- Resolution:
+  - YouTube extraction 이 metadata cache 의 human title 을 source label 로 재사용하도록 변경
+  - `결정 트리` section alias 를 `entropy / information gain / 지니 / 가지치기 / root node / leaf node`까지 확장
+  - speech assignment 에 `strict transcript anchor gate + exact title rescue`를 추가해, section-specific anchor 가 확인된 chunk만 coverage 후보로 인정하도록 변경
+  - title rescue 는 semantic title similarity 가 아니라 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 있을 때만 bounded bonus 를 주도록 제한
+  - speech anchor matching 을 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절 오탐을 제거
+  - `tests.test_page2_dashboard`에 decision-tree alias 회귀, decision-boundary non-match, intro chunk rejection, token-boundary 오탐 방지, exact-title SVM rescue 회귀를 추가
+- Prevention Rule:
+  - chapter형 YouTube playlist 를 speech coverage 로 해석할 때는 transcript만 보지 말고 metadata title 도 explainability 보조 근거로 유지할 것
+  - title prior 는 exact chapter anchor match 에만 적용하고, transcript anchor 없이 semantic similarity만으로 강제 배정하지 말 것
+  - speech anchor 는 substring 검색으로 구현하지 말고 token/boundary 기준으로 계산할 것
+  - `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum 인접 주제가 `결정 트리`로 빨려 들어가지 않는 회귀 테스트를 유지할 것

@@ -113,6 +113,162 @@ VOC_SUGGESTION_MAP = {
     },
 }
 VOC_WEEK_RE = re.compile(r"(\d+\s*(?:주차|주|차시))")
+YOUTUBE_GENERIC_LABEL_RE = re.compile(r"^youtube\s+[0-9a-z_-]{11}$", re.IGNORECASE)
+YOUTUBE_TITLE_CHAPTER_RE = re.compile(r"\[[^\]]+\]\s*(.+)$")
+SPEECH_TITLE_PRIOR_BONUS_MAX = 0.06
+SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA = 0.03
+SECTION_ALIAS_GLOSSARY = {
+    "인공지능-및-기계학습-개요": [
+        "인공지능",
+        "기계학습",
+        "머신러닝",
+        "machine learning",
+        "지도학습",
+        "비지도학습",
+    ],
+    "의학-진단-예제": [
+        "의학 진단",
+        "의료 진단",
+        "진단 예제",
+        "medical diagnosis",
+    ],
+    "support-vector-machine": [
+        "support vector machine",
+        "svm",
+        "서포트 벡터 머신",
+        "커널 svm",
+    ],
+    "결정-트리": [
+        "결정 트리",
+        "decision tree",
+        "decision trees",
+        "의사결정나무",
+        "엔트로피",
+        "entropy",
+        "정보 이득",
+        "information gain",
+        "지니",
+        "gini impurity",
+        "gini",
+        "가지치기",
+        "pruning",
+        "분기",
+        "split criterion",
+        "root node",
+        "leaf node",
+        "tree induction",
+    ],
+    "신경망-모델": [
+        "신경망",
+        "neural network",
+        "neural networks",
+        "퍼셉트론",
+        "역전파",
+        "backpropagation",
+    ],
+    "deep-learning-and-boltzmann-machine": [
+        "딥러닝",
+        "딥 러닝",
+        "deep learning",
+        "볼츠만",
+        "boltzmann",
+        "제한적 볼츠만 기계",
+        "restricted boltzmann machine",
+        "rbm",
+        "dropout",
+        "드롭아웃",
+        "batch normalization",
+        "배치 정규화",
+        "정규화",
+    ],
+    "랜덤-포레스트-오토인코더": [
+        "랜덤 포레스트",
+        "random forest",
+        "오토인코더",
+        "autoencoder",
+        "앙상블",
+    ],
+    "강좌-종합-정리": [
+        "강좌 종합 정리",
+        "종합 정리",
+        "요약",
+        "summary",
+    ],
+}
+SPEECH_STRICT_ANCHOR_GLOSSARY = {
+    "인공지능-및-기계학습-개요": [
+        "인공지능 및 기계학습 개요",
+        "machine learning overview",
+        "지도학습",
+        "비지도학습",
+    ],
+    "의학-진단-예제": [
+        "의학 진단",
+        "의료 진단",
+        "medical diagnosis",
+    ],
+    "support-vector-machine": [
+        "support vector machine",
+        "support vector",
+        "svm",
+        "서포트 벡터 머신",
+        "서포트 팩터 머신",
+        "서포트 팩트 머신",
+        "soft margin",
+        "hard margin",
+        "kernel trick",
+        "kkt",
+    ],
+    "결정-트리": [
+        "결정 트리",
+        "decision tree",
+        "decision trees",
+        "의사결정나무",
+        "디시전트리",
+        "entropy",
+        "엔트로피",
+        "information gain",
+        "정보 이득",
+        "gini impurity",
+        "gini",
+        "지니",
+        "pruning",
+        "가지치기",
+        "root node",
+        "leaf node",
+    ],
+    "신경망-모델": [
+        "신경망",
+        "neural network",
+        "neural networks",
+        "퍼셉트론",
+        "역전파",
+        "backpropagation",
+    ],
+    "deep-learning-and-boltzmann-machine": [
+        "deep learning",
+        "딥러닝",
+        "딥 러닝",
+        "boltzmann",
+        "restricted boltzmann machine",
+        "rbm",
+        "볼츠만",
+        "제한적 볼츠만 기계",
+    ],
+    "랜덤-포레스트-오토인코더": [
+        "random forest",
+        "랜덤 포레스트",
+        "autoencoder",
+        "오토인코더",
+    ],
+    "강좌-종합-정리": [
+        "강좌 종합 정리",
+        "course summary",
+        "wrap up",
+        "summary",
+        "종합 정리",
+    ],
+}
 
 
 class InsightCardSchema(BaseModel):
@@ -134,6 +290,270 @@ def _analysis_no_text_error(warnings: list[str]) -> str:
     return NO_ANALYZABLE_TEXT_ERROR_MESSAGE
 
 
+def _dedupe_terms(terms: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        normalized = normalize_text(term)
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
+
+
+def _section_alias_terms(section: CurriculumSection) -> list[str]:
+    keys = {
+        str(section.id or "").strip().lower(),
+        slugify(section.title),
+        slugify(section.description),
+        slugify(f"{section.title} {section.description}"),
+    }
+    aliases: list[str] = []
+    for key, terms in SECTION_ALIAS_GLOSSARY.items():
+        if key in keys:
+            aliases.extend(terms)
+
+    combined_text = normalize_text(f"{section.title} {section.description}").lower()
+    if "boltzmann" in combined_text or "딥러닝" in combined_text or "deep learning" in combined_text:
+        aliases.extend(SECTION_ALIAS_GLOSSARY["deep-learning-and-boltzmann-machine"])
+    if "autoencoder" in combined_text or "오토인코더" in combined_text:
+        aliases.extend(SECTION_ALIAS_GLOSSARY["랜덤-포레스트-오토인코더"])
+    if "svm" in combined_text or "support vector machine" in combined_text:
+        aliases.extend(SECTION_ALIAS_GLOSSARY["support-vector-machine"])
+
+    return _dedupe_terms(aliases)
+
+
+def _section_assignment_text(section: CurriculumSection) -> str:
+    return "\n".join(
+        _dedupe_terms(
+            [
+                section.title,
+                section.description,
+                *_section_alias_terms(section),
+            ]
+        )
+    )
+
+
+def _build_section_assignment_texts(sections: list[CurriculumSection]) -> dict[str, str]:
+    return {section.id: _section_assignment_text(section) for section in sections}
+
+
+def _rank_scored_sections(scored: list[tuple[CurriculumSection, float]]) -> list[tuple[CurriculumSection, float]]:
+    return sorted(scored, key=lambda item: item[1], reverse=True)
+
+
+def _split_section_title_anchor_terms(title: str) -> list[str]:
+    normalized_title = normalize_text(title)
+    if not normalized_title:
+        return []
+    terms = [normalized_title]
+    for separator in (" / ", "/", " 및 ", " and ", " | ", "|", ","):
+        if separator in normalized_title:
+            terms.extend(part.strip() for part in normalized_title.split(separator))
+    return _dedupe_terms([term for term in terms if len(normalize_text(term)) >= 4])
+
+
+def _section_speech_anchor_terms(section: CurriculumSection) -> list[str]:
+    keys = {
+        str(section.id or "").strip().lower(),
+        slugify(section.title),
+        slugify(section.description),
+        slugify(f"{section.title} {section.description}"),
+    }
+    anchors = _split_section_title_anchor_terms(section.title)
+    for key, terms in SPEECH_STRICT_ANCHOR_GLOSSARY.items():
+        if key in keys:
+            anchors.extend(terms)
+
+    combined_text = normalize_text(f"{section.title} {section.description}").lower()
+    if "boltzmann" in combined_text or "딥러닝" in combined_text or "deep learning" in combined_text:
+        anchors.extend(SPEECH_STRICT_ANCHOR_GLOSSARY["deep-learning-and-boltzmann-machine"])
+    if "autoencoder" in combined_text or "오토인코더" in combined_text:
+        anchors.extend(SPEECH_STRICT_ANCHOR_GLOSSARY["랜덤-포레스트-오토인코더"])
+    if "svm" in combined_text or "support vector machine" in combined_text:
+        anchors.extend(SPEECH_STRICT_ANCHOR_GLOSSARY["support-vector-machine"])
+    return _dedupe_terms(anchors)
+
+
+def _anchor_token_sequence(text: str) -> list[str]:
+    normalized_text = normalize_text(text)
+    if not normalized_text:
+        return []
+    return tokenize(normalized_text)
+
+
+def _count_anchor_occurrences(text: str, anchor: str) -> int:
+    text_tokens = _anchor_token_sequence(text)
+    anchor_tokens = _anchor_token_sequence(anchor)
+    if not text_tokens or not anchor_tokens:
+        return 0
+    anchor_len = len(anchor_tokens)
+    return sum(
+        1
+        for index in range(len(text_tokens) - anchor_len + 1)
+        if text_tokens[index : index + anchor_len] == anchor_tokens
+    )
+
+
+def _speech_anchor_counts(*, text: str, anchors: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for anchor in anchors:
+        count = _count_anchor_occurrences(text, anchor)
+        if count > 0:
+            counts[anchor] = count
+    return counts
+
+
+def _speech_transcript_anchor_counts_by_section(
+    *,
+    chunk,
+    sections: list[CurriculumSection],
+) -> dict[str, dict[str, int]]:
+    if chunk.source_type not in SPEECH_SOURCE_TYPES:
+        return {}
+    return {
+        section.id: _speech_anchor_counts(
+            text=chunk.text,
+            anchors=_section_speech_anchor_terms(section),
+        )
+        for section in sections
+    }
+
+
+def _speech_transcript_candidate_section_ids(
+    *,
+    transcript_anchor_counts: dict[str, dict[str, int]],
+) -> set[str]:
+    candidate_ids: set[str] = set()
+    for section_id, counts in transcript_anchor_counts.items():
+        if len(counts) >= 2 or max(counts.values(), default=0) >= 2:
+            candidate_ids.add(section_id)
+    return candidate_ids
+
+
+def _score_speech_title_sections(
+    *,
+    sections: list[CurriculumSection],
+    source_label: str,
+) -> list[tuple[CurriculumSection, float]]:
+    title_text = _speech_title_text(source_label)
+    if not title_text:
+        return []
+
+    scored: list[tuple[CurriculumSection, float]] = []
+    for section in sections:
+        exact_matches = _speech_anchor_counts(text=title_text, anchors=_section_speech_anchor_terms(section))
+        if exact_matches:
+            scored.append((section, float(sum(exact_matches.values()))))
+    return scored
+
+
+def _resolve_speech_title_rescue(
+    *,
+    chunk,
+    transcript_scored: list[tuple[CurriculumSection, float]],
+    title_scored: list[tuple[CurriculumSection, float]],
+    transcript_anchor_counts: dict[str, dict[str, int]],
+    min_score: float,
+    min_margin: float,
+) -> tuple[str | None, str | None]:
+    if chunk.source_type not in SPEECH_SOURCE_TYPES or not title_scored:
+        return None, None
+
+    transcript_ranked = _rank_scored_sections(transcript_scored)
+    transcript_best_section, transcript_best_score = transcript_ranked[0]
+    transcript_runner_score = transcript_ranked[1][1] if len(transcript_ranked) > 1 else 0.0
+    transcript_is_ambiguous = (
+        transcript_best_score < min_score
+        or (transcript_best_score - transcript_runner_score) < min_margin
+    )
+
+    title_ranked = _rank_scored_sections(title_scored)
+    title_best_section = title_ranked[0][0]
+    transcript_score_map = {section.id: score for section, score in transcript_scored}
+    title_section_transcript_score = float(transcript_score_map.get(title_best_section.id, 0.0))
+    transcript_delta = transcript_best_score - title_section_transcript_score
+    title_section_anchor_counts = transcript_anchor_counts.get(title_best_section.id, {})
+
+    rescue_section_id = None
+    if title_section_anchor_counts and (
+        transcript_is_ambiguous or title_section_transcript_score >= max(0.0, min_score - 0.05)
+    ):
+        rescue_section_id = title_best_section.id
+    elif transcript_is_ambiguous and transcript_delta <= SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA:
+        rescue_section_id = title_best_section.id
+
+    warning = None
+    if rescue_section_id is None and transcript_delta > SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA:
+        warning = (
+            f"{chunk.source_label}: 영상 제목은 '{title_best_section.title}'에 가깝지만 "
+            "발화 transcript는 다른 주제로 읽혔습니다."
+        )
+    return rescue_section_id, warning
+
+
+def _restrict_scored_sections_to_candidates(
+    *,
+    scored: list[tuple[CurriculumSection, float]],
+    candidate_ids: set[str],
+) -> list[tuple[CurriculumSection, float]]:
+    if not candidate_ids:
+        return [(section, 0.0) for section, _score in scored]
+    return [
+        (section, score if section.id in candidate_ids else 0.0)
+        for section, score in scored
+    ]
+
+
+def _speech_title_text(source_label: str) -> str:
+    normalized = normalize_text(str(source_label or ""))
+    if not normalized or YOUTUBE_GENERIC_LABEL_RE.fullmatch(normalized):
+        return ""
+    chapter_match = YOUTUBE_TITLE_CHAPTER_RE.search(normalized)
+    if chapter_match:
+        chapter_title = normalize_text(chapter_match.group(1))
+        if chapter_title:
+            return chapter_title
+    return normalized
+
+
+def _speech_title_prior_bonus(title_margin: float) -> float:
+    return min(SPEECH_TITLE_PRIOR_BONUS_MAX, 0.03 + max(0.0, title_margin))
+
+
+def _apply_speech_title_prior(
+    *,
+    chunk,
+    transcript_scored: list[tuple[CurriculumSection, float]],
+    title_scored: list[tuple[CurriculumSection, float]],
+    transcript_anchor_counts: dict[str, dict[str, int]],
+    min_score: float,
+    min_margin: float,
+) -> tuple[list[tuple[CurriculumSection, float]], str | None]:
+    adjusted_scored = list(transcript_scored)
+    rescue_section_id, warning = _resolve_speech_title_rescue(
+        chunk=chunk,
+        transcript_scored=transcript_scored,
+        title_scored=title_scored,
+        transcript_anchor_counts=transcript_anchor_counts,
+        min_score=min_score,
+        min_margin=min_margin,
+    )
+    if rescue_section_id is not None:
+        bonus = _speech_title_prior_bonus(0.03)
+        adjusted_scored = [
+            (section, score + bonus if section.id == rescue_section_id else score)
+            for section, score in transcript_scored
+        ]
+    return adjusted_scored, warning
+
+
 def analyze_submissions(
     *,
     course_id: str,
@@ -147,7 +567,13 @@ def analyze_submissions(
 ) -> AnalysisRun:
     started = time.perf_counter()
     normalized_sections = _normalize_target_weights(sections)
-    build_custom_dictionary([section.title for section in normalized_sections])
+    build_custom_dictionary(
+        [
+            term
+            for section in normalized_sections
+            for term in [section.title, *_section_alias_terms(section)]
+        ]
+    )
     active_submissions = [
         submission
         for submission in submissions
@@ -418,7 +844,7 @@ def _analyze_submissions_lexical_streaming(
             if not segments:
                 continue
             instructor_assets[submission.name] += 1
-            removed_duplicates += _stream_segments_into_aggregates(
+            removed_count, assignment_warnings = _stream_segments_into_aggregates(
                 segments=segments,
                 instructor_name=submission.name,
                 settings=settings,
@@ -432,6 +858,9 @@ def _analyze_submissions_lexical_streaming(
                 curriculum_tokens=curriculum_tokens,
                 max_evidence=settings.max_evidence_per_section,
             )
+            removed_duplicates += removed_count
+            warnings.extend(assignment_warnings)
+            instructor_warnings[submission.name].extend(assignment_warnings)
 
         for youtube_url in submission.youtube_urls:
             source, segments, source_warnings = extract_youtube_asset(
@@ -446,7 +875,7 @@ def _analyze_submissions_lexical_streaming(
             if segments:
                 caption_success_count += 1
                 instructor_assets[submission.name] += 1
-                removed_duplicates += _stream_segments_into_aggregates(
+                removed_count, assignment_warnings = _stream_segments_into_aggregates(
                     segments=segments,
                     instructor_name=submission.name,
                     settings=settings,
@@ -460,6 +889,9 @@ def _analyze_submissions_lexical_streaming(
                     curriculum_tokens=curriculum_tokens,
                     max_evidence=settings.max_evidence_per_section,
                 )
+                removed_duplicates += removed_count
+                warnings.extend(assignment_warnings)
+                instructor_warnings[submission.name].extend(assignment_warnings)
             else:
                 caption_failure_count += 1
             _emit_progress(
@@ -1032,8 +1464,11 @@ def _emit_progress(progress_callback, **payload) -> None:
 
 
 def _build_lexical_index(sections: list[CurriculumSection]) -> dict:
+    section_assignment_texts = _build_section_assignment_texts(sections)
     return {
-        "section_counters": {section.id: Counter(tokenize(section.search_text)) for section in sections},
+        "section_counters": {
+            section.id: Counter(tokenize(section_assignment_texts[section.id])) for section in sections
+        },
         "section_titles": {section.id: set(tokenize(section.title)) for section in sections},
     }
 
@@ -1067,8 +1502,10 @@ def _stream_segments_into_aggregates(
     off_curriculum_counters_by_mode: dict[str, dict[str, Counter[str]]],
     curriculum_tokens: set[str],
     max_evidence: int,
-) -> int:
+) -> tuple[int, list[str]]:
     removed_duplicates = 0
+    warnings: list[str] = []
+    warning_keys: set[tuple[str, str]] = set()
     chunks = _build_chunks_for_source_segments(segments, settings)
     for chunk in chunks:
         dedupe_key = (chunk.instructor_name, chunk.fingerprint)
@@ -1077,7 +1514,7 @@ def _stream_segments_into_aggregates(
             continue
         dedupe_seen.add(dedupe_key)
 
-        assignment = _assign_chunk_lexical(chunk, sections, lexical_index)
+        assignment, title_warning = _assign_chunk_lexical(chunk, sections, lexical_index)
         tokens = tokenize(chunk.text)
         for mode in _modes_for_source_type(chunk.source_type):
             keyword_counters_by_mode[mode][instructor_name].update(tokens)
@@ -1095,7 +1532,12 @@ def _stream_segments_into_aggregates(
             bucket.append(assignment)
             bucket.sort(key=lambda item: (item.score, item.chunk.token_count), reverse=True)
             del bucket[max_evidence:]
-    return removed_duplicates
+        if title_warning:
+            warning_key = (chunk.source_label, title_warning)
+            if warning_key not in warning_keys:
+                warning_keys.add(warning_key)
+                warnings.append(title_warning)
+    return removed_duplicates, warnings
 
 
 def _modes_for_source_type(source_type: str) -> list[str]:
@@ -1106,21 +1548,57 @@ def _modes_for_source_type(source_type: str) -> list[str]:
     return ["combined"]
 
 
-def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> ChunkAssignment:
+def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> tuple[ChunkAssignment, str | None]:
     section_counters = lexical_index["section_counters"]
     section_titles = lexical_index["section_titles"]
     chunk_counter = Counter(tokenize(chunk.text))
     chunk_tokens = set(chunk_counter)
-    scored = []
+    scored = _score_sections_lexical(
+        sections=sections,
+        text_counter=chunk_counter,
+        text_tokens=chunk_tokens,
+        section_counters=section_counters,
+        section_titles=section_titles,
+    )
+    transcript_scored = list(scored)
+    title_warning = None
+    if chunk.source_type in SPEECH_SOURCE_TYPES:
+        transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
+            chunk=chunk,
+            sections=sections,
+        )
+        candidate_ids = _speech_transcript_candidate_section_ids(
+            transcript_anchor_counts=transcript_anchor_counts,
+        )
+        title_scored = _score_speech_title_sections(
+            sections=sections,
+            source_label=chunk.source_label,
+        )
+        if title_scored:
+            scored, title_warning = _apply_speech_title_prior(
+                chunk=chunk,
+                transcript_scored=transcript_scored,
+                title_scored=title_scored,
+                transcript_anchor_counts=transcript_anchor_counts,
+                min_score=0.07,
+                min_margin=0.01,
+            )
+            rescue_section_id, _ = _resolve_speech_title_rescue(
+                chunk=chunk,
+                transcript_scored=transcript_scored,
+                title_scored=title_scored,
+                transcript_anchor_counts=transcript_anchor_counts,
+                min_score=0.07,
+                min_margin=0.01,
+            )
+            if rescue_section_id:
+                candidate_ids.add(rescue_section_id)
+        scored = _restrict_scored_sections_to_candidates(
+            scored=scored,
+            candidate_ids=candidate_ids,
+        )
 
-    for section in sections:
-        cosine = cosine_similarity(chunk_counter, section_counters[section.id])
-        title_tokens = section_titles[section.id]
-        title_overlap = len(chunk_tokens & title_tokens) / max(1, len(title_tokens))
-        score = (cosine * 0.75) + (title_overlap * 0.25)
-        scored.append((section, score))
-
-    return _best_assignment(chunk, scored, min_score=0.07, min_margin=0.01)
+    return _best_assignment(chunk, scored, min_score=0.07, min_margin=0.01), title_warning
 
 
 def _build_summaries_from_aggregates(
@@ -1141,12 +1619,14 @@ def _build_summaries_from_aggregates(
             {"total_tokens": 0, "unmapped_tokens": 0, "section_tokens": {}},
         )
         total_tokens = int(aggregate.get("total_tokens", 0))
+        unmapped_tokens = int(aggregate.get("unmapped_tokens", 0))
+        mapped_tokens = max(total_tokens - unmapped_tokens, 0)
         section_tokens = aggregate.get("section_tokens", {})
         coverages: list[SectionCoverage] = []
 
         for section in sections:
             token_count_value = int(section_tokens.get(section.id, 0))
-            share = (token_count_value / total_tokens) if total_tokens else 0.0
+            share = (token_count_value / mapped_tokens) if mapped_tokens else 0.0
             coverages.append(
                 SectionCoverage(
                     section_id=section.id,
@@ -1171,8 +1651,8 @@ def _build_summaries_from_aggregates(
                 total_tokens=total_tokens,
                 asset_count=instructor_assets.get(submission.name, 0),
                 section_coverages=coverages,
-                unmapped_tokens=int(aggregate.get("unmapped_tokens", 0)),
-                unmapped_share=(aggregate.get("unmapped_tokens", 0) / total_tokens) if total_tokens else 0.0,
+                unmapped_tokens=unmapped_tokens,
+                unmapped_share=(unmapped_tokens / total_tokens) if total_tokens else 0.0,
                 warnings=instructor_warnings.get(submission.name, []),
             )
         )
@@ -1295,6 +1775,14 @@ def _build_mode_series_from_aggregates(
             "asset_count": int(asset_counts.get(mode, 0)),
             "total_tokens": sum(
                 int(aggregates.get(submission.name, {}).get("total_tokens", 0))
+                for submission in submissions
+            ),
+            "mapped_tokens": sum(
+                max(
+                    int(aggregates.get(submission.name, {}).get("total_tokens", 0))
+                    - int(aggregates.get(submission.name, {}).get("unmapped_tokens", 0)),
+                    0,
+                )
                 for submission in submissions
             ),
         }
@@ -1431,53 +1919,187 @@ def _build_chunks_for_source_segments(segments, settings: Settings):
 def _assign_chunks(chunks, sections, settings: Settings):
     if settings.openai_api_key and OpenAI is not None:
         try:
-            return _assign_with_openai(chunks, sections, settings), "openai-embeddings", []
+            assignments, assignment_warnings = _assign_with_openai(chunks, sections, settings)
+            return assignments, "openai-embeddings", assignment_warnings
         except Exception as exc:  # noqa: BLE001
             warning = f"OpenAI 임베딩 호출에 실패해 lexical similarity로 fallback 했습니다. ({exc})"
-            assignments = _assign_with_lexical(chunks, sections)
-            return assignments, "lexical-fallback", [warning]
+            assignments, assignment_warnings = _assign_with_lexical(chunks, sections)
+            return assignments, "lexical-fallback", [warning, *assignment_warnings]
 
-    return _assign_with_lexical(chunks, sections), "lexical", []
+    assignments, assignment_warnings = _assign_with_lexical(chunks, sections)
+    return assignments, "lexical", assignment_warnings
 
 
 def _assign_with_lexical(chunks, sections):
-    section_counters = {section.id: Counter(tokenize(section.search_text)) for section in sections}
+    section_assignment_texts = _build_section_assignment_texts(sections)
+    section_counters = {
+        section.id: Counter(tokenize(section_assignment_texts[section.id])) for section in sections
+    }
     section_titles = {section.id: set(tokenize(section.title)) for section in sections}
     assignments = []
+    warnings: list[str] = []
+    warning_keys: set[tuple[str, str]] = set()
+    speech_title_scores = {
+        chunk.source_label: _score_speech_title_sections(
+            sections=sections,
+            source_label=chunk.source_label,
+        )
+        for chunk in chunks
+        if chunk.source_type in SPEECH_SOURCE_TYPES and _speech_title_text(chunk.source_label)
+    }
 
     for chunk in chunks:
         chunk_counter = Counter(tokenize(chunk.text))
         chunk_tokens = set(chunk_counter)
-        scored = []
-
-        for section in sections:
-            cosine = cosine_similarity(chunk_counter, section_counters[section.id])
-            title_tokens = section_titles[section.id]
-            title_overlap = len(chunk_tokens & title_tokens) / max(1, len(title_tokens))
-            score = (cosine * 0.75) + (title_overlap * 0.25)
-            scored.append((section, score))
-
+        scored = _score_sections_lexical(
+            sections=sections,
+            text_counter=chunk_counter,
+            text_tokens=chunk_tokens,
+            section_counters=section_counters,
+            section_titles=section_titles,
+        )
+        transcript_scored = list(scored)
+        title_warning = None
+        if chunk.source_type in SPEECH_SOURCE_TYPES:
+            transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
+                chunk=chunk,
+                sections=sections,
+            )
+            candidate_ids = _speech_transcript_candidate_section_ids(
+                transcript_anchor_counts=transcript_anchor_counts,
+            )
+            title_scored = speech_title_scores.get(chunk.source_label) or []
+            if title_scored:
+                scored, title_warning = _apply_speech_title_prior(
+                    chunk=chunk,
+                    transcript_scored=transcript_scored,
+                    title_scored=title_scored,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    min_score=0.07,
+                    min_margin=0.01,
+                )
+                rescue_section_id, _ = _resolve_speech_title_rescue(
+                    chunk=chunk,
+                    transcript_scored=transcript_scored,
+                    title_scored=title_scored,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    min_score=0.07,
+                    min_margin=0.01,
+                )
+                if rescue_section_id:
+                    candidate_ids.add(rescue_section_id)
+            scored = _restrict_scored_sections_to_candidates(
+                scored=scored,
+                candidate_ids=candidate_ids,
+            )
         assignments.append(_best_assignment(chunk, scored, min_score=0.07, min_margin=0.01))
+        if title_warning:
+            warning_key = (chunk.source_label, title_warning)
+            if warning_key not in warning_keys:
+                warning_keys.add(warning_key)
+                warnings.append(title_warning)
 
-    return assignments
+    return assignments, warnings
 
 
 def _assign_with_openai(chunks, sections, settings: Settings):
     client = OpenAI(api_key=settings.openai_api_key)
-    section_inputs = [section.search_text for section in sections]
+    section_assignment_texts = _build_section_assignment_texts(sections)
+    section_inputs = [section_assignment_texts[section.id] for section in sections]
     chunk_inputs = [chunk.text for chunk in chunks]
     section_vectors = _embed_texts(client, section_inputs, settings.openai_embedding_model)
     chunk_vectors = _embed_texts(client, chunk_inputs, settings.openai_embedding_model)
     assignments = []
+    warnings: list[str] = []
+    warning_keys: set[tuple[str, str]] = set()
+    speech_title_scores = {
+        chunk.source_label: _score_speech_title_sections(
+            sections=sections,
+            source_label=chunk.source_label,
+        )
+        for chunk in chunks
+        if chunk.source_type in SPEECH_SOURCE_TYPES and _speech_title_text(chunk.source_label)
+    }
 
     for chunk, chunk_vector in zip(chunks, chunk_vectors, strict=True):
-        scored = []
-        for section, section_vector in zip(sections, section_vectors, strict=True):
-            score = _vector_cosine(chunk_vector, section_vector)
-            scored.append((section, max(0.0, score)))
+        scored = _score_sections_openai(
+            sections=sections,
+            text_vector=chunk_vector,
+            section_vectors=section_vectors,
+        )
+        transcript_scored = list(scored)
+        title_warning = None
+        if chunk.source_type in SPEECH_SOURCE_TYPES:
+            transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
+                chunk=chunk,
+                sections=sections,
+            )
+            candidate_ids = _speech_transcript_candidate_section_ids(
+                transcript_anchor_counts=transcript_anchor_counts,
+            )
+            title_scored = speech_title_scores.get(chunk.source_label) or []
+            if title_scored:
+                scored, title_warning = _apply_speech_title_prior(
+                    chunk=chunk,
+                    transcript_scored=transcript_scored,
+                    title_scored=title_scored,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    min_score=0.23,
+                    min_margin=0.025,
+                )
+                rescue_section_id, _ = _resolve_speech_title_rescue(
+                    chunk=chunk,
+                    transcript_scored=transcript_scored,
+                    title_scored=title_scored,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    min_score=0.23,
+                    min_margin=0.025,
+                )
+                if rescue_section_id:
+                    candidate_ids.add(rescue_section_id)
+            scored = _restrict_scored_sections_to_candidates(
+                scored=scored,
+                candidate_ids=candidate_ids,
+            )
         assignments.append(_best_assignment(chunk, scored, min_score=0.23, min_margin=0.025))
+        if title_warning:
+            warning_key = (chunk.source_label, title_warning)
+            if warning_key not in warning_keys:
+                warning_keys.add(warning_key)
+                warnings.append(title_warning)
 
-    return assignments
+    return assignments, warnings
+
+
+def _score_sections_lexical(
+    *,
+    sections: list[CurriculumSection],
+    text_counter: Counter[str],
+    text_tokens: set[str],
+    section_counters: dict[str, Counter[str]],
+    section_titles: dict[str, set[str]],
+) -> list[tuple[CurriculumSection, float]]:
+    scored = []
+    for section in sections:
+        cosine = cosine_similarity(text_counter, section_counters[section.id])
+        title_tokens = section_titles[section.id]
+        title_overlap = len(text_tokens & title_tokens) / max(1, len(title_tokens))
+        score = (cosine * 0.75) + (title_overlap * 0.25)
+        scored.append((section, score))
+    return scored
+
+
+def _score_sections_openai(
+    *,
+    sections: list[CurriculumSection],
+    text_vector: list[float],
+    section_vectors: list[list[float]],
+) -> list[tuple[CurriculumSection, float]]:
+    scored = []
+    for section, section_vector in zip(sections, section_vectors, strict=True):
+        score = _vector_cosine(text_vector, section_vector)
+        scored.append((section, max(0.0, score)))
+    return scored
 
 
 def _embed_texts(client, texts: list[str], model: str):  # noqa: ANN001
@@ -1569,10 +2191,12 @@ def _build_instructor_summaries(
             section_tokens[assignment.section_id] += assignment.chunk.token_count
             evidence_map[assignment.section_id].append(assignment)
 
+        mapped_tokens = max(total_tokens - unmapped_tokens, 0)
+
         coverages: list[SectionCoverage] = []
         for section in sections:
             token_count_value = section_tokens[section.id]
-            share = (token_count_value / total_tokens) if total_tokens else 0.0
+            share = (token_count_value / mapped_tokens) if mapped_tokens else 0.0
             ranked_evidence = sorted(
                 evidence_map[section.id],
                 key=lambda item: (item.score, item.chunk.token_count),
@@ -1700,6 +2324,10 @@ def _build_mode_series(
         source_mode_stats[mode] = {
             "asset_count": int(asset_counts.get(mode, 0)),
             "total_tokens": sum(int(summary.total_tokens) for summary in summaries),
+            "mapped_tokens": sum(
+                max(int(summary.total_tokens) - int(summary.unmapped_tokens), 0)
+                for summary in summaries
+            ),
         }
 
     available_source_modes = [

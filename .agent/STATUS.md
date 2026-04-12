@@ -34,7 +34,12 @@ Last Updated: 2026-04-12
   - `dev`의 `sidebar + 4 panel` dashboard 구조를 유지한다.
   - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 데이터셋 source of truth 다.
   - 결과 payload 는 `available_source_modes`, `source_mode_stats`를 함께 내보내고, 데이터가 없는 mode 는 disabled + empty state 로 처리한다.
-  - 첫 도넛 차트는 section mapped share 를 raw 값 그대로 보여주고, 남은 비중은 `미분류` slice 로 별도 표시한다.
+  - 커버리지 도넛/bar/radar 는 `커리큘럼 대단원과 실제로 매칭된 텍스트만`을 분모로 쓰는 mapped-only share 를 표시한다.
+  - word cloud 는 raw 텍스트 기준을 유지하고, 주변 발화/비커리큘럼 표현도 계속 관찰할 수 있다.
+  - source 는 있었지만 mapped coverage 가 0인 mode 는 toggle 을 유지한 채 차트 대신 empty state 를 보여준다.
+  - speech 분류는 transcript 를 1차 근거로 쓰되, section-specific strict anchor 가 확인된 chunk만 coverage 후보로 인정한다.
+  - YouTube chapter title 은 exact anchor match 일 때만 rescue 후보가 되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
+  - 영상 제목과 transcript 주제가 크게 어긋나면 non-blocking warning 을 남겨 explainability 를 보강한다.
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
   - `GET /review`는 강사별 실제 VOC 결과 페이지다.
@@ -61,6 +66,11 @@ Last Updated: 2026-04-12
   - section title 사용자 사전을 미리 등록한다.
   - curriculum-first keyword ranking 을 유지한다.
   - material 파일 chunking 은 PDF/슬라이드 경계를 넘겨 합치지 않고, overlap 없이 page/slide 단위로 처리한다.
+  - 커버리지 share 는 raw total token 이 아니라 mapped token 만을 분모로 계산한다.
+  - speech section assignment 는 expanded alias search text 와 별도 strict speech anchor 를 함께 사용한다.
+  - speech anchor matching 은 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절이 `지니` anchor 로 오탐되지 않게 한다.
+  - YouTube source label 은 cache 된 human title 을 우선 사용한다.
+  - speech title prior 는 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 없거나 off-curriculum topic 이면 nearest-neighbor 로 강제 배정하지 않는다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
   - Page 1 lane payload 는 `JobInstructorInput.mode`로 explicit lane mode 를 함께 저장한다.
@@ -91,8 +101,17 @@ Last Updated: 2026-04-12
 - Page 2 결과 payload 에 `available_source_modes`, `source_mode_stats`를 추가했다.
 - Page 2 dataset toggle 은 실제 업로드/분석된 source 만 활성화하고, 비어 있는 mode 는 disabled/empty state 로 노출하도록 보강했다.
 - material PDF/PPTX/text chunking 을 page/slide boundary preserving 경로로 분리해 큰 material chunk 가 여러 주차를 한 번에 먹지 않도록 수정했다.
+- material page 내부에 `■/▷/Q1` 같은 semantic marker 가 있으면 smaller subchunk 로 재분할하고, `확인 문제/답:/빈칸 채우기/필기 공간` 같은 worksheet noise 는 coverage assignment 입력에서 제외하도록 보강했다.
+- section assignment 는 이제 title/description 원문만이 아니라 bilingual alias search text 를 함께 사용해 `Deep Learning and Boltzmann Machine` 같은 영어 section 도 `딥 러닝`, `제한적 볼츠만 기계`, `RBM` 표현을 잡을 수 있게 했다.
+- speech section assignment 에 YouTube chapter title rescue prior 를 추가해 `[2-3] Introduction to Decision Trees`, `[2-4] Entropy and Information Gain` 같은 chapter title 이 transcript near-tie/unmapped 를 보조하도록 보강했다.
+- YouTube extraction 은 metadata cache 의 human title 을 source label 로 재사용해 evidence 와 warning 에서 실제 영상 제목이 보이게 했다.
+- `결정 트리` section alias 를 `entropy`, `information gain`, `지니`, `가지치기`, `root/leaf node`까지 확장해 decision-tree 발화가 `Deep Learning`/`Other`로 밀리던 회귀를 줄였다.
+- speech coverage 에 strict anchor gate 를 추가해 `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum/인접 주제가 nearest-neighbor 로 `결정 트리`에 빨려 들어가지 않도록 조정했다.
+- speech anchor matching 을 token sequence 기준으로 바꿔 `지니고` 같은 일반 어절이 `지니`로 오탐되던 회귀를 막고, exact title match + 단일 transcript anchor 가 있는 SVM/Decision Tree chapter 는 rescue 되도록 보강했다.
 - Page 2 결과 payload 에 `mode_unmapped_series`를 추가하고, 도넛 차트가 보이는 slice 들만 다시 100으로 정규화하지 않도록 수정했다.
-- Page 2 첫 도넛은 curriculum section raw share + `미분류` slice 를 함께 렌더하도록 정리했다.
+- Page 2 `source_mode_stats`에 `mapped_tokens`를 추가하고, 커버리지 도넛/bar/radar를 mapped-only share 기준으로 재정의했다.
+- Page 2 상단 도넛에서 `미분류` slice 를 제거하고, source는 있으나 mapped coverage가 0인 mode는 empty state 로 처리하도록 정리했다.
+- word cloud 는 raw mode tokens 기준을 유지해 비커리큘럼 표현을 계속 관찰할 수 있게 했다.
 - `/api/evaluate`는 ad-hoc PDF 파싱 대신 공통 VOC 분석 helper 를 재사용하도록 정리했다.
 - `job_voc_asset_download`를 추가해 persisted draft 에서 VOC 파일 download URL 을 복원할 수 있게 했다.
 - Page 1 analyze manifest 와 payload 가 explicit lane `mode`를 저장하도록 확장했다.
@@ -118,14 +137,24 @@ Last Updated: 2026-04-12
 - mixed lane restore 에서 `files`와 `voc_files`가 동시에 separate download URL 로 유지되는지
 - legacy draft payload 가 reset metadata 와 빈 restore block 으로 직렬화되는지
 - `/analyze/prepare` multipart 가 `files`와 `voc_files`를 분리 저장하고 `page1_submission_version`을 payload에 남기는지
+- material semantic subchunk 가 worksheet question block 을 제거하는지
+- `Deep Learning and Boltzmann Machine`와 `랜덤 포레스트 / 오토인코더`가 같은 material 페이지에서 동시에 non-zero 로 배정되는지
+- `결정 트리` assignment text 가 `entropy / information gain / 가지치기` alias 를 포함하는지
+- speech title prior 가 near-tie decision-tree chunk 를 rescue 하고, title-transcript mismatch 에서는 hard override 대신 warning 을 남기는지
+- `Decision Boundary` title 이 `결정 트리` exact title anchor 로 오인되지 않는지
+- `지니고` 같은 한국어 어절이 `지니` anchor 로 오탐되지 않는지
+- exact title match 가 있는 `Soft Margin with SVM` chunk 가 단일 transcript anchor 만 있어도 SVM rescue 후보가 되는지
 - persisted draft JSON 이 `voc_files`와 VOC restore download URL 을 따로 내보내는지
 - `/` 렌더에 Page 1 loading overlay shell 과 기본 문구가 포함되는지
 - `/` 렌더가 versioned `/static/styles.css?v=...`와 `/static/app.js?v=...`를 내보내는지
 - 분석 결과 payload 가 `available_source_modes`, `source_mode_stats`를 내보내는지
 - 분석 결과 payload 가 `mode_unmapped_series`를 함께 내보내는지
+- 분석 결과 payload 의 `source_mode_stats`가 `mapped_tokens`를 함께 내보내는지
 - material 자산이 없는 job payload 에서 `material` mode 가 unavailable 로 표시되는지
 - `/jobs/{id}` 렌더가 disabled source toggle shell 과 empty-state shell 을 포함하는지
 - material multi-page PDF 가 page boundary preserving chunk 로 처리되어 여러 section 에 분산되는지
+- mapped-only share 기준에서 mode별 section 비중 합이 100%가 되는지
+- source는 있으나 mapped coverage가 0인 mode가 available 상태를 유지하면서 coverage empty state 로 전환되는지
 
 ## Known Gaps / Next Priorities
 
@@ -150,6 +179,8 @@ Last Updated: 2026-04-12
 - `DBG-016`
 - `DBG-017`
 - `DBG-020`
+- `DBG-021`
+- `DBG-023`
 - `DBG-024`
 - `DBG-027`
 - `DBG-028`
@@ -158,6 +189,8 @@ Last Updated: 2026-04-12
 - `DBG-031`
 - `DBG-032`
 - `DBG-033`
+- `DBG-035`
+- `DBG-036`
 
 ## Recent Updates
 
@@ -182,6 +215,9 @@ Last Updated: 2026-04-12
 - material PDF/PPTX/text chunking 을 page/slide boundary preserving 경로로 분리해, 여러 주차가 한 chunk 로 합쳐져 첫 section 으로 쏠리던 회귀를 줄였다.
 - Page 2 결과 payload 에 `mode_unmapped_series`를 추가해 `미분류` 비중을 별도로 전달하도록 정리했다.
 - Page 2 첫 도넛/legend/tooltip 은 visible slice 재정규화 대신 raw share 를 그대로 보여주고, 남는 비중은 `미분류` slice 로 표시하도록 바꿨다.
+- Page 2 coverage share 분모를 raw total token 에서 mapped token 으로 바꿔, `그럼/다음/그리고` 같은 주변 발화가 미분류 비중으로 차트를 잠식하지 않도록 수정했다.
+- `source_mode_stats`에 `mapped_tokens`를 추가하고, source는 있지만 mapped coverage가 0인 mode는 toggle 을 유지한 채 coverage empty state 로 분기하도록 보강했다.
+- word cloud 는 raw token 기준을 유지해 비커리큘럼 표현을 별도로 관찰할 수 있게 했다.
 
 ### 2026-04-11
 
