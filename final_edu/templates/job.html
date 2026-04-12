@@ -680,6 +680,7 @@
 
   const topicColors = ["#2E303B", "#CD483F", "#888C67", "#E89B8D", "#92C393", "#EDB6C3", "#B3D3C5", "#F2E7E7"];
   const instColors = ['#94a3b8', '#059669', '#d97706', '#4338ca', '#7c3aed', '#db2777'];
+  let lastWordcloudSignature = "";
 
   function inferLegacyModeActivity(mode) {
     const instructorSeries = rawData.rose_series_by_mode?.[mode] || {};
@@ -742,6 +743,72 @@
       return "강의(발화)";
     }
     return "전체";
+  }
+
+  function stableColorForKey(key) {
+    const text = String(key || "");
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash) + text.charCodeAt(index);
+      hash |= 0;
+    }
+    return topicColors[Math.abs(hash) % topicColors.length];
+  }
+
+  function keywordMapForMode(mode) {
+    const source =
+      rawData.average_keywords_by_mode?.[mode]
+        ? (rawData.keywords_by_mode?.[mode] || {})
+        : (
+          rawData.keywords_by_mode?.[mode]
+          || (mode === "combined" ? rawData.keywords_by_instructor : rawData.keywords_by_mode?.combined)
+          || rawData.keywords_by_instructor
+          || {}
+        );
+    return instructors.reduce((acc, name) => {
+      acc[name] = Array.isArray(source?.[name]) ? source[name] : [];
+      return acc;
+    }, {});
+  }
+
+  function averageKeywordsForMode(mode) {
+    const direct = rawData.average_keywords_by_mode?.[mode];
+    if (Array.isArray(direct)) {
+      return direct;
+    }
+
+    const keywordMap = keywordMapForMode(mode);
+    const keywordLists = instructors.map((name) => keywordMap[name] || []);
+    if (!keywordLists.length) {
+      return [];
+    }
+    if (keywordLists.length === 1) {
+      return keywordLists[0];
+    }
+
+    const totals = new Map();
+    keywordLists.forEach((items) => {
+      items.forEach((item) => {
+        const text = String(item?.text || "").trim();
+        if (!text) {
+          return;
+        }
+        totals.set(text, (totals.get(text) || 0) + Number(item?.value || 0));
+      });
+    });
+
+    return Array.from(totals.entries())
+      .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0], 'ko'))
+      .slice(0, 25)
+      .map(([text, value]) => ({ text, value }));
+  }
+
+  function activeWordcloudKeywords() {
+    const instName = navInstructors[currentIndex];
+    if (currentIndex === 0) {
+      return averageKeywordsForMode(currentMode);
+    }
+    return keywordMapForMode(currentMode)[instName] || [];
   }
 
   function sourceModeStat(mode) {
@@ -945,10 +1012,14 @@
   }
 
   function renderWordcloud() {
-    const instName = navInstructors[currentIndex];
-    const keywords = (currentIndex === 0)
-      ? Object.values(rawData.keywords_by_mode[currentMode] || {}).flat().slice(0, 30)
-      : (rawData.keywords_by_mode[currentMode]?.[instName] || []);
+    const keywords = activeWordcloudKeywords();
+    const signature = JSON.stringify(
+      keywords.map((item) => [item.text, Number(item.value || 0)])
+    );
+    if (signature === lastWordcloudSignature) {
+      return;
+    }
+    lastWordcloudSignature = signature;
 
     const wordTotal = keywords.reduce((s, i) => s + i.value, 0);
 
@@ -977,13 +1048,19 @@
         sizeRange: [18, 54], rotationRange: [0, 0], gridSize: 10,
         textStyle: {
           fontFamily: 'Pretendard Variable', fontWeight: 800,
-          color: () => topicColors[Math.floor(Math.random() * topicColors.length)]
+          color: (params) => stableColorForKey(params?.name || params?.data?.name || params?.value || "word")
         },
         emphasis: {
           focus: 'self',
           textStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.2)', fontSize: 64 }
         },
-        data: keywords.map(w => ({ name: w.text, value: w.value }))
+        data: keywords.map((w, index) => ({
+          name: w.text,
+          value: w.value,
+          textStyle: {
+            color: stableColorForKey(w.text || String(index)),
+          },
+        }))
       }]
     });
   }
@@ -1118,7 +1195,9 @@
   function updateAll() {
     applySourceModeAvailability();
     document.getElementById('currentInstructorName').innerText = navInstructors[currentIndex];
-    document.getElementById('wordcloudTitle').innerText = `${navInstructors[currentIndex]} 주요 수업 키워드`;
+    document.getElementById('wordcloudTitle').innerText = currentIndex === 0
+      ? '전체 주요 수업 키워드'
+      : `${navInstructors[currentIndex]} 주요 수업 키워드`;
     document.getElementById('instructorIcon').style.filter = currentIndex === 0 ? "grayscale(100%)" : "none";
     if (!modeIsAvailable(currentMode)) {
       toggleCoverageEmptyState(true, coverageModeMessage());

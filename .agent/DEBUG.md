@@ -213,6 +213,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/static/app.js`, `final_edu/static/styles.css`, `final_edu/templates/index.html`
   Trigger Commands: 과정 목록 popup 삭제 버튼 클릭, lane icon 클릭
   Must Read When: delegated click handler, SVG icon button, Page 1 icon hit-area 변경
+- `DBG-040` `active` Lane: `Web / Demo Agent`
+  Tags: `page2`, `wordcloud`, `average`, `off-curriculum`, `payload`
+  Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `/jobs/{job_id}` Page 2 `전체 평균`/단일 강사 word cloud 비교
+  Must Read When: Page 2 word cloud aggregate, keyword payload public/private 분리, overall average title/renderer 계약 변경
 
 ## Active Incidents
 
@@ -1067,3 +1072,30 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - VOC spreadsheet 지원을 넓힐 때는 `모든 시트 합치기`를 기본값으로 두지 말 것
   - workbook 구조가 애매하면 억지로 LLM에 넘기지 말고 업로드 단계에서 명시적으로 거부할 것
   - VOC spreadsheet extractor 회귀에는 `clear response sheet 1개`, `ambiguous response sheet 2개`, `.xls` 경로를 각각 포함할 것
+
+### DBG-040 `active` 단일 강사 결과에서도 Page 2 `전체 평균` word cloud 가 다른 내용처럼 보임
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page2`, `wordcloud`, `average`, `off-curriculum`, `payload`
+- Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{job_id}` Page 2 `전체 평균`/단일 강사 word cloud 비교
+- Must Read When: Page 2 word cloud aggregate, keyword payload public/private 분리, overall average title/renderer 계약 변경
+- Symptom:
+  - 강사를 1명만 업로드했는데도 `전체 평균 주요 수업 키워드`와 해당 강사 word cloud 화면이 서로 다른 term set처럼 보였음
+  - `전체 평균` 화면에는 `다음/생각/케이스` 같은 off-curriculum 키워드가 섞이고, 개별 강사 화면과 단어 개수도 달라졌음
+- Root Cause:
+  - backend `keywords_by_mode` 공개 payload 안에 실제 강사 키워드와 함께 `강사명__off_curriculum` pseudo-key가 같이 들어 있었음
+  - `job.html`의 `전체 평균` word cloud 는 평균을 계산하지 않고 `Object.values(keywords_by_mode[currentMode]).flat().slice(0, 30)`를 사용해, 단일 강사일 때도 `강사 keywords + off_curriculum keywords`를 함께 먹었음
+  - inline word cloud renderer 가 `Math.random()` 색상을 사용해 같은 데이터도 view 전환마다 더 다르게 보였음
+- Resolution:
+  - 공개 `keywords_by_mode`와 `keywords_by_instructor`에서는 `__off_curriculum` pseudo-key를 제거하고, off-curriculum 키워드는 insight 전용 내부 경로로 분리
+  - 결과 payload에 `average_keywords_by_mode`를 추가해 `전체 평균` word cloud 가 실제 강사 keyword list만 집계한 결과를 직접 쓰게 변경
+  - legacy result fallback 에서는 실제 강사 이름 목록만 필터링하고 `__off_curriculum` suffix key를 무시하도록 정리
+  - inline/static word cloud renderer 모두 token 기반 stable color 를 사용하도록 바꿔 동일 dataset 의 시각 흔들림을 줄임
+  - `tests.test_page2_dashboard`에 `average_keywords_by_mode`, pseudo-key 제거, 단일 강사 평균=강사 회귀를 추가
+- Prevention Rule:
+  - 공개 UI payload 와 내부/debug payload 를 같은 dict 에 섞지 말 것
+  - `전체 평균` word cloud 는 `flatten + slice`로 만들지 말고 별도 aggregate field 또는 실제 강사 목록만 대상으로 한 집계 함수를 사용할 것
+  - 단일 강사 결과에서는 `전체 평균 == 해당 강사 keyword set`이 되는 회귀 테스트를 반드시 유지할 것
+  - word cloud 색상은 `Math.random()` 같은 비결정 경로를 쓰지 말고 token 기반 stable color 를 사용할 것

@@ -158,6 +158,7 @@ class AnalysisRun:
     mode_unmapped_series: dict = field(default_factory=dict)
     mode_series: dict = field(default_factory=dict)
     average_series_by_mode: dict = field(default_factory=dict)
+    average_keywords_by_mode: dict = field(default_factory=dict)
     keywords_by_instructor: dict = field(default_factory=dict)
     keywords_by_mode: dict = field(default_factory=dict)
     rose_series_by_instructor: dict = field(default_factory=dict)

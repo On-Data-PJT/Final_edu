@@ -722,7 +722,11 @@ def analyze_submissions(
         mode_series=mode_series,
         sections=normalized_sections,
     )
-    keywords_by_mode = _build_keywords_by_mode(
+    (
+        keywords_by_mode,
+        off_curriculum_keywords_by_mode,
+        average_keywords_by_mode,
+    ) = _build_keyword_payloads_by_mode(
         chunks=deduped_chunks,
         sections=normalized_sections,
     )
@@ -744,6 +748,7 @@ def analyze_submissions(
         summaries=summaries,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
+        off_curriculum_keywords_by_instructor=off_curriculum_keywords_by_mode.get("combined", {}),
         settings=settings,
     )
     warnings.extend(insight_warnings)
@@ -777,6 +782,7 @@ def analyze_submissions(
         mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
+        average_keywords_by_mode=average_keywords_by_mode,
         keywords_by_instructor=keywords_by_instructor,
         keywords_by_mode=keywords_by_mode,
         rose_series_by_instructor=rose_series_by_instructor,
@@ -959,7 +965,11 @@ def _analyze_submissions_lexical_streaming(
         mode_series=mode_series,
         sections=sections,
     )
-    keywords_by_mode = _build_keywords_by_mode_from_counters(
+    (
+        keywords_by_mode,
+        off_curriculum_keywords_by_mode,
+        average_keywords_by_mode,
+    ) = _build_keywords_by_mode_from_counters(
         grouped_by_mode=keyword_counters_by_mode,
         grouped_off_curriculum_by_mode=off_curriculum_counters_by_mode,
     )
@@ -981,6 +991,7 @@ def _analyze_submissions_lexical_streaming(
         summaries=summaries,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
+        off_curriculum_keywords_by_instructor=off_curriculum_keywords_by_mode.get("combined", {}),
         settings=replace(settings, openai_api_key=None),
     )
     warnings.extend(insight_warnings)
@@ -1013,6 +1024,7 @@ def _analyze_submissions_lexical_streaming(
         mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
+        average_keywords_by_mode=average_keywords_by_mode,
         keywords_by_instructor=keywords_by_instructor,
         keywords_by_mode=keywords_by_mode,
         rose_series_by_instructor=rose_series_by_instructor,
@@ -1139,6 +1151,7 @@ def _build_voc_only_run(
         sections=sections,
     )
     keywords_by_mode = _empty_keywords_by_mode(submissions)
+    average_keywords_by_mode = _empty_average_keywords_by_mode()
     duration_ms = int((time.perf_counter() - started) * 1000)
     return AnalysisRun(
         sections=sections,
@@ -1166,6 +1179,7 @@ def _build_voc_only_run(
         mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
+        average_keywords_by_mode=average_keywords_by_mode,
         keywords_by_instructor=keywords_by_mode.get("combined", {}),
         keywords_by_mode=keywords_by_mode,
         rose_series_by_instructor=rose_series_by_mode.get("combined", {}),
@@ -1201,8 +1215,11 @@ def _empty_keywords_by_mode(submissions: list[InstructorSubmission]) -> dict[str
         payload[mode] = {}
         for submission in submissions:
             payload[mode][submission.name] = []
-            payload[mode][f"{submission.name}__off_curriculum"] = []
     return payload
+
+
+def _empty_average_keywords_by_mode() -> dict[str, list[dict]]:
+    return {mode: [] for mode in RESULT_MODES}
 
 
 def _estimate_voc_response_count(source_type: str, segments: list) -> int:
@@ -1800,11 +1817,15 @@ def _build_mode_series_from_aggregates(
     )
 
 
-def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_curriculum: dict[str, Counter[str]]) -> dict[str, list[dict]]:
+def _build_keywords_from_counters(
+    grouped: dict[str, Counter[str]],
+    grouped_off_curriculum: dict[str, Counter[str]],
+) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
     keywords: dict[str, list[dict]] = {}
+    off_curriculum_keywords: dict[str, list[dict]] = {}
     for instructor_name, counts in grouped.items():
         off_counts = grouped_off_curriculum.get(instructor_name, Counter())
-        
+
         # 커리큘럼 기반 단어에 가중치 크게 부여
         boosted = Counter()
         for token, count in counts.items():
@@ -1812,34 +1833,78 @@ def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_
                 boosted[token] = count * 50
             else:
                 boosted[token] = count
-                
-        best_tokens = [token for token, _ in boosted.most_common(25)]
-        
+
+        best_tokens = [
+            token
+            for token, _ in sorted(
+                boosted.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:25]
+        ]
+
         keywords[instructor_name] = [
             {"text": token, "value": int(counts[token])}
             for token in best_tokens
         ]
-        
-        top_off_curriculum = off_counts.most_common(15)
-        keywords[f"{instructor_name}__off_curriculum"] = [
+
+        top_off_curriculum = sorted(
+            off_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:15]
+        off_curriculum_keywords[instructor_name] = [
             {"text": token, "value": int(value)}
             for token, value in top_off_curriculum
         ]
-    return keywords
+    return keywords, off_curriculum_keywords
+
+
+def _build_average_keywords(keyword_lists_by_instructor: dict[str, list[dict]]) -> list[dict]:
+    instructor_names = [name for name in keyword_lists_by_instructor if name]
+    if not instructor_names:
+        return []
+    if len(instructor_names) == 1:
+        return [
+            {
+                "text": str(item.get("text", "")),
+                "value": int(item.get("value", 0)),
+            }
+            for item in keyword_lists_by_instructor.get(instructor_names[0], [])[:25]
+        ]
+
+    totals: Counter[str] = Counter()
+    for keyword_items in keyword_lists_by_instructor.values():
+        for item in keyword_items:
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            totals[text] += int(item.get("value", 0))
+
+    return [
+        {"text": text, "value": int(value)}
+        for text, value in sorted(
+            totals.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:25]
+    ]
 
 
 def _build_keywords_by_mode_from_counters(
     *,
     grouped_by_mode: dict[str, dict[str, Counter[str]]],
     grouped_off_curriculum_by_mode: dict[str, dict[str, Counter[str]]],
-) -> dict[str, dict[str, list[dict]]]:
-    return {
-        mode: _build_keywords_from_counters(
+) -> tuple[dict[str, dict[str, list[dict]]], dict[str, dict[str, list[dict]]], dict[str, list[dict]]]:
+    keywords_by_mode: dict[str, dict[str, list[dict]]] = {}
+    off_curriculum_keywords_by_mode: dict[str, dict[str, list[dict]]] = {}
+    average_keywords_by_mode: dict[str, list[dict]] = {}
+    for mode in RESULT_MODES:
+        keywords, off_curriculum = _build_keywords_from_counters(
             grouped_by_mode.get(mode, {}),
             grouped_off_curriculum_by_mode.get(mode, {}),
         )
-        for mode in RESULT_MODES
-    }
+        keywords_by_mode[mode] = keywords
+        off_curriculum_keywords_by_mode[mode] = off_curriculum
+        average_keywords_by_mode[mode] = _build_average_keywords(keywords)
+    return keywords_by_mode, off_curriculum_keywords_by_mode, average_keywords_by_mode
 
 
 def _normalize_target_weights(sections: list[CurriculumSection]) -> list[CurriculumSection]:
@@ -2360,10 +2425,17 @@ def _mode_has_available_source(stats: dict | None) -> bool:
 
 
 def _build_keywords_by_instructor(chunks, sections: list[CurriculumSection]) -> dict[str, list[dict]]:
-    return _build_keywords_by_mode(chunks, sections).get("combined", {})
+    return _build_keyword_payloads_by_mode(chunks, sections)[0].get("combined", {})
 
 
 def _build_keywords_by_mode(chunks, sections: list[CurriculumSection]) -> dict[str, dict[str, list[dict]]]:
+    return _build_keyword_payloads_by_mode(chunks, sections)[0]
+
+
+def _build_keyword_payloads_by_mode(
+    chunks,
+    sections: list[CurriculumSection],
+) -> tuple[dict[str, dict[str, list[dict]]], dict[str, dict[str, list[dict]]], dict[str, list[dict]]]:
     curriculum_tokens = set()
     for section in sections:
         curriculum_tokens.update(tokenize(section.search_text))
@@ -2432,6 +2504,7 @@ def _build_insights(
     summaries: list[InstructorSummary],
     average_series_by_mode: dict[str, list[dict]],
     keywords_by_instructor: dict[str, list[dict]],
+    off_curriculum_keywords_by_instructor: dict[str, list[dict]],
     settings: Settings,
 ) -> tuple[list[dict], str, list[str]]:
     metrics = _compute_insight_metrics(
@@ -2440,6 +2513,7 @@ def _build_insights(
         summaries=summaries,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
+        off_curriculum_keywords_by_instructor=off_curriculum_keywords_by_instructor,
     )
     fallback_cards = _deterministic_insight_cards(metrics)
 
@@ -2488,6 +2562,7 @@ def _compute_insight_metrics(
     summaries: list[InstructorSummary],
     average_series_by_mode: dict[str, list[dict]],
     keywords_by_instructor: dict[str, list[dict]],
+    off_curriculum_keywords_by_instructor: dict[str, list[dict]],
 ) -> dict:
     target_map = {section.id: section.target_weight / 100 for section in sections}
     combined_average = {item["section_id"]: item["share"] for item in average_series_by_mode.get("combined", [])}
@@ -2534,7 +2609,7 @@ def _compute_insight_metrics(
     individual_off_curriculum = []
     common_off_curriculum_counter: Counter[str] = Counter()
     for summary in summaries:
-        off_curriculum = keywords_by_instructor.get(f"{summary.name}__off_curriculum", [])
+        off_curriculum = off_curriculum_keywords_by_instructor.get(summary.name, [])
         if off_curriculum:
             individual_off_curriculum.append(
                 {

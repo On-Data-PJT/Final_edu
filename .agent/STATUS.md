@@ -39,6 +39,8 @@ Last Updated: 2026-04-12
   - 결과 payload 는 `available_source_modes`, `source_mode_stats`를 함께 내보내고, 데이터가 없는 mode 는 disabled + empty state 로 처리한다.
   - 커버리지 도넛/bar/radar 는 `커리큘럼 대단원과 실제로 매칭된 텍스트만`을 분모로 쓰는 mapped-only share 를 표시한다.
   - word cloud 는 raw 텍스트 기준을 유지하고, 주변 발화/비커리큘럼 표현도 계속 관찰할 수 있다.
+  - `전체 평균` word cloud 는 `average_keywords_by_mode`를 사용해 실제 강사 keyword list만 집계하고, 공개 `keywords_by_mode`에는 더 이상 `__off_curriculum` pseudo-key를 넣지 않는다.
+  - 강사가 1명뿐인 결과에서는 `전체 평균` word cloud 와 해당 강사 word cloud 가 같은 term/value set 을 사용한다.
   - source 는 있었지만 mapped coverage 가 0인 mode 는 toggle 을 유지한 채 차트 대신 empty state 를 보여준다.
   - speech 분류는 transcript 를 1차 근거로 쓰되, section-specific strict anchor 가 확인된 chunk만 coverage 후보로 인정한다.
   - YouTube chapter title 은 exact anchor match 일 때만 rescue 후보가 되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
@@ -121,6 +123,8 @@ Last Updated: 2026-04-12
 - Page 2 `source_mode_stats`에 `mapped_tokens`를 추가하고, 커버리지 도넛/bar/radar를 mapped-only share 기준으로 재정의했다.
 - Page 2 상단 도넛에서 `미분류` slice 를 제거하고, source는 있으나 mapped coverage가 0인 mode는 empty state 로 처리하도록 정리했다.
 - word cloud 는 raw mode tokens 기준을 유지해 비커리큘럼 표현을 계속 관찰할 수 있게 했다.
+- Page 2 결과 payload 에 `average_keywords_by_mode`를 추가하고, `전체 평균` word cloud 가 더 이상 `keywords_by_mode` 전체를 flatten 하거나 `__off_curriculum` internal key 를 섞지 않도록 정리했다.
+- 단일 강사 결과에서는 `전체 평균` word cloud 와 개별 강사 word cloud 가 같은 keyword set 을 쓰도록 맞추고, word cloud 색상도 token 기반 stable color 로 고정했다.
 - `/api/evaluate`는 ad-hoc PDF 파싱 대신 공통 VOC 분석 helper 를 재사용하도록 정리했다.
 - `job_voc_asset_download`를 추가해 persisted draft 에서 VOC 파일 download URL 을 복원할 수 있게 했다.
 - Page 1 analyze manifest 와 payload 가 explicit lane `mode`를 저장하도록 확장했다.
@@ -218,6 +222,7 @@ Last Updated: 2026-04-12
 - `DBG-037`
 - `DBG-038`
 - `DBG-039`
+- `DBG-040`
 
 ## Recent Updates
 

@@ -2406,6 +2406,48 @@
     return String(file?.name || file?.originalName || file?.original_name || "업로드 파일");
   }
 
+  function keywordMapForMode(result, mode, instructors) {
+    const source = result.keywords_by_mode?.[mode]
+      || result.keywords_by_mode?.combined
+      || result.keywords_by_instructor
+      || {};
+    return instructors.reduce((acc, instructor) => {
+      acc[instructor.name] = Array.isArray(source[instructor.name]) ? source[instructor.name] : [];
+      return acc;
+    }, {});
+  }
+
+  function averageKeywordsForMode(result, mode, instructors) {
+    const direct = result.average_keywords_by_mode?.[mode];
+    if (Array.isArray(direct)) {
+      return direct;
+    }
+    const keywordMap = keywordMapForMode(result, mode, instructors);
+    const keywordLists = instructors.map((instructor) => keywordMap[instructor.name] || []);
+    if (!keywordLists.length) {
+      return [];
+    }
+    if (keywordLists.length === 1) {
+      return keywordLists[0];
+    }
+
+    const totals = new Map();
+    keywordLists.forEach((items) => {
+      items.forEach((item) => {
+        const text = String(item?.text || "").trim();
+        if (!text) {
+          return;
+        }
+        totals.set(text, (totals.get(text) || 0) + Number(item?.value || 0));
+      });
+    });
+
+    return Array.from(totals.entries())
+      .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0], "ko"))
+      .slice(0, 25)
+      .map(([text, value]) => ({ text, value }));
+  }
+
   function renderPage2Charts(containers, options = {}) {
     if (!state.page2.result) {
       return;
@@ -2433,11 +2475,11 @@
       }))
       || [];
     const roseData = roseByMode[state.page2.instructorName] || legacyRoseData;
-    const keywordsByMode = result.keywords_by_mode?.[state.page2.mode]
-      || result.keywords_by_mode?.combined
-      || result.keywords_by_instructor
-      || {};
-    const wordCloudData = (keywordsByMode[state.page2.instructorName] || []).map((item, index) => ({
+    const keywordsByMode = keywordMapForMode(result, state.page2.mode, instructors);
+    const rawWordCloudKeywords = state.page2.instructorName === "전체 평균"
+      ? averageKeywordsForMode(result, state.page2.mode, instructors)
+      : (keywordsByMode[state.page2.instructorName] || []);
+    const wordCloudData = rawWordCloudKeywords.map((item, index) => ({
       name: item.text,
       value: item.value,
       textStyle: {

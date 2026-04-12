@@ -240,7 +240,8 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - `GET /review`: 강사별 실제 VOC 결과 페이지
   - `GET /solution`: 기존 인사이트 2섹션 + 별도 `VOC 기반 인사이트` 패널 페이지
 - 결과 payload contract:
-  - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `line_series_by_mode`, `available_source_modes`, `source_mode_stats`를 사용
+  - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `average_keywords_by_mode`, `line_series_by_mode`, `available_source_modes`, `source_mode_stats`를 사용
+  - `keywords_by_mode`와 `keywords_by_instructor`는 공개 UI용 실제 강사 keyword list만 담고, off-curriculum/debug keyword는 별도 내부 경로로 분리한다
   - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
   - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있다
   - top-level 결과에는 `voc_summary`가 포함될 수 있다

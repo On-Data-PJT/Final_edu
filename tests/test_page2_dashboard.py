@@ -208,25 +208,24 @@ def _fake_extract_material_mixed_topic_asset(upload: UploadedAsset, instructor_n
     )
 
 
-def _build_result_payload(*, include_material: bool = True, include_speech: bool = True) -> dict:
+def _build_result_payload(
+    *,
+    include_material: bool = True,
+    include_speech: bool = True,
+    instructor_names: tuple[str, ...] = ("강사 A", "강사 B"),
+) -> dict:
     with tempfile.TemporaryDirectory() as temp_dir:
-        material_path_a = Path(temp_dir) / "instructor-a.txt"
-        material_path_b = Path(temp_dir) / "instructor-b.txt"
-        material_path_a.write_text("placeholder", encoding="utf-8")
-        material_path_b.write_text("placeholder", encoding="utf-8")
-
-        submissions = [
-            InstructorSubmission(
-                name="강사 A",
-                files=[UploadedAsset(path=material_path_a, original_name="a.txt")] if include_material else [],
-                youtube_urls=["https://example.com/a"] if include_speech else [],
-            ),
-            InstructorSubmission(
-                name="강사 B",
-                files=[UploadedAsset(path=material_path_b, original_name="b.txt")] if include_material else [],
-                youtube_urls=["https://example.com/b"] if include_speech else [],
-            ),
-        ]
+        submissions = []
+        for index, instructor_name in enumerate(instructor_names):
+            material_path = Path(temp_dir) / f"instructor-{index + 1}.txt"
+            material_path.write_text("placeholder", encoding="utf-8")
+            submissions.append(
+                InstructorSubmission(
+                    name=instructor_name,
+                    files=[UploadedAsset(path=material_path, original_name=f"{instructor_name}.txt")] if include_material else [],
+                    youtube_urls=[f"https://example.com/{index + 1}"] if include_speech else [],
+                )
+            )
 
         settings = replace(
             get_settings(),
@@ -261,6 +260,7 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertIn("mode_unmapped_series", result)
         self.assertIn("rose_series_by_mode", result)
         self.assertIn("keywords_by_mode", result)
+        self.assertIn("average_keywords_by_mode", result)
         self.assertEqual(sorted(result["rose_series_by_mode"].keys()), ["combined", "material", "speech"])
         self.assertEqual(sorted(result["keywords_by_mode"].keys()), ["combined", "material", "speech"])
         self.assertEqual(sorted(result["available_source_modes"]), ["combined", "material", "speech"])
@@ -302,8 +302,27 @@ class Page2DashboardTests(unittest.TestCase):
             result["keywords_by_instructor"],
             result["keywords_by_mode"]["combined"],
         )
+        self.assertEqual(
+            sorted(result["keywords_by_mode"]["combined"].keys()),
+            ["강사 A", "강사 B"],
+        )
+        self.assertTrue(all("__off_curriculum" not in key for key in result["keywords_by_mode"]["combined"]))
+        self.assertTrue(all("__off_curriculum" not in key for key in result["keywords_by_instructor"]))
+        self.assertEqual(
+            [item["text"] for item in result["average_keywords_by_mode"]["combined"][:4]],
+            ["sql", "데이터", "딥러닝", "분석"],
+        )
         self.assertIn("material", result["mode_unmapped_series"])
         self.assertIn("강사 A", result["mode_unmapped_series"]["material"]["instructors"])
+
+    def test_average_keywords_match_single_instructor_keywords(self) -> None:
+        result = _build_result_payload(instructor_names=("강사 A",))
+
+        for mode in ("combined", "material", "speech"):
+            self.assertEqual(
+                result["average_keywords_by_mode"][mode],
+                result["keywords_by_mode"][mode]["강사 A"],
+            )
 
     def test_analysis_marks_material_mode_unavailable_when_no_material_assets_exist(self) -> None:
         result = _build_result_payload(include_material=False, include_speech=True)
@@ -752,7 +771,9 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertIn('id="donutEmptyState"', response.text)
         self.assertIn("mode_unmapped_series", response.text)
         self.assertIn("mapped_tokens", response.text)
+        self.assertIn("average_keywords_by_mode", response.text)
         self.assertIn("강사별 커리큘럼 구성 비중", response.text)
+        self.assertIn("전체 주요 수업 키워드", response.text)
         self.assertIn("Final Edu Dashboard", response.text)
         self.assertIn("VOC Analysis", response.text)
         self.assertIn("강사 A", response.text)

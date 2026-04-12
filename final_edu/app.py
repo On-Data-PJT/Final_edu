@@ -715,6 +715,11 @@ def _demo_context(*, request: Request, settings) -> dict:
             "material": {inst["name"]: inst["keywords"][:3] for inst in inst_data},
             "speech": {inst["name"]: inst["keywords"][2:] for inst in inst_data}
         },
+        "average_keywords_by_mode": {
+            "combined": inst_data[0]["keywords"][:5],
+            "material": inst_data[0]["keywords"][:3],
+            "speech": inst_data[0]["keywords"][2:6],
+        },
         # Necessary for average and comparison visuals even if simplified
         "mode_series": {
             "combined": {

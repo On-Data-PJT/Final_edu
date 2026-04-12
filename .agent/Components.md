@@ -23,6 +23,7 @@ Last Updated: 2026-04-12
   - `mode_series`
   - `rose_series_by_mode`
   - `keywords_by_mode`
+  - `average_keywords_by_mode`
   - `line_series_by_mode`
   - `available_source_modes`
   - `source_mode_stats`
@@ -218,6 +219,8 @@ Last Updated: 2026-04-12
 - 제목에 현재 선택 강사명이 바로 드러나야 한다.
 - Panel 1과 동기화된다.
 - keyword cloud 데이터도 `view mode`에 따라 실제 material/speech/combined 결과를 써야 한다.
+- `전체 평균` view 는 강사별 keyword list 를 실제로 집계한 `average_keywords_by_mode`를 사용해야 한다.
+- 강사가 1명뿐이면 `전체 평균` word cloud 와 해당 강사 word cloud 는 같은 term/value set 을 보여야 한다.
 
 ### Panel 3. Average + Instructor Bars
 
