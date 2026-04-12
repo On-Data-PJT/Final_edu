@@ -130,6 +130,14 @@ class LocalCourseRepository:
             return None
         return CourseRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
+    def delete(self, course_id: str) -> CourseRecord | None:
+        path = self.root / f"{course_id}.json"
+        if not path.exists():
+            return None
+        record = CourseRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        path.unlink(missing_ok=True)
+        return record
+
     def list_all(self) -> list[CourseRecord]:
         records = [
             CourseRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))

@@ -259,22 +259,54 @@
 
     <div class="course-list" data-role="course-list-items">
       {% for course in courses %}
-      <button type="button" class="course-list-item {% if course.id == selected_course_id %}is-active{% endif %}"
-        data-course-list-item data-course-select="{{ course.id }}" data-course-item="true"
-        data-course-id="{{ course.id }}" data-course-name="{{ course.name }}">
-        <div class="course-list-item-head">
-          <strong>{{ course.name }}</strong>
-          <span class="course-state-chip is-sage">선택 가능</span>
-        </div>
-        <span>등록 강사 {{ course.instructor_names | length }}명</span>
-        <small>대주제 {{ course.section_count }}개</small>
-      </button>
+      <article class="course-list-item {% if course.id == selected_course_id %}is-active is-selected{% endif %}"
+        data-course-list-item data-course-item="true" data-course-id="{{ course.id }}" data-course-name="{{ course.name }}">
+        <button type="button" class="course-list-select" data-course-select="{{ course.id }}" aria-label="{{ course.name }} 선택">
+          <div class="course-list-item-head">
+            <strong>{{ course.name }}</strong>
+          </div>
+          <span>등록 강사 {{ course.instructor_names | length }}명</span>
+          <small>대주제 {{ course.section_count }}개</small>
+        </button>
+        <button type="button" class="course-list-delete-button" data-course-delete="{{ course.id }}"
+          data-course-name="{{ course.name }}" aria-label="{{ course.name }} 삭제" title="{{ course.name }} 삭제">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="m7 7 10 10M17 7 7 17" />
+          </svg>
+        </button>
+      </article>
       {% else %}
       <div class="empty-state">
         <strong>아직 과정이 없습니다.</strong>
         <p>새 과정을 추가해 주세요.</p>
       </div>
       {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section id="course-delete-modal" class="floating-panel modal-shell" data-testid="course-delete-modal" aria-hidden="true"
+  hidden>
+  <div class="panel page1-popup page1-confirm-card">
+    <div class="block-header">
+      <div class="section-heading">
+        <h2>과정 삭제</h2>
+        <p data-role="course-delete-title">과정과 관련 분석 결과를 삭제합니다.</p>
+      </div>
+      <button type="button" class="icon-button" data-close-course-delete aria-label="닫기">
+        <svg viewBox="0 0 24 24" role="img" focusable="false">
+          <path d="m7 7 10 10M17 7 7 17" />
+        </svg>
+      </button>
+    </div>
+    <div class="page1-confirm-copy">
+      <strong data-role="course-delete-name">선택한 과정을 삭제하시겠습니까?</strong>
+      <p>과정과 관련 분석 결과가 함께 삭제되며 되돌릴 수 없습니다.</p>
+      <p class="page1-confirm-feedback is-hidden" data-role="course-delete-feedback" hidden></p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="secondary-button" data-close-course-delete>취소</button>
+      <button type="button" class="primary-button is-danger" data-confirm-course-delete>삭제</button>
     </div>
   </div>
 </section>

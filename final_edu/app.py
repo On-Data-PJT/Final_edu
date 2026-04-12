@@ -26,8 +26,10 @@ from final_edu.courses import (
 )
 from final_edu.jobs import (
     build_upload_key,
+    delete_job,
     enqueue_analysis_job,
     get_job,
+    list_course_jobs,
     list_recent_jobs,
     load_job_payload,
     load_job_result,
@@ -233,6 +235,34 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="과정을 찾지 못했습니다.")
         return JSONResponse({"course": _serialize_course(course)})
 
+    @app.delete("/courses/{course_id}", response_class=JSONResponse)
+    async def delete_course(course_id: str) -> JSONResponse:
+        course = course_repository.get(course_id)
+        if course is None:
+            raise HTTPException(status_code=404, detail="과정을 찾지 못했습니다.")
+
+        related_jobs = list_course_jobs(course_id, settings)
+        active_jobs = [job for job in related_jobs if str(job.status) in {"queued", "running"}]
+        if active_jobs:
+            raise HTTPException(status_code=409, detail="분석이 진행 중인 과정은 삭제할 수 없습니다.")
+
+        deleted_job_count = 0
+        for job in related_jobs:
+            storage.delete_prefix(f"jobs/{job.id}/")
+            if delete_job(job.id, settings):
+                deleted_job_count += 1
+
+        deleted_preparation_count = _delete_preparations_for_course(storage, course_id)
+        storage.delete_key(course.curriculum_pdf_key)
+        course_repository.delete(course_id)
+        return JSONResponse(
+            {
+                "course_id": course_id,
+                "deleted_job_count": deleted_job_count,
+                "deleted_preparation_count": deleted_preparation_count,
+            }
+        )
+
     @app.post("/analyze/prepare", response_class=JSONResponse)
     async def analyze_prepare(request: Request) -> JSONResponse:
         form = await request.form()
@@ -254,6 +284,9 @@ def create_app() -> FastAPI:
         preparation = _load_preparation(storage, request_id)
         if preparation is None:
             raise HTTPException(status_code=404, detail="분석 준비 정보를 찾지 못했습니다.")
+        if course_repository.get(preparation.payload.course_id) is None:
+            storage.delete_key(_preparation_key(request_id))
+            raise HTTPException(status_code=404, detail="과정이 삭제되어 분석을 시작할 수 없습니다.")
         record = enqueue_analysis_job(
             preparation.payload,
             len(preparation.payload.course_sections),
@@ -1027,6 +1060,24 @@ def _load_preparation(storage, request_id: str) -> AnalysisPreparation | None:
     if not payload:
         return None
     return AnalysisPreparation.from_dict(payload)
+
+
+def _delete_preparations_for_course(storage, course_id: str) -> int:
+    normalized_course_id = str(course_id or "").strip()
+    if not normalized_course_id:
+        return 0
+    deleted_count = 0
+    for key in storage.list_keys("analysis-preparations/"):
+        try:
+            payload = storage.get_json(key)
+            preparation = AnalysisPreparation.from_dict(payload)
+        except Exception:  # noqa: BLE001
+            continue
+        if str(preparation.payload.course_id or "").strip() != normalized_course_id:
+            continue
+        if storage.delete_key(key):
+            deleted_count += 1
+    return deleted_count
 
 
 def _job_card(job, request: Request) -> dict:  # noqa: ANN001

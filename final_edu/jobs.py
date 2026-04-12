@@ -31,6 +31,12 @@ class JobRepository:
     def list_recent(self, limit: int) -> list[AnalysisJobRecord]:
         raise NotImplementedError
 
+    def list_by_course(self, course_id: str) -> list[AnalysisJobRecord]:
+        raise NotImplementedError
+
+    def delete(self, job_id: str) -> bool:
+        raise NotImplementedError
+
 
 class LocalJobRepository(JobRepository):
     def __init__(self, settings: Settings) -> None:
@@ -61,6 +67,26 @@ class LocalJobRepository(JobRepository):
             records.append(record)
         records.sort(key=lambda item: item.updated_at_ts, reverse=True)
         return records[:limit]
+
+    def list_by_course(self, course_id: str) -> list[AnalysisJobRecord]:
+        self._prune()
+        normalized_course_id = str(course_id or "").strip()
+        if not normalized_course_id:
+            return []
+        records: list[AnalysisJobRecord] = []
+        for path in self.root.glob("*.json"):
+            record = AnalysisJobRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            if str(record.course_id or "").strip() == normalized_course_id:
+                records.append(record)
+        records.sort(key=lambda item: item.updated_at_ts, reverse=True)
+        return records
+
+    def delete(self, job_id: str) -> bool:
+        path = self.root / f"{job_id}.json"
+        if not path.exists():
+            return False
+        path.unlink(missing_ok=True)
+        return True
 
     def _write(self, record: AnalysisJobRecord) -> None:
         path = self.root / f"{record.id}.json"
@@ -119,6 +145,36 @@ class RedisJobRepository(JobRepository):
         records = [AnalysisJobRecord.from_dict(json.loads(item)) for item in payloads if item]
         records.sort(key=lambda item: item.updated_at_ts, reverse=True)
         return records
+
+    def list_by_course(self, course_id: str) -> list[AnalysisJobRecord]:
+        self._prune()
+        normalized_course_id = str(course_id or "").strip()
+        if not normalized_course_id:
+            return []
+        job_ids = self.redis.zrevrange(self.recent_key, 0, -1)
+        if not job_ids:
+            return []
+        pipeline = self.redis.pipeline()
+        for job_id in job_ids:
+            pipeline.get(self._metadata_key(job_id))
+        payloads = pipeline.execute()
+        records = [
+            AnalysisJobRecord.from_dict(json.loads(item))
+            for item in payloads
+            if item and str(json.loads(item).get("course_id", "")).strip() == normalized_course_id
+        ]
+        records.sort(key=lambda item: item.updated_at_ts, reverse=True)
+        return records
+
+    def delete(self, job_id: str) -> bool:
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id:
+            return False
+        pipeline = self.redis.pipeline()
+        pipeline.delete(self._metadata_key(normalized_job_id))
+        pipeline.zrem(self.recent_key, normalized_job_id)
+        deleted_metadata, deleted_recent = pipeline.execute()
+        return bool(deleted_metadata or deleted_recent)
 
     def _metadata_key(self, job_id: str) -> str:
         return f"{self.key_prefix}:{job_id}"
@@ -298,6 +354,16 @@ def get_job(job_id: str, settings: Settings | None = None) -> AnalysisJobRecord 
 def list_recent_jobs(limit: int = RECENT_JOBS_LIMIT, settings: Settings | None = None) -> list[AnalysisJobRecord]:
     services = create_job_services(settings)
     return services.repository.list_recent(limit)
+
+
+def list_course_jobs(course_id: str, settings: Settings | None = None) -> list[AnalysisJobRecord]:
+    services = create_job_services(settings)
+    return services.repository.list_by_course(course_id)
+
+
+def delete_job(job_id: str, settings: Settings | None = None) -> bool:
+    services = create_job_services(settings)
+    return services.repository.delete(job_id)
 
 
 def load_job_result(job: AnalysisJobRecord, settings: Settings | None = None) -> dict | None:

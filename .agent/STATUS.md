@@ -20,6 +20,7 @@ Last Updated: 2026-04-12
 
 - `Page 1`
   - `dev`의 centered composer lane UI를 유지하되, 각 lane 은 좌측 `+` dropdown 으로 `강의자료 / 유튜브 링크 / VOC` 입력면을 전환한다.
+  - `과정 목록` popup 의 각 row 는 `선택 hit area + 작은 x 삭제 버튼`으로 분리되어 있고, 삭제는 별도 확인 popup 을 거친다.
   - lane 하단 공통 rail 에 파일, 링크, VOC chip 을 함께 유지하고, 현재 보이는 입력면만 바뀐다.
   - persisted draft restore 는 `files`, `vocFiles`, `youtubeUrls`, `instructorName`와 함께 마지막 lane `mode`를 복원한다.
   - lane `mode`는 마지막으로 열어 둔 입력면을 뜻하며, 이미 저장된 자산을 다른 source bucket 으로 재해석하지 않는다.
@@ -31,6 +32,7 @@ Last Updated: 2026-04-12
   - VOC chip 은 일반 파일 chip 과 구분되는 `VOC` 배지로 표시된다.
   - analyze submit 과 prepare confirm 대기 중에는 blocking loading overlay 를 띄워 현재 처리 중임을 보여준다.
   - 분석 제출은 `과정 선택 + 유효 lane 1개 이상`일 때만 활성화된다.
+  - 현재 선택된 과정을 삭제하면 선택 상태, persisted/local draft, pending prepare 상태를 비우고 composer 를 즉시 초기 empty state 로 리셋한다.
 - `Page 2`
   - `dev`의 `sidebar + 4 panel` dashboard 구조를 유지한다.
   - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 데이터셋 source of truth 다.
@@ -80,6 +82,10 @@ Last Updated: 2026-04-12
   - 단일 roster 과정에서 generic 강사명(`강사 1`)이 submit payload 로 남으면 과정 roster 기준으로 정규화한다.
   - 강사별 `voc_analysis`, 공통 `voc_summary`를 result JSON에 저장한다.
   - 커버리지 자료가 없어도 VOC만 있으면 VOC-only 결과를 반환한다.
+- 과정 삭제 계약:
+  - `DELETE /courses/{course_id}`는 과정 JSON, curriculum PDF object, 해당 과정의 completed/failed job metadata와 `jobs/{job_id}/...` object prefix, matching prepare cache 를 함께 hard delete 한다.
+  - `queued/running` job 이 있으면 삭제는 `409`로 거부되고 기존 데이터는 그대로 유지된다.
+  - `POST /analyze/prepare/{request_id}/confirm`는 enqueue 직전 course 존재 여부를 다시 확인하고, 이미 삭제된 과정이면 stale prepare 를 지우고 `404`로 차단한다.
 - 모델 계약:
   - 솔루션 인사이트와 VOC LLM 분석은 `OPENAI_INSIGHT_MODEL`을 사용한다.
   - embedding 경로 실패 시 lexical fallback 으로 내려간다.
@@ -126,6 +132,9 @@ Last Updated: 2026-04-12
 - local `inline` queue 모드에서도 결과 페이지로 넘어가기 전까지 loading overlay 가 유지되도록 submit UX를 보강했다.
 - `pyproject.toml`과 `uv.lock`에 `kiwipiepy` 의존성을 반영했다.
 - VOC input 에 `xlsx/xls`를 추가하고, prepare 단계에서 ambiguous workbook 을 거부하는 sheet-selection validator 를 넣었다.
+- 과정 목록 popup 에 과정 삭제 버튼과 확인 popup 을 추가하고, `DELETE /courses/{course_id}` hard delete 경로를 연결했다.
+- 삭제는 관련 completed/failed job metadata, `jobs/{job_id}` object prefix, matching `analysis-preparations/*.json`까지 함께 정리하도록 보강했다.
+- 진행 중 job 이 있는 과정 삭제는 `409`로 거부하고, stale prepare confirm 은 course existence check 로 차단하도록 정리했다.
 - VOC extractor 는 Excel row 를 CSV와 같은 `header: value | ...` 형식으로 직렬화하고, clear response sheet 만 분석하도록 보강했다.
 - `render.yaml`을 현재 ScraperAPI/STT/probe/distributed throttle env 계약과 맞췄다.
 - `yt-dlp` metadata 해석은 더 이상 ScraperAPI proxy 를 타지 않고, metadata-only `process=False` 경로와 단일 영상 fallback 을 사용한다.
@@ -154,6 +163,9 @@ Last Updated: 2026-04-12
 - `/` 렌더가 versioned `/static/styles.css?v=...`와 `/static/app.js?v=...`를 내보내는지
 - `/analyze/prepare`가 clear `review.xlsx` VOC upload 를 허용하고 payload 에 별도 `voc_files`로 저장하는지
 - `/analyze/prepare`가 응답 후보 sheet 가 둘 이상인 ambiguous `review.xlsx`를 400 오류로 거부하는지
+- `DELETE /courses/{id}`가 course JSON, curriculum PDF, related completed job object prefix, matching prepare cache 를 함께 삭제하는지
+- `DELETE /courses/{id}`가 `running` job 이 있으면 `409`로 거부하고 기존 파일을 보존하는지
+- 삭제된 과정을 참조하는 stale `POST /analyze/prepare/{request_id}/confirm`이 `404`로 차단되고 prepare cache 를 지우는지
 - VOC 분석이 `review.xlsx` workbook 을 CSV와 같은 row-text 로 읽고 response count / sentiment / suggestions 를 만드는지
 - `.xls` VOC input 이 row-style sheet reader 를 통해 same extractor contract 를 따르는지
 - 분석 결과 payload 가 `available_source_modes`, `source_mode_stats`를 내보내는지
@@ -204,6 +216,8 @@ Last Updated: 2026-04-12
 - `DBG-035`
 - `DBG-036`
 - `DBG-037`
+- `DBG-038`
+- `DBG-039`
 
 ## Recent Updates
 
@@ -233,6 +247,10 @@ Last Updated: 2026-04-12
 - word cloud 는 raw token 기준을 유지해 비커리큘럼 표현을 별도로 관찰할 수 있게 했다.
 - VOC 업로드 허용 형식에 `XLSX/XLS`를 추가했고, workbook 에 응답 후보 sheet 가 여러 개면 prepare 단계에서 명시적으로 거부하도록 보강했다.
 - VOC Excel extractor 는 clear response sheet 를 선택해 `header: value | ...` row text 로 정규화하고, 같은 데이터의 CSV/XLSX 분석 계약을 맞췄다.
+- 과정 목록 popup 에 row별 삭제 버튼과 중앙 확인 popup 을 추가했다.
+- `DELETE /courses/{course_id}` hard delete route 를 추가해 course/curriculum PDF/관련 completed job/prepare cache 를 함께 정리하도록 보강했다.
+- 진행 중 분석이 걸린 과정 삭제는 `409`로 막고, stale prepare confirm 은 course existence 재검사 후 `404`로 차단하도록 정리했다.
+- 과정 목록 삭제 버튼이 `svg/path`를 직접 클릭하면 delegated click handler의 `HTMLElement` guard 때문에 첫 클릭이 무시되던 회귀를 잡고, `Element` 기준 target 정규화와 40px hit area로 first-click 반응성을 복구했다.
 
 ### 2026-04-11
 

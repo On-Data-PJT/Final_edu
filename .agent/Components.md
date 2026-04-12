@@ -100,11 +100,21 @@ Last Updated: 2026-04-12
   - 등록 강사 수
   - 대주제 수
   - 현재 선택 여부
-- 클릭 시 과정이 즉시 선택되고 popup 은 닫힌다.
+- 각 항목 우측에는 작은 `x` 삭제 버튼이 있어야 한다.
+- row 본체 클릭 시 과정이 즉시 선택되고 popup 은 닫힌다.
+- 삭제 버튼 클릭 시 과정 목록 popup 은 유지한 채 별도 중앙 확인 popup 이 열려야 한다.
+- 삭제 확인 popup 은 `과정과 관련 분석 결과가 함께 삭제되며 되돌릴 수 없다`는 문구를 보여야 한다.
+- 삭제는 hard delete 다.
+  - 과정 JSON
+  - 커리큘럼 PDF object
+  - 해당 과정의 completed/failed job 과 업로드/result payload
+  - matching prepare cache
+- 진행 중(`queued/running`) 분석이 있는 과정은 삭제할 수 없고, 확인 popup 안에서 오류를 보여줘야 한다.
 - 과정 전환 시 현재 입력 중이던 lane 상태는 과정별로 보존한다.
 - 선택한 과정에 과거 분석 제출 이력이 있으면 마지막 제출 기준의 강사명, 업로드 자료, 유튜브 링크, VOC를 복원한다.
 - 과정 복원은 lane 단위가 아니라 `선택 강사 + 그 강사에게 연결된 파일/유튜브` 묶음 단위로 복원되어야 한다.
   - Page 1 lane 은 마지막으로 보던 입력 `mode`를 다시 열고, 공통 rail 에 자료/링크/VOC chip 을 함께 복원한다.
+- 현재 선택된 과정을 삭제하면 Page 1 composer 는 즉시 빈 상태로 리셋되어야 한다.
 
 ### Main Composer
 
@@ -118,7 +128,7 @@ Last Updated: 2026-04-12
   - 한 번에 하나의 surface 만 보인다.
   - `files` mode 는 `PDF/PPTX/TXT/MD` drag/drop + click 업로드를 지원한다.
   - `youtube` mode 는 comma-token input 이다.
-  - `voc` mode 는 `PDF/CSV/TXT` drag/drop + click 업로드를 지원한다.
+  - `voc` mode 는 `PDF/CSV/TXT/XLSX/XLS` drag/drop + click 업로드를 지원한다.
   - 파일은 여러 개 허용, 개별 삭제 가능
 - 파일 drag/drop 인식 범위는 현재 보이는 `files` surface 자체여야 하며, 항상 `files`에 저장한다.
 - VOC drag/drop 인식 범위는 현재 보이는 `voc` surface 자체여야 하며, 항상 `vocFiles`에 저장한다.

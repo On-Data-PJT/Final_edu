@@ -145,6 +145,8 @@ class Page1RestoreTests(unittest.TestCase):
         self.assertIn('data-action="switch-mode"', response.text)
         self.assertIn('data-action="open-file-picker"', response.text)
         self.assertIn('data-role="asset-rail"', response.text)
+        self.assertIn('data-course-delete="course-restore"', response.text)
+        self.assertNotIn("선택 가능", response.text)
         self.assertRegex(response.text, r'/static/styles\.css\?v=\d+')
         self.assertRegex(response.text, r'/static/app\.js\?v=\d+')
         drafts = _extract_script_payload(response.text, "page1-course-drafts-data")
@@ -569,6 +571,268 @@ class Page1RestoreTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드", response.json()["detail"])
+
+    def test_delete_course_removes_course_jobs_and_preparations(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime_root = Path(runtime_dir)
+            course = CourseRecord(
+                id="course-delete",
+                name="삭제대상과정",
+                curriculum_pdf_key="courses/course-delete/curriculum/source.pdf",
+                sections=[
+                    CurriculumSection(
+                        id="section-1",
+                        title="개요",
+                        description="삭제 테스트",
+                        target_weight=100.0,
+                    )
+                ],
+                instructor_names=["삭제강사"],
+                raw_curriculum_text="삭제 테스트 커리큘럼",
+                created_at="2026-04-12T20:00:00+09:00",
+                updated_at="2026-04-12T20:00:00+09:00",
+            )
+            job = AnalysisJobRecord(
+                id="job-delete",
+                course_id=course.id,
+                course_name=course.name,
+                status="completed",
+                created_at="2026-04-12T11:00:00+00:00",
+                updated_at="2026-04-12T11:01:00+00:00",
+                created_at_ts=1775991600.0,
+                updated_at_ts=1775991660.0,
+                payload_key="jobs/job-delete/payload.json",
+                result_key="jobs/job-delete/result.json",
+                instructor_names=["삭제강사"],
+                instructor_count=1,
+                asset_count=1,
+                youtube_url_count=0,
+                section_count=1,
+                warning_count=0,
+                selected_analysis_mode="openai",
+            )
+            payload = AnalysisJobPayload(
+                job_id=job.id,
+                course_id=course.id,
+                course_name=course.name,
+                course_sections=course.sections,
+                curriculum_text="삭제 테스트 커리큘럼",
+                submitted_at="2026-04-12T20:01:00+09:00",
+                analysis_mode="openai",
+                page1_submission_version=2,
+                instructors=[
+                    JobInstructorInput(
+                        name="삭제강사",
+                        files=[StoredUploadRef(storage_key="jobs/job-delete/uploads/instructor-1/material.pdf", original_name="material.pdf")],
+                    )
+                ],
+            )
+
+            course_path = runtime_root / "courses" / f"{course.id}.json"
+            course_path.parent.mkdir(parents=True, exist_ok=True)
+            course_path.write_text(json.dumps(course.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            curriculum_path = runtime_root / "object_store" / course.curriculum_pdf_key
+            curriculum_path.parent.mkdir(parents=True, exist_ok=True)
+            curriculum_path.write_bytes(b"%PDF-1.4 curriculum\n%%EOF\n")
+
+            job_path = runtime_root / "jobs" / f"{job.id}.json"
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            job_path.write_text(json.dumps(job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            payload_path = runtime_root / "object_store" / job.payload_key
+            payload_path.parent.mkdir(parents=True, exist_ok=True)
+            payload_path.write_text(json.dumps(payload.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result_path = runtime_root / "object_store" / "jobs" / job.id / "result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(json.dumps({"status": "ok"}, ensure_ascii=False), encoding="utf-8")
+
+            upload_path = runtime_root / "object_store" / "jobs" / job.id / "uploads" / "instructor-1" / "material.pdf"
+            upload_path.parent.mkdir(parents=True, exist_ok=True)
+            upload_path.write_bytes(b"%PDF-1.4 upload\n%%EOF\n")
+
+            preparation_path = runtime_root / "object_store" / "analysis-preparations" / "prep-delete.json"
+            preparation_path.parent.mkdir(parents=True, exist_ok=True)
+            preparation_path.write_text(
+                json.dumps(
+                    {
+                        "request_id": "prep-delete",
+                        "payload": payload.to_dict(),
+                        "created_at": "2026-04-12T20:02:00+09:00",
+                        "requires_confirmation": True,
+                        "recommended_analysis_mode": "openai",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                clear=False,
+            ):
+                get_settings.cache_clear()
+                client = TestClient(create_app())
+                response = client.delete(f"/courses/{course.id}")
+                job_response = client.get(f"/jobs/{job.id}")
+                course_response = client.get(f"/courses/{course.id}")
+                course_exists_after = course_path.exists()
+                curriculum_exists_after = curriculum_path.exists()
+                job_exists_after = job_path.exists()
+                job_prefix_exists_after = (runtime_root / "object_store" / "jobs" / job.id).exists()
+                preparation_exists_after = preparation_path.exists()
+                get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "course_id": course.id,
+                "deleted_job_count": 1,
+                "deleted_preparation_count": 1,
+            },
+        )
+        self.assertEqual(job_response.status_code, 404)
+        self.assertEqual(course_response.status_code, 404)
+        self.assertFalse(course_exists_after)
+        self.assertFalse(curriculum_exists_after)
+        self.assertFalse(job_exists_after)
+        self.assertFalse(job_prefix_exists_after)
+        self.assertFalse(preparation_exists_after)
+
+    def test_delete_course_rejects_active_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime_root = Path(runtime_dir)
+            course = CourseRecord(
+                id="course-delete-busy",
+                name="삭제불가과정",
+                curriculum_pdf_key="courses/course-delete-busy/curriculum/source.pdf",
+                sections=[
+                    CurriculumSection(
+                        id="section-1",
+                        title="개요",
+                        description="삭제 차단 테스트",
+                        target_weight=100.0,
+                    )
+                ],
+                instructor_names=["삭제강사"],
+                raw_curriculum_text="삭제 차단 커리큘럼",
+                created_at="2026-04-12T20:10:00+09:00",
+                updated_at="2026-04-12T20:10:00+09:00",
+            )
+            job = AnalysisJobRecord(
+                id="job-delete-busy",
+                course_id=course.id,
+                course_name=course.name,
+                status="running",
+                created_at="2026-04-12T11:10:00+00:00",
+                updated_at="2026-04-12T11:11:00+00:00",
+                created_at_ts=1775992200.0,
+                updated_at_ts=1775992260.0,
+                payload_key="jobs/job-delete-busy/payload.json",
+                instructor_names=["삭제강사"],
+                instructor_count=1,
+                asset_count=1,
+                youtube_url_count=0,
+                section_count=1,
+                warning_count=0,
+                selected_analysis_mode="openai",
+            )
+
+            course_path = runtime_root / "courses" / f"{course.id}.json"
+            course_path.parent.mkdir(parents=True, exist_ok=True)
+            course_path.write_text(json.dumps(course.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            curriculum_path = runtime_root / "object_store" / course.curriculum_pdf_key
+            curriculum_path.parent.mkdir(parents=True, exist_ok=True)
+            curriculum_path.write_bytes(b"%PDF-1.4 curriculum\n%%EOF\n")
+
+            job_path = runtime_root / "jobs" / f"{job.id}.json"
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            job_path.write_text(json.dumps(job.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                clear=False,
+            ):
+                get_settings.cache_clear()
+                client = TestClient(create_app())
+                response = client.delete(f"/courses/{course.id}")
+                course_exists_after = course_path.exists()
+                curriculum_exists_after = curriculum_path.exists()
+                job_exists_after = job_path.exists()
+                get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("진행 중", response.json()["detail"])
+        self.assertTrue(course_exists_after)
+        self.assertTrue(curriculum_exists_after)
+        self.assertTrue(job_exists_after)
+
+    def test_prepare_confirm_rejects_deleted_course(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime_root = Path(runtime_dir)
+            course = CourseRecord(
+                id="course-missing-confirm",
+                name="삭제된과정",
+                curriculum_pdf_key="courses/course-missing-confirm/curriculum/source.pdf",
+                sections=[
+                    CurriculumSection(
+                        id="section-1",
+                        title="개요",
+                        description="confirm 차단",
+                        target_weight=100.0,
+                    )
+                ],
+                instructor_names=["삭제강사"],
+                raw_curriculum_text="confirm 차단",
+                created_at="2026-04-12T20:20:00+09:00",
+                updated_at="2026-04-12T20:20:00+09:00",
+            )
+            payload = AnalysisJobPayload(
+                job_id="job-missing-confirm",
+                course_id=course.id,
+                course_name=course.name,
+                course_sections=course.sections,
+                curriculum_text="confirm 차단",
+                submitted_at="2026-04-12T20:21:00+09:00",
+                analysis_mode="openai",
+                page1_submission_version=2,
+                instructors=[JobInstructorInput(name="삭제강사")],
+            )
+            preparation_path = runtime_root / "object_store" / "analysis-preparations" / "prep-missing-course.json"
+            preparation_path.parent.mkdir(parents=True, exist_ok=True)
+            preparation_path.write_text(
+                json.dumps(
+                    {
+                        "request_id": "prep-missing-course",
+                        "payload": payload.to_dict(),
+                        "created_at": "2026-04-12T20:22:00+09:00",
+                        "requires_confirmation": True,
+                        "recommended_analysis_mode": "openai",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                clear=False,
+            ):
+                get_settings.cache_clear()
+                client = TestClient(create_app())
+                response = client.post("/analyze/prepare/prep-missing-course/confirm")
+                preparation_exists_after = preparation_path.exists()
+                get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("과정이 삭제되어", response.json()["detail"])
+        self.assertFalse(preparation_exists_after)
 
 
 if __name__ == "__main__":

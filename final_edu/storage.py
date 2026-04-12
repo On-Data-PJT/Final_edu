@@ -25,6 +25,15 @@ class ObjectStorage:
     def download_to_path(self, key: str, destination: Path) -> Path:
         raise NotImplementedError
 
+    def delete_key(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        raise NotImplementedError
+
+    def delete_prefix(self, prefix: str) -> int:
+        raise NotImplementedError
+
 
 class LocalObjectStorage(ObjectStorage):
     def __init__(self, root: Path) -> None:
@@ -49,12 +58,64 @@ class LocalObjectStorage(ObjectStorage):
         shutil.copyfile(target, destination)
         return destination
 
+    def delete_key(self, key: str) -> bool:
+        target = self._absolute_path(key)
+        if not target.exists():
+            return False
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            target.unlink(missing_ok=True)
+        self._prune_empty_parents(target.parent)
+        return True
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        normalized_prefix = str(prefix or "").strip().lstrip("/")
+        base_path = self.root if not normalized_prefix else self._absolute_path(normalized_prefix)
+        if not base_path.exists():
+            return []
+        if base_path.is_file():
+            return [str(base_path.relative_to(self.root)).replace("\\", "/")]
+        return sorted(
+            str(path.relative_to(self.root)).replace("\\", "/")
+            for path in base_path.rglob("*")
+            if path.is_file()
+        )
+
+    def delete_prefix(self, prefix: str) -> int:
+        keys = self.list_keys(prefix)
+        if not keys:
+            return 0
+        for key in keys:
+            self.delete_key(key)
+        normalized_prefix = str(prefix or "").strip().lstrip("/")
+        if normalized_prefix:
+            prefix_path = self._absolute_path(normalized_prefix)
+            if prefix_path.exists() and prefix_path.is_dir():
+                shutil.rmtree(prefix_path, ignore_errors=True)
+                self._prune_empty_parents(prefix_path.parent)
+        return len(keys)
+
     def _resolve(self, key: str) -> Path:
         relative_key = Path(key)
         self._validate_relative_key(relative_key)
         destination = self.root / relative_key
         destination.parent.mkdir(parents=True, exist_ok=True)
         return destination
+
+    def _absolute_path(self, key: str) -> Path:
+        relative_key = Path(str(key or "").strip().lstrip("/"))
+        self._validate_relative_key(relative_key)
+        return self.root / relative_key
+
+    def _prune_empty_parents(self, path: Path) -> None:
+        current = path
+        while current != self.root and current.exists():
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
     def _validate_relative_key(self, key: Path) -> None:
         if key.is_absolute():
@@ -103,6 +164,39 @@ class R2ObjectStorage(ObjectStorage):
         destination.parent.mkdir(parents=True, exist_ok=True)
         self.client.download_file(self.bucket, key, str(destination))
         return destination
+
+    def delete_key(self, key: str) -> bool:
+        normalized_key = str(key or "").strip().lstrip("/")
+        if not normalized_key:
+            return False
+        try:
+            self.client.delete_object(Bucket=self.bucket, Key=normalized_key)
+        except Exception:  # noqa: BLE001
+            return False
+        return True
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        normalized_prefix = str(prefix or "").strip().lstrip("/")
+        paginator = self.client.get_paginator("list_objects_v2")
+        keys: list[str] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=normalized_prefix):
+            for item in page.get("Contents", []) or []:
+                key = str(item.get("Key") or "").strip()
+                if key:
+                    keys.append(key)
+        return sorted(keys)
+
+    def delete_prefix(self, prefix: str) -> int:
+        keys = self.list_keys(prefix)
+        if not keys:
+            return 0
+        for start in range(0, len(keys), 1000):
+            chunk = keys[start : start + 1000]
+            self.client.delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": key} for key in chunk], "Quiet": True},
+            )
+        return len(keys)
 
 
 def create_object_storage(settings: Settings | None = None) -> ObjectStorage:

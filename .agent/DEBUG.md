@@ -203,6 +203,16 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/extractors.py`, `final_edu/app.py`, `tests/test_page1_restore.py`, `tests/test_voc_analysis.py`
   Trigger Commands: `POST /analyze/prepare`, VOC Excel upload, `analyze_voc_assets()`
   Must Read When: VOC 입력 포맷 확대, workbook sheet 선택 규칙, VOC spreadsheet row serialization 변경
+- `DBG-038` `active` Lane: `Lead / Integration`
+  Tags: `page1`, `courses`, `delete`, `storage`, `prepare-confirm`
+  Related Files: `final_edu/app.py`, `final_edu/courses.py`, `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/static/app.js`, `final_edu/templates/index.html`, `tests/test_page1_restore.py`
+  Trigger Commands: `DELETE /courses/{course_id}`, `POST /analyze/prepare/{request_id}/confirm`, 과정 목록 popup 삭제 버튼
+  Must Read When: 과정 삭제 UX, course/job/object-storage cleanup, stale prepare confirm 규칙 변경
+- `DBG-039` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `svg`, `click-delegation`, `delete-button`, `hit-area`
+  Related Files: `final_edu/static/app.js`, `final_edu/static/styles.css`, `final_edu/templates/index.html`
+  Trigger Commands: 과정 목록 popup 삭제 버튼 클릭, lane icon 클릭
+  Must Read When: delegated click handler, SVG icon button, Page 1 icon hit-area 변경
 
 ## Active Incidents
 
@@ -615,6 +625,56 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - Page 1 interactive submit 경로에 500ms 이상 걸릴 수 있는 요청이 있으면 최소한의 visible loading surface 를 둘 것
   - hidden button busy 상태만으로 사용자 피드백을 대신하지 말 것
   - inline queue 경로는 redirect 전까지 실제 분석 시간이 포함될 수 있으므로, local UX 검토 시 queue mode 를 함께 확인할 것
+
+### DBG-038 `active` 과정 목록에서 course만 지우고 related job/prepare를 남기면 restore draft와 stale confirm이 다시 살아남음
+
+- Date: `2026-04-12`
+- Agent / Lane: `Lead / Integration`
+- Tags: `page1`, `courses`, `delete`, `storage`, `prepare-confirm`
+- Related Files: `final_edu/app.py`, `final_edu/courses.py`, `final_edu/jobs.py`, `final_edu/storage.py`, `final_edu/static/app.js`, `final_edu/templates/index.html`, `tests/test_page1_restore.py`
+- Trigger Commands: `DELETE /courses/{course_id}`, `POST /analyze/prepare/{request_id}/confirm`, 과정 목록 popup 삭제 버튼
+- Must Read When: 과정 삭제 UX, course/job/object-storage cleanup, stale prepare confirm 규칙 변경
+- Symptom:
+  - Page 1 과정 목록이 계속 쌓이는데 지울 방법이 없었고, 단순히 course JSON만 지우면 최근 job 기반 restore draft와 결과 카드가 계속 남을 수 있었음
+  - 이미 prepare 해 둔 request 는 course가 사라진 뒤에도 confirm 이 가능해 stale payload로 새 분석을 enqueue할 위험이 있었음
+- Root Cause:
+  - course repository에는 delete가 없었고, object storage / job metadata / preparation cache를 함께 정리하는 공용 hard delete 경로가 없었음
+  - prepare confirm route가 request payload만 믿고 enqueue하면서 course 존재 여부를 다시 확인하지 않았음
+- Resolution:
+  - `DELETE /courses/{course_id}`를 추가하고, course JSON + curriculum PDF object + related completed/failed job metadata + `jobs/{job_id}/...` prefix + matching `analysis-preparations/*.json`를 함께 hard delete 하도록 정리
+  - `queued/running` job이 있으면 `409`로 거부해 삭제를 전부 중단하도록 막음
+  - Page 1 과정 목록 popup row를 `선택 영역 + x 삭제 버튼`으로 분리하고, 중앙 확인 popup 뒤에 삭제를 실행하도록 변경
+  - 현재 선택된 과정을 삭제하면 selected course, persisted/local draft, pending prepare 상태를 비우고 composer를 empty state로 리셋
+  - `POST /analyze/prepare/{request_id}/confirm`는 enqueue 전에 course existence를 다시 확인하고, 이미 삭제된 과정이면 stale preparation을 지운 뒤 `404`를 반환하도록 보강
+- Prevention Rule:
+  - course 삭제는 metadata 하나만 지우지 말고 관련 job/result/upload/preparation까지 같은 transaction-like 경로에서 함께 정리할 것
+  - 진행 중 job이 있는 course 삭제는 hard block하고 부분 삭제를 허용하지 말 것
+  - prepare/confirm 2단계 flow에서는 confirm 시점에 upstream entity(course/job source) 존재 여부를 다시 검증할 것
+  - 과정 목록 UI를 바꾸면 `GET /` 렌더 회귀와 `DELETE /courses/{id}` cleanup 회귀를 함께 유지할 것
+
+### DBG-039 `active` SVG 아이콘을 직접 누르면 delegated click이 무시돼 삭제 확인 모달이 늦게 뜨는 것처럼 보였음
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `svg`, `click-delegation`, `delete-button`, `hit-area`
+- Related Files: `final_edu/static/app.js`, `final_edu/static/styles.css`, `final_edu/templates/index.html`
+- Trigger Commands: 과정 목록 popup 삭제 버튼 클릭, lane icon 클릭
+- Must Read When: delegated click handler, SVG icon button, Page 1 icon hit-area 변경
+- Symptom:
+  - 과정 목록에서 `x` 삭제 버튼을 눌러도 삭제 확인 모달이 첫 클릭에 뜨지 않고, 몇 번 눌러야 열리는 것처럼 보였음
+  - 특히 원형 버튼 안 `x` 선이나 `svg path`를 직접 누를 때 더 자주 재현됐음
+- Root Cause:
+  - 과정 목록 popup click 위임 로직이 `event.target instanceof HTMLElement`일 때만 계속 진행했음
+  - 삭제 아이콘은 inline `svg/path`라서, 사용자가 선 자체를 누르면 target이 `SVGElement` 계열이 되어 early return으로 클릭이 버려졌음
+  - 같은 패턴이 일부 Page 1 delegated icon click에도 남아 있었음
+- Resolution:
+  - delegated handler의 target 정규화를 `HTMLElement`가 아니라 `Element` 기준 공용 helper로 변경
+  - `closest("[data-course-delete]")`, `closest("[data-action]")` 등은 모두 normalized `Element` target으로 처리하도록 정리
+  - 삭제 버튼 hit area를 40px로 키워 아이콘 주변을 눌러도 첫 클릭 성공률이 떨어지지 않게 보강
+- Prevention Rule:
+  - SVG/icon 버튼을 delegated click으로 처리할 때 `event.target instanceof HTMLElement`로 필터링하지 말 것
+  - `closest()`를 쓸 이벤트 target은 `Element` 기준으로 정규화할 것
+  - icon-only 버튼은 시각 크기와 별개로 최소 40px 전후의 tappable area를 유지할 것
 
 ## Archive
 

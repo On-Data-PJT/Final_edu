@@ -20,6 +20,8 @@
       restoreNotice: "",
       pendingPreparation: null,
       isPreparingAnalysis: false,
+      isDeletingCourse: false,
+      pendingDeleteCourseId: "",
     },
     page2: {
       result: null,
@@ -47,6 +49,7 @@
     page1CourseDraftsData: "#page1-course-drafts-data",
     courseModal: "#course-modal, [data-testid='course-modal']",
     courseListPanel: "#course-list-panel, [data-testid='course-list-panel']",
+    courseDeleteModal: "#course-delete-modal, [data-testid='course-delete-modal']",
     courseModalForm: "#course-modal-form, [data-testid='course-modal-form']",
     coursePreviewState: "#course-preview-state, [data-testid='course-preview-state']",
     coursePreviewTable: "#course-preview-table, [data-testid='course-preview-table']",
@@ -146,6 +149,7 @@
     const refs = {
       courseModal: $(SELECTORS.courseModal),
       courseListPanel: $(SELECTORS.courseListPanel),
+      courseDeleteModal: $(SELECTORS.courseDeleteModal),
       courseForm,
       analysisForm,
       workspace,
@@ -196,6 +200,10 @@
       prepareConfirmButton: findFirst($(SELECTORS.analysisPrepareModal), ["[data-confirm-prepare]"]),
       loadingTitle: findFirst($(SELECTORS.page1LoadingOverlay), ["[data-role='page1-loading-title']"]),
       loadingDetail: findFirst($(SELECTORS.page1LoadingOverlay), ["[data-role='page1-loading-detail']"]),
+      courseDeleteTitle: findFirst($(SELECTORS.courseDeleteModal), ["[data-role='course-delete-title']"]),
+      courseDeleteName: findFirst($(SELECTORS.courseDeleteModal), ["[data-role='course-delete-name']"]),
+      courseDeleteFeedback: findFirst($(SELECTORS.courseDeleteModal), ["[data-role='course-delete-feedback']"]),
+      courseDeleteConfirmButton: findFirst($(SELECTORS.courseDeleteModal), ["[data-confirm-course-delete]"]),
     };
 
     state.page1.selectedCourseId = valueOf(refs.selectedCourseId);
@@ -204,6 +212,7 @@
     bindDialog(refs.courseModal, SELECTORS.openCourseModal, SELECTORS.closeDialogs);
     bindDialog(refs.courseListPanel, SELECTORS.openCourseList, SELECTORS.closeDialogs);
     bindPrepareModal(refs);
+    bindCourseDeleteModal(refs);
 
     if (refs.courseFileInput) {
       refs.courseFileInput.addEventListener("change", () => {
@@ -227,8 +236,8 @@
 
     if (refs.courseFileTokens) {
       refs.courseFileTokens.addEventListener("click", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
+        const target = eventTargetElement(event);
+        if (!target) {
           return;
         }
         const removeButton = target.closest("[data-remove-course-file]");
@@ -256,8 +265,8 @@
 
     if (refs.courseInstructorTokens) {
       refs.courseInstructorTokens.addEventListener("click", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
+        const target = eventTargetElement(event);
+        if (!target) {
           return;
         }
         const removeButton = target.closest("[data-remove-course-instructor]");
@@ -276,8 +285,8 @@
 
     if (refs.previewTable) {
       refs.previewTable.addEventListener("input", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement) || !target.closest("[data-preview-row]")) {
+        const target = eventTargetElement(event);
+        if (!target || !target.closest("[data-preview-row]")) {
           return;
         }
         syncPreviewSectionsFromTable(refs.previewTable);
@@ -322,8 +331,19 @@
 
     if (refs.courseListPanel) {
       refs.courseListPanel.addEventListener("click", async (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
+        const target = eventTargetElement(event);
+        if (!target) {
+          return;
+        }
+        const deleteButton = target.closest("[data-course-delete]");
+        if (deleteButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          const courseId = String(deleteButton.getAttribute("data-course-delete") || "").trim();
+          const course = state.page1.courses.find((item) => item.id === courseId);
+          if (course) {
+            openCourseDeleteModal(refs, course);
+          }
           return;
         }
         const button = target.closest("[data-course-select]");
@@ -341,8 +361,8 @@
     }
 
     document.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
+      const target = eventTargetElement(event);
+      if (!target) {
         return;
       }
       if (!target.closest("[data-instructor-block]")) {
@@ -465,8 +485,8 @@
     });
 
     document.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
+      const target = eventTargetElement(event);
+      if (!target) {
         return;
       }
       const nav = target.closest(SELECTORS.page2InstructorNav);
@@ -636,47 +656,50 @@
     const target = ensureRenderedContainer(courseListPanel, "course-list-items", "div");
     target.innerHTML = "";
     if (!state.page1.courses.length) {
-      const empty = document.createElement("p");
-      empty.className = "course-list-empty";
-      empty.textContent = "추가된 과정이 없습니다.";
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.innerHTML = "<strong>아직 과정이 없습니다.</strong><p>새 과정을 추가해 주세요.</p>";
       target.appendChild(empty);
       return;
     }
 
     state.page1.courses.forEach((course) => {
-      const card = document.createElement("button");
-      card.type = "button";
+      const card = document.createElement("article");
       card.className = "course-list-item";
-      card.dataset.courseSelect = course.id;
       card.dataset.courseItem = "true";
+      card.dataset.courseId = course.id;
+      card.dataset.courseName = course.name;
       if (course.id === state.page1.selectedCourseId) {
         card.classList.add(CSS.selected);
+        card.classList.add(CSS.active);
       }
       card.innerHTML = `
-        <div class="course-list-item-head">
-          <strong>${escapeHtml(course.name)}</strong>
-          <span class="course-state-chip is-sage">선택 가능</span>
-        </div>
-        <span>등록 강사 ${Array.isArray(course.instructor_names) ? course.instructor_names.length : 0}명</span>
-        <small>대주제 ${course.sections.length}개</small>
+        <button type="button" class="course-list-select" data-course-select="${escapeHtml(course.id)}" aria-label="${escapeHtml(course.name)} 선택">
+          <div class="course-list-item-head">
+            <strong>${escapeHtml(course.name)}</strong>
+          </div>
+          <span>등록 강사 ${Array.isArray(course.instructor_names) ? course.instructor_names.length : 0}명</span>
+          <small>대주제 ${course.sections.length}개</small>
+        </button>
+        <button type="button" class="course-list-delete-button" data-course-delete="${escapeHtml(course.id)}"
+          data-course-name="${escapeHtml(course.name)}" aria-label="${escapeHtml(course.name)} 삭제" title="${escapeHtml(course.name)} 삭제">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path d="m7 7 10 10M17 7 7 17" />
+          </svg>
+        </button>
       `;
       target.appendChild(card);
     });
   }
 
   function updateCourseListSelection(courseListPanel) {
-    qsa("[data-course-card]").forEach((button) => {
-      const active = (button.getAttribute("data-course-select") || button.getAttribute("data-course-id")) === state.page1.selectedCourseId;
-      button.classList.toggle(CSS.selected, active);
-      button.classList.toggle(CSS.active, active);
-    });
     if (!courseListPanel) {
       return;
     }
-    qsa("[data-course-item]", courseListPanel).forEach((button) => {
-      const active = button.getAttribute("data-course-select") === state.page1.selectedCourseId;
-      button.classList.toggle(CSS.selected, active);
-      button.classList.toggle(CSS.active, active);
+    qsa("[data-course-item]", courseListPanel).forEach((item) => {
+      const active = item.getAttribute("data-course-id") === state.page1.selectedCourseId;
+      item.classList.toggle(CSS.selected, active);
+      item.classList.toggle(CSS.active, active);
     });
   }
 
@@ -1124,11 +1147,136 @@
     });
   }
 
+  function bindCourseDeleteModal(refs) {
+    if (!refs?.courseDeleteModal) {
+      return;
+    }
+    qsa("[data-close-course-delete]", refs.courseDeleteModal).forEach((button) => {
+      button.addEventListener("click", () => closeCourseDeleteModal(refs));
+    });
+    if (refs.courseDeleteConfirmButton) {
+      refs.courseDeleteConfirmButton.addEventListener("click", async () => {
+        const courseId = String(
+          refs.courseDeleteConfirmButton?.dataset?.courseId
+          || state.page1.pendingDeleteCourseId
+          || "",
+        ).trim();
+        if (!courseId) {
+          return;
+        }
+        await deleteCourseFromList(refs, courseId);
+      });
+    }
+    refs.courseDeleteModal.addEventListener("click", (event) => {
+      if (event.target === refs.courseDeleteModal) {
+        closeCourseDeleteModal(refs);
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && isOpen(refs.courseDeleteModal)) {
+        closeCourseDeleteModal(refs);
+      }
+    });
+  }
+
   function closePrepareModal(refs) {
     state.page1.pendingPreparation = null;
     if (refs?.prepareModal) {
       closeSurface(refs.prepareModal);
     }
+  }
+
+  function openCourseDeleteModal(refs, course) {
+    const normalizedCourse = normalizeCoursePayload(course);
+    state.page1.pendingDeleteCourseId = normalizedCourse.id;
+    if (refs?.courseDeleteConfirmButton) {
+      refs.courseDeleteConfirmButton.dataset.courseId = normalizedCourse.id;
+    }
+    setFieldValue(
+      refs?.courseDeleteTitle,
+      `${normalizedCourse.name} 과정과 관련 분석 결과를 삭제합니다.`,
+    );
+    setFieldValue(
+      refs?.courseDeleteName,
+      `${normalizedCourse.name} 과정을 삭제하시겠습니까?`,
+    );
+    setCourseDeleteFeedback(refs, "");
+    if (refs?.courseDeleteModal) {
+      openSurface(refs.courseDeleteModal);
+    }
+  }
+
+  function closeCourseDeleteModal(refs) {
+    state.page1.pendingDeleteCourseId = "";
+    setCourseDeleteFeedback(refs, "");
+    if (refs?.courseDeleteConfirmButton) {
+      delete refs.courseDeleteConfirmButton.dataset.courseId;
+    }
+    if (refs?.courseDeleteModal) {
+      closeSurface(refs.courseDeleteModal);
+    }
+  }
+
+  function setCourseDeleteFeedback(refs, message) {
+    const feedback = refs?.courseDeleteFeedback;
+    if (!(feedback instanceof HTMLElement)) {
+      return;
+    }
+    const normalizedMessage = String(message || "").trim();
+    const hidden = !normalizedMessage;
+    feedback.hidden = hidden;
+    feedback.classList.toggle(CSS.hidden, hidden);
+    feedback.textContent = normalizedMessage;
+  }
+
+  async function deleteCourseFromList(refs, courseId) {
+    const normalizedCourseId = String(courseId || "").trim();
+    if (!normalizedCourseId || state.page1.isDeletingCourse) {
+      return;
+    }
+    state.page1.isDeletingCourse = true;
+    setCourseDeleteFeedback(refs, "");
+    setBusy(refs.courseDeleteConfirmButton, true, "삭제 중");
+    try {
+      await fetchJson(`/courses/${encodeURIComponent(normalizedCourseId)}`, {
+        method: "DELETE",
+      });
+      applyDeletedCourseState(refs, normalizedCourseId);
+      closeCourseDeleteModal(refs);
+    } catch (error) {
+      setCourseDeleteFeedback(refs, error.message || "과정을 삭제하지 못했습니다.");
+    } finally {
+      state.page1.isDeletingCourse = false;
+      setBusy(refs.courseDeleteConfirmButton, false);
+    }
+  }
+
+  function applyDeletedCourseState(refs, courseId) {
+    const normalizedCourseId = String(courseId || "").trim();
+    if (!normalizedCourseId) {
+      return;
+    }
+    const wasSelected = normalizedCourseId === state.page1.selectedCourseId;
+    state.page1.courses = state.page1.courses.filter((course) => course.id !== normalizedCourseId);
+    delete state.page1.courseDrafts[normalizedCourseId];
+    delete state.page1.persistedCourseDrafts[normalizedCourseId];
+
+    if (wasSelected) {
+      state.page1.restoreRequestId += 1;
+      state.page1.restoreNotice = "";
+      state.page1.restoringCourseId = "";
+      state.page1.selectedCourseId = "";
+      state.page1.selectedCourse = null;
+      setFieldValue(refs.selectedCourseId, "");
+      setFieldValue(refs.selectedCourseName, "");
+      closePrepareModal(refs);
+      hidePage1Loading(refs);
+      resetPage1Blocks(refs.blocksRoot, refs.template, refs.analysisForm, refs.manifestInput);
+    }
+
+    renderCourseList(refs.courseListPanel);
+    updateCourseListSelection(refs.courseListPanel);
+    syncPage1State(refs);
   }
 
   async function confirmPreparedAnalysis(refs, requestId, options = {}) {
@@ -1371,8 +1519,8 @@
     });
 
     block.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
+      const target = eventTargetElement(event);
+      if (!target) {
         return;
       }
       const action = target.closest("[data-action]");
@@ -1437,8 +1585,8 @@
     });
 
     block.addEventListener("change", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
+      const target = eventTargetElement(event);
+      if (!target) {
         return;
       }
       if (target.matches("[data-role='instructor-files']")) {
@@ -1452,8 +1600,8 @@
     });
 
     block.addEventListener("keydown", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
+      const target = eventTargetElement(event);
+      if (!target) {
         return;
       }
       if (!target.matches("[data-role='youtube-draft']")) {
@@ -1471,8 +1619,8 @@
     });
 
     block.addEventListener("blur", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement) || !target.matches("[data-role='youtube-draft']")) {
+      const target = eventTargetElement(event);
+      if (!target || !target.matches("[data-role='youtube-draft']")) {
         return;
       }
       if (valueOf(target).trim()) {
@@ -3219,6 +3367,10 @@
 
   function $(selector, root = document) {
     return (root || document).querySelector(selector);
+  }
+
+  function eventTargetElement(event) {
+    return event?.target instanceof Element ? event.target : null;
   }
 
   function text(node) {

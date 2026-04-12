@@ -634,12 +634,15 @@ select:focus {
 }
 
 .course-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 14px;
   width: 100%;
   border: 1px solid var(--theme_border);
   border-radius: var(--theme_radius-md);
   background: #ffffff;
   padding: 16px;
-  text-align: left;
 }
 
 .course-list-item:hover {
@@ -657,19 +660,81 @@ select:focus {
   font-weight: 500;
 }
 
-.course-state-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: rgba(22, 101, 52, 0.08);
-  color: var(--theme_button-primary);
-  font-size: 13px;
+.course-list-select {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
 }
 
-.course-state-chip.is-sage {
-  background: var(--theme_success-bg);
-  color: var(--theme_success-text);
+.course-list-select span,
+.course-list-select small {
+  color: var(--theme_text-secondary);
+}
+
+.course-list-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid rgba(22, 101, 52, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--theme_text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.course-list-delete-button:hover {
+  border-color: rgba(185, 28, 28, 0.22);
+  background: rgba(254, 242, 242, 0.92);
+  color: #b91c1c;
+}
+
+.course-list-delete-button svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+.page1-confirm-card {
+  width: min(520px, 100%);
+}
+
+.page1-confirm-copy {
+  display: grid;
+  gap: 10px;
+  color: var(--theme_text-secondary);
+}
+
+.page1-confirm-copy strong {
+  color: var(--theme_text-primary);
+  font-size: 18px;
+}
+
+.page1-confirm-feedback {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 14px;
+}
+
+.primary-button.is-danger {
+  background: #b91c1c;
+}
+
+.primary-button.is-danger:hover {
+  background: #991b1b;
 }
 
 .preview-table-wrap {
