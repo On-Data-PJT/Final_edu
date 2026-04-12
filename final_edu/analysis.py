@@ -1206,7 +1206,7 @@ def _empty_keywords_by_mode(submissions: list[InstructorSubmission]) -> dict[str
 
 
 def _estimate_voc_response_count(source_type: str, segments: list) -> int:
-    if source_type == "csv":
+    if source_type in {"csv", "xlsx", "xls"}:
         return len(segments)
     if source_type == "text":
         return sum(max(1, len([line for line in segment.text.split("|") if line.strip()])) for segment in segments)

@@ -1284,7 +1284,7 @@
           <input type="hidden" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" value="">
         </div>
         <div class="lane-surface lane-surface-voc" data-role="voc-surface" data-upload-source="voc" hidden>
-          <input class="sr-only" type="file" multiple accept=".pdf,.csv,.txt" data-role="instructor-voc" data-upload-source="voc" name="instructor_voc__${blockId}">
+          <input class="sr-only" type="file" multiple accept=".pdf,.csv,.txt,.xlsx,.xls" data-role="instructor-voc" data-upload-source="voc" name="instructor_voc__${blockId}">
           <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="voc">강의평가서(VOC)를 드래그하거나 클릭해 업로드</button>
         </div>
         <div class="lane-asset-rail" data-role="asset-rail" hidden>

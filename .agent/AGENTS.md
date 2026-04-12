@@ -203,7 +203,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - `GET /jiye`
   - `POST /api/evaluate`
   - `GET /health`
-- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `CSV`, `YouTube URL`, `YouTube Playlist URL`, `VOC PDF/CSV/TXT`
+- 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `CSV`, `YouTube URL`, `YouTube Playlist URL`, `VOC PDF/CSV/TXT/XLSX/XLS`
 - 커리큘럼 기준:
   - `Page 1`에서 과정명 + 커리큘럼 PDF를 등록
   - `POST /courses/preview`는 PDF를 `accepted | review_required | rejected`로 판정하고, 대주제/비중 초안의 신뢰도와 저장 가능 여부를 함께 반환
@@ -216,6 +216,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
     - 자산 저장은 항상 `files / youtubeUrls / vocFiles`로 분리 유지
     - lane `mode`는 마지막으로 열어 둔 입력면 복원용 UI 상태로만 사용
     - 파일 업로드는 현재 보이는 `files` 또는 `voc` surface에서만 받고, YouTube surface는 파일 drop/click 업로드를 받지 않는다
+    - VOC는 `PDF/CSV/TXT/XLSX/XLS`를 지원하되, 스프레드시트는 응답이 담긴 단일 clear sheet만 허용하고 구조가 모호하면 prepare 단계에서 거부한다
     - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다
     - persisted draft auto-restore 는 `page1_submission_version >= 2`인 payload만 허용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행

@@ -4,6 +4,8 @@ import re
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -37,6 +39,86 @@ from final_edu.youtube_cache import (
 )
 
 YOUTUBE_ID_RE = re.compile(r"(?:v=|youtu\.be/|shorts/)([0-9A-Za-z_-]{11})")
+EXCEL_VOC_HEADER_HINTS = (
+    "comment",
+    "comments",
+    "feedback",
+    "review",
+    "opinion",
+    "response",
+    "suggestion",
+    "rating",
+    "score",
+    "week",
+    "lecture",
+    "class",
+    "강의",
+    "평가",
+    "후기",
+    "의견",
+    "소감",
+    "피드백",
+    "불만",
+    "개선",
+    "만족",
+    "건의",
+    "응답",
+    "주차",
+    "차시",
+)
+EXCEL_VOC_TEXT_HEADER_HINTS = (
+    "comment",
+    "comments",
+    "feedback",
+    "review",
+    "opinion",
+    "response",
+    "suggestion",
+    "강의",
+    "평가",
+    "후기",
+    "의견",
+    "소감",
+    "피드백",
+    "불만",
+    "개선",
+    "건의",
+    "응답",
+)
+EXCEL_VOC_META_HEADER_HINTS = (
+    "week",
+    "date",
+    "lecture",
+    "class",
+    "rating",
+    "score",
+    "주차",
+    "차시",
+    "날짜",
+    "만족도",
+    "점수",
+)
+NUMERICISH_RE = re.compile(r"^[\d\s.,%+\-/:]+$")
+TEXT_SIGNAL_RE = re.compile(r"[A-Za-z가-힣]")
+
+
+@dataclass(slots=True)
+class TabularSheet:
+    name: str
+    rows: list[list[str]]
+
+
+@dataclass(slots=True)
+class VocSheetCandidate:
+    sheet: TabularSheet
+    score: float
+    header: list[str]
+    data_rows: list[list[str]]
+    text_columns: list[int]
+    meta_columns: list[int]
+    response_like_rows: int
+    numeric_ratio: float
+    header_hint_count: int
 
 
 def extract_file_asset(
@@ -58,6 +140,8 @@ def extract_file_asset(
         segments, warnings = _extract_pptx(asset.path, source, instructor_name)
     elif suffix == ".csv":
         segments, warnings = _extract_csv_file(asset.path, source, instructor_name)
+    elif suffix in {".xlsx", ".xls"}:
+        segments, warnings = _extract_excel_file(asset.path, source, instructor_name)
     elif suffix in {".txt", ".md"}:
         segments, warnings = _extract_text_file(asset.path, source, instructor_name)
     else:
@@ -295,6 +379,271 @@ def _extract_csv_file(
         warnings.append(f"{source.label}: CSV에서 분석 가능한 텍스트를 찾지 못했습니다.")
 
     return segments, warnings
+
+
+def _extract_excel_file(
+    path: Path,
+    source: SourceAsset,
+    instructor_name: str,
+) -> tuple[list[RawTextSegment], list[str]]:
+    sheets = _read_excel_sheets(path)
+    if not sheets:
+        raise ValueError(
+            f"{source.label}: 엑셀 파일이 비어 있거나 읽을 수 있는 시트를 찾지 못했습니다. "
+            "응답이 담긴 단일 시트를 남기거나 CSV로 저장해 다시 업로드해 주세요."
+        )
+
+    candidate = _select_voc_sheet_candidate(sheets, source.label)
+    return _build_excel_segments(
+        source=source,
+        instructor_name=instructor_name,
+        sheet_candidate=candidate,
+    )
+
+
+def _read_excel_sheets(path: Path) -> list[TabularSheet]:
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        return _read_xlsx_sheets(path)
+    if suffix == ".xls":
+        return _read_xls_sheets(path)
+    return []
+
+
+def _read_xlsx_sheets(path: Path) -> list[TabularSheet]:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(filename=path, read_only=True, data_only=True)
+    try:
+        sheets: list[TabularSheet] = []
+        for worksheet in workbook.worksheets:
+            if getattr(worksheet, "sheet_state", "visible") != "visible":
+                continue
+            rows: list[list[str]] = []
+            for row in worksheet.iter_rows(values_only=True):
+                normalized_row = _normalize_sheet_row(row)
+                if normalized_row:
+                    rows.append(normalized_row)
+            if rows:
+                sheets.append(TabularSheet(name=worksheet.title, rows=rows))
+        return sheets
+    finally:
+        workbook.close()
+
+
+def _read_xls_sheets(path: Path) -> list[TabularSheet]:
+    import xlrd
+
+    workbook = xlrd.open_workbook(path)
+    sheets: list[TabularSheet] = []
+    for worksheet in workbook.sheets():
+        rows: list[list[str]] = []
+        for row_index in range(worksheet.nrows):
+            normalized_row = _normalize_sheet_row(
+                worksheet.cell_value(row_index, column_index)
+                for column_index in range(worksheet.ncols)
+            )
+            if normalized_row:
+                rows.append(normalized_row)
+        if rows:
+            sheets.append(TabularSheet(name=worksheet.name, rows=rows))
+    return sheets
+
+
+def _normalize_sheet_row(values) -> list[str]:
+    row = [_normalize_tabular_cell(value) for value in values]
+    while row and not row[-1]:
+        row.pop()
+    return row if any(row) else []
+
+
+def _normalize_tabular_cell(value) -> str:  # noqa: ANN001
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ", timespec="minutes")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return normalize_text(f"{value:.6f}".rstrip("0").rstrip("."))
+    if isinstance(value, int):
+        return str(value)
+    return normalize_text(str(value))
+
+
+def _select_voc_sheet_candidate(sheets: list[TabularSheet], source_label: str) -> VocSheetCandidate:
+    candidates = [
+        candidate
+        for sheet in sheets
+        if (candidate := _score_voc_sheet_candidate(sheet)) is not None
+    ]
+    if not candidates:
+        raise ValueError(
+            f"{source_label}: 엑셀 구조가 모호합니다. 응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드해 주세요."
+        )
+
+    candidates.sort(key=lambda item: item.score, reverse=True)
+    top = candidates[0]
+    if len(candidates) == 1:
+        return top
+
+    second = candidates[1]
+    if top.score >= second.score + 1.25:
+        return top
+
+    raise ValueError(
+        f"{source_label}: 엑셀 구조가 모호합니다. 응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드해 주세요."
+    )
+
+
+def _score_voc_sheet_candidate(sheet: TabularSheet) -> VocSheetCandidate | None:
+    header = list(sheet.rows[0]) if sheet.rows else []
+    data_rows = [row for row in sheet.rows[1:] if any(cell for cell in row)] if len(sheet.rows) > 1 else []
+    if not header or len(data_rows) < 2:
+        return None
+
+    column_count = max(len(header), max((len(row) for row in data_rows), default=0))
+    header = _pad_row(header, column_count)
+    padded_rows = [_pad_row(row, column_count) for row in data_rows]
+    non_empty_cells = 0
+    numeric_like_cells = 0
+    text_columns: list[int] = []
+    meta_columns: list[int] = []
+    header_hint_count = 0
+
+    for column_index in range(column_count):
+        values = [row[column_index] for row in padded_rows if row[column_index]]
+        if not values:
+            continue
+        non_empty_cells += len(values)
+        numeric_like_cells += sum(1 for value in values if _looks_numeric_like(value))
+        header_value = normalize_text(header[column_index]).lower()
+        if _contains_hint(header_value, EXCEL_VOC_HEADER_HINTS):
+            header_hint_count += 1
+        if _is_text_rich_column(values, header_value):
+            text_columns.append(column_index)
+        elif _contains_hint(header_value, EXCEL_VOC_META_HEADER_HINTS):
+            meta_columns.append(column_index)
+
+    numeric_ratio = (numeric_like_cells / non_empty_cells) if non_empty_cells else 1.0
+    response_like_rows = sum(
+        1
+        for row in padded_rows
+        if any(column_index < len(row) and _is_text_rich_value(row[column_index]) for column_index in text_columns)
+    )
+    if not text_columns or response_like_rows < 2 or numeric_ratio > 0.82:
+        return None
+
+    score = (
+        min(len(padded_rows), 50) * 0.08
+        + len(text_columns) * 1.2
+        + len(meta_columns) * 0.2
+        + response_like_rows * 0.15
+        + header_hint_count * 0.6
+        - numeric_ratio * 1.5
+    )
+
+    return VocSheetCandidate(
+        sheet=sheet,
+        score=score,
+        header=header,
+        data_rows=padded_rows,
+        text_columns=text_columns,
+        meta_columns=meta_columns,
+        response_like_rows=response_like_rows,
+        numeric_ratio=numeric_ratio,
+        header_hint_count=header_hint_count,
+    )
+
+
+def _build_excel_segments(
+    *,
+    source: SourceAsset,
+    instructor_name: str,
+    sheet_candidate: VocSheetCandidate,
+) -> tuple[list[RawTextSegment], list[str]]:
+    included_columns = list(dict.fromkeys([*sheet_candidate.meta_columns, *sheet_candidate.text_columns]))
+    if not included_columns:
+        raise ValueError(
+            f"{source.label}: 엑셀에서 VOC 응답 열을 찾지 못했습니다. 응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드해 주세요."
+        )
+
+    sheet_name = normalize_text(sheet_candidate.sheet.name) or "sheet"
+    segments: list[RawTextSegment] = []
+    for row_index, row in enumerate(sheet_candidate.data_rows, start=1):
+        parts: list[str] = []
+        for column_index in included_columns:
+            value = row[column_index] if column_index < len(row) else ""
+            if not value:
+                continue
+            header_value = sheet_candidate.header[column_index] if column_index < len(sheet_candidate.header) else ""
+            label = normalize_text(header_value) or f"column {column_index + 1}"
+            parts.append(f"{label}: {value}")
+        row_text = normalize_text(" | ".join(parts))
+        if not row_text:
+            continue
+        segments.append(
+            RawTextSegment(
+                source_id=source.id,
+                instructor_name=instructor_name,
+                source_label=source.label,
+                source_type=source.asset_type,
+                locator=f"{sheet_name}.row.{row_index}",
+                text=row_text,
+            )
+        )
+
+    if not segments:
+        raise ValueError(
+            f"{source.label}: 엑셀에서 분석 가능한 VOC 응답을 찾지 못했습니다. 응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드해 주세요."
+        )
+
+    warnings: list[str] = []
+    if len(sheet_candidate.data_rows) != len(segments):
+        warnings.append(
+            f"{source.label}: 선택된 시트 '{sheet_candidate.sheet.name}'에서 비어 있는 응답 행 {len(sheet_candidate.data_rows) - len(segments)}개를 제외했습니다."
+        )
+    return segments, warnings
+
+
+def _pad_row(row: list[str], size: int) -> list[str]:
+    if len(row) >= size:
+        return list(row)
+    return list(row) + [""] * (size - len(row))
+
+
+def _looks_numeric_like(value: str) -> bool:
+    clean = normalize_text(value)
+    if not clean:
+        return False
+    return bool(NUMERICISH_RE.fullmatch(clean))
+
+
+def _is_text_rich_column(values: list[str], header_value: str) -> bool:
+    text_like_values = [value for value in values if _is_text_rich_value(value)]
+    if _contains_hint(header_value, EXCEL_VOC_TEXT_HEADER_HINTS):
+        return bool(text_like_values)
+    if len(text_like_values) < 2:
+        return False
+    average_length = sum(len(value) for value in text_like_values) / len(text_like_values)
+    return average_length >= 8
+
+
+def _is_text_rich_value(value: str) -> bool:
+    clean = normalize_text(value)
+    if not clean:
+        return False
+    if _looks_numeric_like(clean):
+        return False
+    return len(TEXT_SIGNAL_RE.findall(clean)) >= 4 or len(clean) >= 8
+
+
+def _contains_hint(value: str, hints: tuple[str, ...]) -> bool:
+    return any(hint in value for hint in hints)
 
 
 def _shape_texts(shape) -> list[str]:  # noqa: ANN001

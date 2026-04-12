@@ -5,10 +5,12 @@ import os
 import re
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from final_edu.app import create_app
 from final_edu.config import get_settings
@@ -27,6 +29,20 @@ def _extract_script_payload(html: str, script_id: str) -> dict:
     if not match:
         raise AssertionError(f"{script_id} script payload not found")
     return json.loads(match.group(1))
+
+
+def _build_xlsx_bytes(sheets: dict[str, list[list[object]]]) -> bytes:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    for index, (title, rows) in enumerate(sheets.items()):
+        worksheet = default_sheet if index == 0 else workbook.create_sheet(title=title)
+        worksheet.title = title
+        for row in rows:
+            worksheet.append(list(row))
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+    return buffer.getvalue()
 
 
 class Page1RestoreTests(unittest.TestCase):
@@ -410,6 +426,149 @@ class Page1RestoreTests(unittest.TestCase):
         self.assertEqual([item["original_name"] for item in instructor["files"]], ["study.pdf"])
         self.assertEqual([item["original_name"] for item in instructor["voc_files"]], ["review.pdf"])
         self.assertEqual(instructor["youtube_inputs"], [])
+
+    def test_prepare_submission_accepts_xlsx_voc_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime_root = Path(runtime_dir)
+            course = CourseRecord(
+                id="course-voc-xlsx",
+                name="VOC엑셀",
+                curriculum_pdf_key="courses/course-voc-xlsx/curriculum/test.pdf",
+                sections=[
+                    CurriculumSection(
+                        id="section-1",
+                        title="개요",
+                        description="VOC 엑셀 테스트",
+                        target_weight=100.0,
+                    )
+                ],
+                instructor_names=["윤머신"],
+                raw_curriculum_text="VOC엑셀 커리큘럼",
+                created_at="2026-04-12T19:00:00+09:00",
+                updated_at="2026-04-12T19:00:00+09:00",
+            )
+
+            course_path = runtime_root / "courses" / f"{course.id}.json"
+            course_path.parent.mkdir(parents=True, exist_ok=True)
+            course_path.write_text(json.dumps(course.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            workbook_bytes = _build_xlsx_bytes(
+                {
+                    "응답": [
+                        ["week", "rating", "comment"],
+                        ["1주차", 5, "설명은 친절했고 예시는 좋았어요"],
+                        ["2주차", 2, "실습 환경 오류가 자주 났어요"],
+                    ]
+                }
+            )
+
+            with patch.dict(
+                os.environ,
+                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                clear=False,
+            ):
+                get_settings.cache_clear()
+                client = TestClient(create_app())
+                response = client.post(
+                    "/analyze/prepare",
+                    data={
+                        "course_id": course.id,
+                        "course_name": course.name,
+                        "instructor_manifest": json.dumps([{"id": "primary", "mode": "voc"}]),
+                        "instructor_name__primary": "윤머신",
+                        "page1_submission_version": "2",
+                    },
+                    files=[
+                        (
+                            "instructor_voc__primary",
+                            (
+                                "review.xlsx",
+                                workbook_bytes,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            ),
+                        ),
+                    ],
+                )
+                self.assertEqual(response.status_code, 200)
+                request_id = response.json()["request_id"]
+                preparation_path = runtime_root / "object_store" / "analysis-preparations" / f"{request_id}.json"
+                preparation_payload = json.loads(preparation_path.read_text(encoding="utf-8"))
+                get_settings.cache_clear()
+
+        instructor = preparation_payload["payload"]["instructors"][0]
+        self.assertEqual([item["original_name"] for item in instructor["voc_files"]], ["review.xlsx"])
+
+    def test_prepare_submission_rejects_ambiguous_xlsx_voc_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime_root = Path(runtime_dir)
+            course = CourseRecord(
+                id="course-voc-xlsx-ambiguous",
+                name="VOC엑셀모호",
+                curriculum_pdf_key="courses/course-voc-xlsx-ambiguous/curriculum/test.pdf",
+                sections=[
+                    CurriculumSection(
+                        id="section-1",
+                        title="개요",
+                        description="VOC 엑셀 모호성 테스트",
+                        target_weight=100.0,
+                    )
+                ],
+                instructor_names=["윤머신"],
+                raw_curriculum_text="VOC엑셀모호 커리큘럼",
+                created_at="2026-04-12T19:10:00+09:00",
+                updated_at="2026-04-12T19:10:00+09:00",
+            )
+
+            course_path = runtime_root / "courses" / f"{course.id}.json"
+            course_path.parent.mkdir(parents=True, exist_ok=True)
+            course_path.write_text(json.dumps(course.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+            workbook_bytes = _build_xlsx_bytes(
+                {
+                    "응답A": [
+                        ["week", "comment"],
+                        ["1주차", "설명은 친절했어요"],
+                        ["2주차", "실습 환경이 불안정했어요"],
+                    ],
+                    "응답B": [
+                        ["week", "comment"],
+                        ["1주차", "자료가 부족했어요"],
+                        ["2주차", "질문 시간이 더 필요해요"],
+                    ],
+                }
+            )
+
+            with patch.dict(
+                os.environ,
+                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                clear=False,
+            ):
+                get_settings.cache_clear()
+                client = TestClient(create_app())
+                response = client.post(
+                    "/analyze/prepare",
+                    data={
+                        "course_id": course.id,
+                        "course_name": course.name,
+                        "instructor_manifest": json.dumps([{"id": "primary", "mode": "voc"}]),
+                        "instructor_name__primary": "윤머신",
+                        "page1_submission_version": "2",
+                    },
+                    files=[
+                        (
+                            "instructor_voc__primary",
+                            (
+                                "review.xlsx",
+                                workbook_bytes,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            ),
+                        ),
+                    ],
+                )
+                get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("응답이 담긴 단일 시트만 남기거나 CSV로 저장해 다시 업로드", response.json()["detail"])
 
 
 if __name__ == "__main__":

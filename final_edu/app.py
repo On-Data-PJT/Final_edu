@@ -33,6 +33,7 @@ from final_edu.jobs import (
     load_job_result,
     new_job_id,
 )
+from final_edu.extractors import extract_file_asset
 from final_edu.models import (
     AnalysisJobPayload,
     AnalysisPreparation,
@@ -782,6 +783,7 @@ async def _build_job_instructor(
         total_size = await _write_upload_to_path(upload, temp_path, max_upload_bytes)
         if total_size == 0:
             continue
+        await _validate_voc_upload(temp_path, original_name, normalized_name)
         storage_key = f"jobs/{job_id}/uploads/instructor-{index}/voc/{uuid.uuid4().hex[:8]}-{safe_temp_name}"
         storage.put_file(storage_key, temp_path, content_type=upload.content_type)
         stored_voc_uploads.append(StoredUploadRef(storage_key=storage_key, original_name=original_name))
@@ -813,6 +815,16 @@ async def _write_upload_to_path(upload: UploadFile, path: Path, max_upload_bytes
             handle.write(chunk)
     await upload.close()
     return total_size
+
+
+async def _validate_voc_upload(path: Path, original_name: str, instructor_name: str) -> None:
+    suffix = path.suffix.lower()
+    if suffix not in {".pdf", ".csv", ".txt", ".xlsx", ".xls"}:
+        raise ValueError(f"{original_name}: VOC 업로드는 PDF, CSV, TXT, XLSX, XLS 파일만 지원합니다.")
+    if suffix not in {".xlsx", ".xls"}:
+        return
+    upload = UploadedAsset(path=path, original_name=original_name)
+    await run_in_threadpool(extract_file_asset, upload, instructor_name)
 
 
 def _ensure_pdf_upload(upload: UploadFile) -> None:

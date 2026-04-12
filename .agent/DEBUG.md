@@ -198,6 +198,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/extractors.py`, `tests/test_page2_dashboard.py`
   Trigger Commands: `/jobs/{job_id}` speech coverage, YouTube chapter playlist 분석, decision-tree 0% 조사
   Must Read When: speech assignment alias, YouTube title reuse, title rescue prior, transcript/title mismatch warning 규칙을 바꿀 때
+- `DBG-037` `active` Lane: `Lead / Integration`
+  Tags: `voc`, `excel`, `xlsx`, `xls`, `sheet-selection`
+  Related Files: `final_edu/extractors.py`, `final_edu/app.py`, `tests/test_page1_restore.py`, `tests/test_voc_analysis.py`
+  Trigger Commands: `POST /analyze/prepare`, VOC Excel upload, `analyze_voc_assets()`
+  Must Read When: VOC 입력 포맷 확대, workbook sheet 선택 규칙, VOC spreadsheet row serialization 변경
 
 ## Active Incidents
 
@@ -979,3 +984,26 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - title prior 는 exact chapter anchor match 에만 적용하고, transcript anchor 없이 semantic similarity만으로 강제 배정하지 말 것
   - speech anchor 는 substring 검색으로 구현하지 말고 token/boundary 기준으로 계산할 것
   - `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum 인접 주제가 `결정 트리`로 빨려 들어가지 않는 회귀 테스트를 유지할 것
+
+### DBG-037 `active` VOC Excel workbook 을 그대로 선형화하면 요약 시트/다중 응답 시트가 함께 섞여 맥락 오분석이 생김
+
+- Date: `2026-04-12`
+- Agent / Lane: `Lead / Integration`
+- Tags: `voc`, `excel`, `xlsx`, `xls`, `sheet-selection`
+- Related Files: `final_edu/extractors.py`, `final_edu/app.py`, `tests/test_page1_restore.py`, `tests/test_voc_analysis.py`
+- Trigger Commands: `POST /analyze/prepare`, VOC Excel upload, `analyze_voc_assets()`
+- Must Read When: VOC 입력 포맷 확대, workbook sheet 선택 규칙, VOC spreadsheet row serialization 변경
+- Symptom:
+  - VOC 업로드는 CSV까지는 안정적으로 동작했지만, Excel workbook 을 그대로 지원하면 `응답 시트 + 요약 시트`가 함께 들어 있는 파일을 잘못 합쳐 읽을 위험이 있었음
+  - 숫자 집계표, 피벗, 관리자용 시트가 함께 있는 workbook 은 LLM/rule-based VOC 분석에 잡음을 크게 넣어 explainability 를 해칠 수 있었음
+- Root Cause:
+  - 기존 VOC 경로는 `CSV -> row text` 직렬화만 있었고, workbook 구조를 판별하거나 응답이 담긴 단일 sheet 를 고르는 정책이 없었음
+  - 여러 시트가 비슷하게 text-rich 하면 어느 sheet 를 진짜 VOC 응답으로 봐야 하는지 계약이 비어 있었음
+- Resolution:
+  - VOC 입력 포맷에 `XLSX/XLS`를 추가하되, extractor 는 workbook 을 시트별로 읽고 `header + text-rich row` 패턴을 기준으로 clear response sheet 후보만 점수화하도록 정리
+  - 후보가 하나로 명확하면 그 시트만 선택하고, 둘 이상이 비슷하게 후보이면 prepare 단계에서 `단일 시트 또는 CSV로 다시 업로드` 오류를 반환하도록 보강
+  - 선택된 시트는 CSV와 동일하게 `header: value | ...` row text 로 직렬화하고, `tests.test_page1_restore`와 `tests.test_voc_analysis`에 XLSX accept / ambiguous reject / XLS extractor 회귀를 추가
+- Prevention Rule:
+  - VOC spreadsheet 지원을 넓힐 때는 `모든 시트 합치기`를 기본값으로 두지 말 것
+  - workbook 구조가 애매하면 억지로 LLM에 넘기지 말고 업로드 단계에서 명시적으로 거부할 것
+  - VOC spreadsheet extractor 회귀에는 `clear response sheet 1개`, `ambiguous response sheet 2개`, `.xls` 경로를 각각 포함할 것

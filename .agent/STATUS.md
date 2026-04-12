@@ -13,7 +13,7 @@ Last Updated: 2026-04-12
 - 현재 입력 포맷:
   - 과정 등록: `커리큘럼 PDF`
   - 강의 자료: `PDF`, `PPTX`, `TXT/MD`
-  - VOC 자료: `PDF`, `CSV`, `TXT`
+  - VOC 자료: `PDF`, `CSV`, `TXT`, `XLSX`, `XLS`
   - 링크 입력: `YouTube URL`, `YouTube Playlist URL`
 
 ## Current Product State
@@ -27,6 +27,7 @@ Last Updated: 2026-04-12
   - `youtube` surface 에서는 파일 업로드를 받지 않고 안내 메시지만 보여준다.
   - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다.
   - persisted draft auto-restore 는 `page1_submission_version >= 2`인 저장본만 사용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다.
+  - VOC input 은 `PDF/CSV/TXT/XLSX/XLS`를 받되, Excel workbook 은 응답이 담긴 단일 clear sheet만 허용하고 구조가 모호하면 prepare 단계에서 거부한다.
   - VOC chip 은 일반 파일 chip 과 구분되는 `VOC` 배지로 표시된다.
   - analyze submit 과 prepare confirm 대기 중에는 blocking loading overlay 를 띄워 현재 처리 중임을 보여준다.
   - 분석 제출은 `과정 선택 + 유효 lane 1개 이상`일 때만 활성화된다.
@@ -73,6 +74,8 @@ Last Updated: 2026-04-12
   - speech title prior 는 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 없거나 off-curriculum topic 이면 nearest-neighbor 로 강제 배정하지 않는다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
+  - VOC spreadsheet 는 CSV와 동일하게 row text(`header: value | ...`)로 정규화해 분석한다.
+  - `xlsx/xls` workbook 에 응답 후보 sheet 가 여러 개이거나 숫자 집계표 중심 구조면 prepare 단계에서 명시적 오류로 거부한다.
   - Page 1 lane payload 는 `JobInstructorInput.mode`로 explicit lane mode 를 함께 저장한다.
   - 단일 roster 과정에서 generic 강사명(`강사 1`)이 submit payload 로 남으면 과정 roster 기준으로 정규화한다.
   - 강사별 `voc_analysis`, 공통 `voc_summary`를 result JSON에 저장한다.
@@ -122,6 +125,8 @@ Last Updated: 2026-04-12
 - Page 1에 간단한 gear spinner 기반 loading overlay 를 추가해 prepare 전 구간과 confirm/redirect 전 구간의 대기 상태를 사용자에게 노출했다.
 - local `inline` queue 모드에서도 결과 페이지로 넘어가기 전까지 loading overlay 가 유지되도록 submit UX를 보강했다.
 - `pyproject.toml`과 `uv.lock`에 `kiwipiepy` 의존성을 반영했다.
+- VOC input 에 `xlsx/xls`를 추가하고, prepare 단계에서 ambiguous workbook 을 거부하는 sheet-selection validator 를 넣었다.
+- VOC extractor 는 Excel row 를 CSV와 같은 `header: value | ...` 형식으로 직렬화하고, clear response sheet 만 분석하도록 보강했다.
 - `render.yaml`을 현재 ScraperAPI/STT/probe/distributed throttle env 계약과 맞췄다.
 - `yt-dlp` metadata 해석은 더 이상 ScraperAPI proxy 를 타지 않고, metadata-only `process=False` 경로와 단일 영상 fallback 을 사용한다.
 
@@ -131,7 +136,7 @@ Last Updated: 2026-04-12
   - `python3 -m py_compile final_edu/*.py tests/test_page1_restore.py tests/test_page2_dashboard.py tests/test_voc_analysis.py`
   - `node --check final_edu/static/app.js`
 - 테스트
-  - `python3 -m unittest tests.test_page1_restore tests.test_page2_dashboard tests.test_voc_analysis`
+  - `source ~/.zshrc; UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest tests.test_page1_restore tests.test_page2_dashboard tests.test_voc_analysis`
 - 검증 내용
 - `course_restore_drafts_json`가 dropdown lane shell 과 explicit `mode` restore 를 유지하는지
 - mixed lane restore 에서 `files`와 `voc_files`가 동시에 separate download URL 로 유지되는지
@@ -147,6 +152,10 @@ Last Updated: 2026-04-12
 - persisted draft JSON 이 `voc_files`와 VOC restore download URL 을 따로 내보내는지
 - `/` 렌더에 Page 1 loading overlay shell 과 기본 문구가 포함되는지
 - `/` 렌더가 versioned `/static/styles.css?v=...`와 `/static/app.js?v=...`를 내보내는지
+- `/analyze/prepare`가 clear `review.xlsx` VOC upload 를 허용하고 payload 에 별도 `voc_files`로 저장하는지
+- `/analyze/prepare`가 응답 후보 sheet 가 둘 이상인 ambiguous `review.xlsx`를 400 오류로 거부하는지
+- VOC 분석이 `review.xlsx` workbook 을 CSV와 같은 row-text 로 읽고 response count / sentiment / suggestions 를 만드는지
+- `.xls` VOC input 이 row-style sheet reader 를 통해 same extractor contract 를 따르는지
 - 분석 결과 payload 가 `available_source_modes`, `source_mode_stats`를 내보내는지
 - 분석 결과 payload 가 `mode_unmapped_series`를 함께 내보내는지
 - 분석 결과 payload 의 `source_mode_stats`가 `mapped_tokens`를 함께 내보내는지
@@ -162,6 +171,7 @@ Last Updated: 2026-04-12
 - `job_voc_asset_download`의 실제 파일 응답 body/download header 자체를 검증하는 direct route 테스트는 아직 없다.
 - 이미 잘못 저장된 기존 job/draft 의 `files`/`voc_files` 오분류를 자동 복구하는 migration 은 아직 없다.
 - OCR 기반 스캔 PDF 지원은 아직 없다.
+- VOC workbook 자동 보정은 conservative 하므로, 응답 sheet 가 둘 이상인 Excel 은 사용자가 단일 sheet 나 CSV 로 정리해 다시 올려야 한다.
 - 기존 completed job 은 자동 재계산되지 않으므로, material 분포 개선은 재분석 후에만 반영된다.
 - 외부 동향 인사이트는 deterministic fallback 중심이며 실검색 기반 고도화는 아직 없다.
 - Render 실배포 smoke test 는 아직 별도로 수행하지 않았다.
@@ -174,6 +184,8 @@ Last Updated: 2026-04-12
 
 ## Consulted DEBUG IDs
 
+- `DBG-005`
+- `DBG-012`
 - `DBG-014`
 - `DBG-015`
 - `DBG-016`
@@ -191,6 +203,7 @@ Last Updated: 2026-04-12
 - `DBG-033`
 - `DBG-035`
 - `DBG-036`
+- `DBG-037`
 
 ## Recent Updates
 
@@ -218,6 +231,8 @@ Last Updated: 2026-04-12
 - Page 2 coverage share 분모를 raw total token 에서 mapped token 으로 바꿔, `그럼/다음/그리고` 같은 주변 발화가 미분류 비중으로 차트를 잠식하지 않도록 수정했다.
 - `source_mode_stats`에 `mapped_tokens`를 추가하고, source는 있지만 mapped coverage가 0인 mode는 toggle 을 유지한 채 coverage empty state 로 분기하도록 보강했다.
 - word cloud 는 raw token 기준을 유지해 비커리큘럼 표현을 별도로 관찰할 수 있게 했다.
+- VOC 업로드 허용 형식에 `XLSX/XLS`를 추가했고, workbook 에 응답 후보 sheet 가 여러 개면 prepare 단계에서 명시적으로 거부하도록 보강했다.
+- VOC Excel extractor 는 clear response sheet 를 선택해 `header: value | ...` row text 로 정규화하고, 같은 데이터의 CSV/XLSX 분석 계약을 맞췄다.
 
 ### 2026-04-11
 
