@@ -1,6 +1,6 @@
 # DEBUG
 
-Last Updated: 2026-04-11
+Last Updated: 2026-04-12
 
 이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.
 preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작업과 맞는 재발 방지 규칙을 빠르게 찾는 것입니다.
@@ -158,6 +158,31 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/youtube.py`, `final_edu/app.py`
   Trigger Commands: `POST /analyze/prepare`, `summarize_youtube_inputs()`
   Must Read When: yt-dlp metadata 옵션, ScraperAPI 적용 범위, prepare 단계 500 회귀 변경
+- `DBG-027` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `restore`, `manifest`, `voc`, `mode`
+  Related Files: `final_edu/static/app.js`, `final_edu/app.py`, `final_edu/models.py`, `tests/test_page1_restore.py`
+  Trigger Commands: `GET /`, `POST /analyze/prepare`, persisted draft restore
+  Must Read When: lane mode persistence, course restore draft serializer, VOC chip/status 표시 변경
+- `DBG-028` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `loading`, `prepare-confirm`, `inline-queue`, `ux`
+  Related Files: `final_edu/templates/index.html`, `final_edu/static/app.js`, `final_edu/static/styles.css`
+  Trigger Commands: `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm`, `POST /analyze`
+  Must Read When: Page 1 submit loading indicator, prepare modal handoff, inline queue 대기 UX 변경
+- `DBG-031` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `page2`, `source-mode`, `voc`, `availability`
+  Related Files: `final_edu/templates/index.html`, `final_edu/static/app.js`, `final_edu/templates/job.html`, `final_edu/analysis.py`, `tests/test_page1_restore.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `GET /`, `POST /analyze/prepare`, `/jobs/{job_id}` Page 2 mode toggle
+  Must Read When: Page 1 source input 구조, Page 2 mode availability, material/speech empty-state 계약을 바꿀 때
+- `DBG-032` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `submit`, `formdata`, `restore`, `legacy`
+  Related Files: `final_edu/static/app.js`, `final_edu/app.py`, `final_edu/models.py`, `tests/test_page1_restore.py`
+  Trigger Commands: `POST /analyze/prepare`, 과정 선택 후 persisted draft auto-restore
+  Must Read When: Page 1 submit payload source of truth, hidden file input sync, draft versioning 규칙 변경
+- `DBG-033` `active` Lane: `Web / Demo Agent`
+  Tags: `page2`, `material`, `chunking`, `unmapped`, `donut`
+  Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `/jobs/{job_id}` Page 2 material toggle, material PDF/PPTX 분석
+  Must Read When: material chunking, Page 2 donut 비율 표시, `미분류` series 계약을 바꿀 때
 
 ## Active Incidents
 
@@ -340,7 +365,7 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 화면 선택 상태가 hidden input 을 통해 서버로 넘어가면 submit 직전에 한 번 더 sync 하는 경로를 둘 것
   - 복원 데이터에 generic fallback 값이 남을 수 있으면 canonical roster 와 연결해 복원 보정 규칙을 함께 둘 것
 
-### DBG-016 `active` Page 1 흰 composer capsule 과 실제 파일 드롭 영역이 달랐음
+### DBG-016 `active` Page 1 실제 업로드 target 은 현재 source surface 와 일치해야 함
 
 - Date: `2026-04-09`
 - Agent / Lane: `Web / Demo Agent`
@@ -349,15 +374,15 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
 - Trigger Commands: 파일 drag/drop
 - Must Read When: composer lane, drop target, mode switching 변경
 - Symptom:
-  - 흰 자료 입력창 전체가 업로드 영역처럼 보이지만 실제 파일 drop 은 중앙 surface 일부에서만 동작했음
+  - 사용자가 파일을 올린 위치와 실제 저장 bucket 이 다르게 해석되면 `files`와 `voc_files`가 섞일 수 있었음
 - Root Cause:
-  - drag/drop 이벤트를 lane 전체가 아니라 `files-surface` 내부에만 바인딩했음
+  - visual container 범위를 기준으로 drop target 을 넓히면, dropdown lane 에서는 현재 mode/state 와 source bucket 의미가 다시 뒤섞일 수 있었음
 - Resolution:
-  - drag/drop binding 을 `composer-lane` 전체로 올려 시각적 container 와 실제 drop target 을 맞춤
-  - 유튜브 모드에서도 같은 lane 에 파일을 drop 하면 files 모드로 전환되도록 정리
+  - `files`/`voc`는 각 source surface에만 drag/drop과 picker를 바인딩하고, 저장 bucket도 그 surface에 고정
+  - `youtube` surface 에서는 파일 drop 을 거부하고 안내를 보여 주도록 정리
 - Prevention Rule:
-  - drag/drop UI 는 시각적 container 와 실제 drop target 범위를 다르게 두지 말 것
-  - lane/capsule 단위 업로드 UX를 설계했다면 이벤트 binding 도 같은 바깥 container 에 걸 것
+  - dropdown lane 에서 drag/drop과 picker는 항상 현재 source surface 기준으로만 연결할 것
+  - lane 전체나 shared mode 값을 보고 upload bucket 을 결정하지 말 것
 
 ### DBG-019 `active` 커리큘럼 preview 에서 표 레이아웃을 납작하게 정규화해 시간표형 문서의 비중 근거를 잃음
 
@@ -521,6 +546,55 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - metadata-only `yt-dlp` 호출은 `process=False`와 `ignoreconfig=True` 여부를 먼저 점검할 것
   - 단일 YouTube `watch` URL은 metadata 실패만으로 `prepare` 전체가 500으로 끝나지 않게 할 것
   - `POST /analyze/prepare` 회귀 테스트에는 direct metadata + transcript proxy 분리 시나리오를 남길 것
+
+### DBG-027 `active` Page 1 mixed lane 이 명시적 mode 없이 저장돼 복원 시 VOC가 사라진 것처럼 보였음
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `restore`, `manifest`, `voc`, `mode`
+- Related Files: `final_edu/static/app.js`, `final_edu/app.py`, `final_edu/models.py`, `tests/test_page1_restore.py`
+- Trigger Commands: `GET /`, `POST /analyze/prepare`, persisted draft restore
+- Must Read When: lane mode persistence, course restore draft serializer, VOC chip/status 표시 변경
+- Symptom:
+  - Page 1에서 YouTube와 VOC를 함께 붙인 lane 이 저장된 뒤 다시 복원되면, 어떤 mode로 작업했는지 일관되지 않게 열릴 수 있었음
+  - VOC chip 이 일반 파일과 같은 `파일` 배지로 표시돼, 상태 메시지의 `VOC 1개`와 화면의 chip 구분이 맞지 않아 저장이 누락된 것처럼 보였음
+- Root Cause:
+  - analyze submit manifest 가 lane `id`만 저장하고 현재 `mode`를 저장하지 않았음
+  - persisted payload / restore serializer 는 lane mode 를 자산 존재 여부로 추론했기 때문에 mixed lane 에서 마지막 UI mode 를 보존하지 못했음
+  - chip renderer 가 `voc` 타입에도 일반 파일 배지 텍스트를 재사용했음
+- Resolution:
+  - Page 1 manifest 와 `JobInstructorInput` payload 에 lane `mode`를 명시적으로 저장하도록 확장
+  - restore serializer 가 추론 대신 저장된 explicit mode 를 우선 사용하게 수정
+  - submit 시 single-roster / generic 강사명을 과정 roster 기준으로 정규화해 저장 payload drift 를 줄였음
+  - VOC chip 을 `VOC` 배지와 별도 tone 으로 렌더하고, `course_restore_drafts_json` 회귀 테스트를 추가했음
+- Prevention Rule:
+  - lane 단위 UI 상태는 자산 존재 여부로 재구성하지 말고 explicit mode 를 payload 에 함께 저장할 것
+  - 서로 다른 asset class 는 count/status 뿐 아니라 chip label 도 명시적으로 구분할 것
+  - `course_restore_drafts_json`를 건드리면 `GET /` 기준 round-trip 테스트를 함께 추가할 것
+
+### DBG-028 `active` Page 1 submit/confirm 요청 중 시각적 로딩 표시가 없어 앱이 멈춘 것처럼 보였음
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `loading`, `prepare-confirm`, `inline-queue`, `ux`
+- Related Files: `final_edu/templates/index.html`, `final_edu/static/app.js`, `final_edu/static/styles.css`
+- Trigger Commands: `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm`, `POST /analyze`
+- Must Read When: Page 1 submit loading indicator, prepare modal handoff, inline queue 대기 UX 변경
+- Symptom:
+  - 대용량 자료/YouTube/VOC를 넣고 submit 하면 `분석 범위 확인` 모달이 뜨기 전까지 화면 변화가 거의 없어 멈춘 것처럼 보였음
+  - local `inline` queue 모드에서는 confirm 이후 실제 분석이 끝날 때까지 응답이 돌아오지 않아, 결과 페이지로 넘어가기 전 대기 구간이 특히 길게 느껴졌음
+- Root Cause:
+  - submit/confirm 흐름이 내부적으로는 busy 상태를 관리했지만, 사용자가 볼 수 있는 blocking loading surface 가 없었음
+  - `confirm`은 redirect 직전까지 기다리는 동안 hidden button busy 상태만 바뀌었고, inline queue 에서는 그 대기 시간이 실제 분석 시간과 겹쳤음
+- Resolution:
+  - Page 1에 공용 blocking loading overlay 를 추가하고 prepare 요청 시작 직전과 confirm 시작 직전에 즉시 노출되도록 수정
+  - prepare 결과가 confirmation required 이면 overlay 를 닫고 기존 분석 범위 modal 로 넘기며, confirm/redirect 경로에서는 overlay 를 유지하도록 정리
+  - request 시작 전에 `requestAnimationFrame` 2프레임을 양보해 spinner paint 가 fetch 전에 보이도록 보강
+  - reduced-motion 환경에서는 회전 애니메이션만 제거하고 loading state 자체는 유지
+- Prevention Rule:
+  - Page 1 interactive submit 경로에 500ms 이상 걸릴 수 있는 요청이 있으면 최소한의 visible loading surface 를 둘 것
+  - hidden button busy 상태만으로 사용자 피드백을 대신하지 말 것
+  - inline queue 경로는 redirect 전까지 실제 분석 시간이 포함될 수 있으므로, local UX 검토 시 queue mode 를 함께 확인할 것
 
 ## Archive
 
@@ -692,3 +766,121 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
 - Prevention Rule:
   - submit flow 를 분기시키면 `prepare`, `confirm`, 기존 direct fallback 세 경로를 모두 별도 smoke 로 확인할 것
   - helper import 를 정리할 때는 route refactor 뒤에 남은 call site 를 다시 grep 해 누락 여부를 확인할 것
+
+### DBG-029 `active` static JS/CSS 캐시 때문에 새 Page 1 UI 수정이 반영되지 않음
+
+- Date: `2026-04-12`
+- Agent / Lane: `Lead / Web`
+- Tags: `page1`, `static`, `cache`, `loading-overlay`, `voc-chip`
+- Related Files: `final_edu/app.py`, `final_edu/templates/base.html`, `tests/test_page1_restore.py`
+- Trigger Commands: `uv run python -m final_edu --reload`, 브라우저 재방문/새로고침
+- Must Read When: Page 1 static JS/CSS 변경 후 사용자가 이전 동작을 계속 본다고 제보할 때
+- Symptom:
+  - 서버 재기동 후에도 `분석 시작` 클릭 시 prepare modal 이 닫히지 않고 버튼만 `시작 중`으로 보였음
+  - VOC chip 라벨 수정이 들어갔는데도 화면에는 여전히 `파일`로 보였음
+- Root Cause:
+  - `base.html`이 local static asset을 버전 없는 `/static/app.js`, `/static/styles.css`로 직접 참조해 브라우저가 구버전 자산을 계속 재사용했음
+- Resolution:
+  - Jinja helper로 static asset URL에 `?v=<mtime_ns>`를 붙여 파일이 바뀌면 즉시 새 URL을 받도록 변경
+  - `/` 렌더 테스트에서 versioned static URL 존재를 검증
+- Prevention Rule:
+  - 로컬 static 자산은 버전 없는 고정 URL로 템플릿에 직접 박지 말 것
+  - Page 1 상호작용 수정 후에는 DOM/assertion뿐 아니라 rendered HTML의 static URL versioning도 함께 확인할 것
+
+### DBG-030 `active` Page 2 도넛 차트 내부 legend 가 긴 과목명에서 퍼센트와 겹침
+
+- Date: `2026-04-12`
+- Agent / Lane: `Lead / Web`
+- Tags: `page2`, `legend`, `echarts`, `layout`, `dashboard`
+- Related Files: `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{job_id}` 상단 `강사별 커리큘럼 구성 비중` 렌더
+- Must Read When: page2 상단 도넛 차트 legend, 긴 과목명, 퍼센트 정렬 문제를 수정할 때
+- Symptom:
+  - 과목명이 긴 경우 ECharts legend의 과목명 텍스트가 퍼센트 수치까지 침범해 서로 겹쳐 보였음
+- Root Cause:
+  - `job.html` inline chart 코드가 ECharts 내부 `rich text` legend를 쓰고 있었고, 이름 영역 폭이 고정이라 긴 문자열이 퍼센트 칼럼과 충돌했음
+- Resolution:
+  - 내부 legend를 끄고 차트 바깥 HTML legend로 교체
+  - legend row를 `swatch / ellipsis label / right-aligned percent` 3열로 렌더
+  - `title` tooltip과 pie slice highlight 연동을 추가
+- Prevention Rule:
+  - 긴 라벨과 수치를 같은 ECharts `rich text` row에 고정폭으로 넣지 말 것
+  - page2처럼 label 길이가 가변적인 legend는 DOM legend를 우선 고려할 것
+
+### DBG-031 `active` Page 1 mode-switch lane 이 자료를 잘못된 source bucket 에 저장하고, Page 2는 비어 있는 mode 를 `0%`로 오해하게 만듦
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `page2`, `source-mode`, `voc`, `availability`
+- Related Files: `final_edu/templates/index.html`, `final_edu/static/app.js`, `final_edu/templates/job.html`, `final_edu/analysis.py`, `tests/test_page1_restore.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `GET /`, `POST /analyze/prepare`, `/jobs/{job_id}` Page 2 source toggle
+- Must Read When: Page 1 source input 구조, Page 2 mode availability, material/speech empty-state 계약을 바꿀 때
+- Symptom:
+  - 사용자가 `study_material.pdf`를 올렸다고 인식했는데 payload 상에서는 `voc_files`로 저장되어 Page 2 `강의자료`가 전부 `0%`로 보였음
+  - 결과 페이지 상단 toggle 은 실제로 데이터가 없는 `material` mode 도 그대로 활성화해 사용자가 misleading `0%` 차트를 보게 했음
+- Root Cause:
+  - 기존 Page 1은 한 lane 안에서 `mode`를 바꿔 같은 file picker/dropzone을 `files` 또는 `vocFiles`로 라우팅했기 때문에, 업로드 시점 mode에 따라 파일이 다른 bucket으로 들어갈 수 있었음
+  - 기존 Page 2는 source availability 메타데이터가 없어 `combined/material/speech`를 무조건 모두 활성화했고, 비어 있는 mode 를 명시적으로 구분하지 못했음
+- Resolution:
+  - Page 1은 `+` dropdown lane UI를 유지하되, lane `mode`를 마지막 visible surface 로만 사용하고 저장 bucket 은 계속 `files / youtubeUrls / vocFiles`로 분리 유지
+  - file picker 와 drag/drop 을 lane 공통 상태가 아니라 `files`/`voc` surface identity로만 라우팅하도록 수정
+  - `youtube` surface 에서는 파일 업로드를 받지 않고 사용자 안내만 보여주도록 정리
+  - lane 공통 asset rail 에 자료/링크/VOC chip 을 함께 보여주고, restore 시 explicit `mode`를 그대로 연다
+  - result payload 에 `available_source_modes`, `source_mode_stats`를 추가
+  - Page 2 toggle 은 unavailable mode 를 disabled 처리하고, 차트 대신 empty state 를 노출
+  - `tests.test_page1_restore`, `tests.test_page2_dashboard`에 source 분리/availability 회귀 추가
+- Prevention Rule:
+  - lane `mode`는 visible surface 용 UI 상태로만 쓰고, 이미 저장된 자산 source bucket 을 바꾸는 의미로 재사용하지 말 것
+  - mixed lane 회귀 테스트에는 `files + youtube + voc`가 동시에 있는 restore 케이스를 반드시 포함할 것
+  - Page 2 source toggle 을 유지할 때는 결과 payload 에 availability 메타데이터를 함께 두고, unavailable mode 를 `0% 차트`로 대신하지 말 것
+
+### DBG-032 `active` Page 1 rail 상태와 실제 submit multipart 가 어긋나 새 job도 `study_material.pdf -> voc_files`로 저장됨
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `submit`, `formdata`, `restore`, `legacy`
+- Related Files: `final_edu/static/app.js`, `final_edu/app.py`, `final_edu/models.py`, `tests/test_page1_restore.py`
+- Trigger Commands: `POST /analyze/prepare`, 과정 선택 후 persisted draft auto-restore
+- Must Read When: Page 1 submit payload source of truth, hidden file input sync, draft versioning 규칙 변경
+- Symptom:
+  - 화면 rail에는 `파일 1개 · 링크 1개 · VOC 1개`처럼 보이는데, 새로 생성된 job payload 에서는 `files=[]`, `voc_files=[TalkFile_study_material.pdf.pdf]`만 저장될 수 있었음
+  - 같은 과정 선택 시 legacy draft 가 자동 복원되면서 깨진 상태가 반복 제출돼, 사용자는 새로 올린 VOC가 사라진 것처럼 느꼈음
+- Root Cause:
+  - Page 1 state 는 `blockState.files / vocFiles / youtubeUrls`에 있었지만, 실제 submit 은 `new FormData(refs.analysisForm)`로 hidden file input `FileList`를 다시 읽었음
+  - 이 경로는 rail을 그리는 JS state와 별개라, hidden input sync 가 조금만 드리프트해도 서버 payload 가 다른 bucket 으로 저장될 수 있었음
+  - 기존 persisted draft 는 version 정보가 없어, 이미 깨진 구버전 payload 도 다음 선택 시 그대로 auto-restore 되었음
+- Resolution:
+  - analyze submit multipart 를 hidden input 이 아니라 lane JS state에서 직접 조립하는 `buildAnalysisFormData()`로 교체
+  - payload 에 `page1_submission_version=2`를 저장하고, restore serializer 는 version 2 미만 draft 를 `requires_reset` metadata 와 함께 빈 block 으로 직렬화
+  - course 선택 시 legacy draft 는 auto-restore 대신 reset notice 후 빈 lane 으로 초기화
+  - `tests.test_page1_restore`에 legacy reset serializer 회귀와 prepare multipart bucket 분리 회귀를 추가
+- Prevention Rule:
+  - JS가 asset rail/state를 별도로 관리하는 폼에서는 submit source of truth를 hidden file input `FileList`에 두지 말 것
+  - upload bucket 검증은 restore 테스트만으로 충분하지 않으므로 `/analyze/prepare` multipart 저장 회귀를 반드시 함께 둘 것
+  - persisted draft schema가 submit contract를 바꾸면 version 필드를 올리고, legacy auto-restore 정책을 명시적으로 둘 것
+
+### DBG-033 `active` Page 2 material 도넛이 raw share가 아닌 visible slice 재정규화와 과도한 chunk 병합 때문에 한 과목 100%처럼 보임
+
+- Date: `2026-04-12`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page2`, `material`, `chunking`, `unmapped`, `donut`
+- Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{job_id}` Page 2 `강의자료` toggle, material PDF/PPTX 분석
+- Must Read When: material chunking, Page 2 donut 비율 표시, `미분류` series 계약을 바꿀 때
+- Symptom:
+  - multi-topic 강의자료 PDF를 올렸는데 material 도넛이 첫 과목 `100.0%`처럼 보였음
+  - 실제 PDF에는 SVM, 결정 트리, 신경망, 딥러닝/오토인코더, 종합 정리까지 포함돼 있었음
+- Root Cause:
+  - material 파일도 일반 transcript와 같은 `build_chunks(... overlap=1)` 경로를 타면서 여러 페이지가 `p.1 -> p.8` 같은 큰 chunk로 합쳐졌음
+  - 그 큰 chunk는 첫 section 쪽으로 배정되고, 뒤 chunk는 `unmapped`로 빠질 수 있어 material section share가 과도하게 한 과목으로 쏠렸음
+  - Page 2 도넛/legend/tooltip은 backend raw share를 쓰지 않고, 보이는 section value들의 합으로 다시 100%를 계산해 `75.46% -> 100.0%`처럼 보이게 했음
+- Resolution:
+  - material source(`pdf/pptx/text`)는 page/slide/segment 경계를 넘겨 합치지 않는 preserving chunk 경로로 분리하고 overlap을 제거
+  - 긴 단일 segment만 내부에서 다시 잘라 chunk를 만들고, locator에는 `(1/n)` suffix를 붙임
+  - result payload에 `mode_unmapped_series`를 추가해 mode별 미분류 비중을 별도로 전달
+  - Page 2 첫 도넛은 raw section share를 그대로 쓰고, 남는 비중은 `미분류` slice로 함께 렌더
+  - `tests.test_page2_dashboard`에 page-boundary preserving chunk 회귀와 material multi-section 분산 회귀를 추가
+- Prevention Rule:
+  - material 문서는 transcript처럼 여러 page/slide를 overlap으로 이어 붙이지 말 것
+  - Page 2 비율 시각화는 visible slice끼리 재정규화하지 말고, raw share와 미분류를 명시적으로 함께 보여줄 것
+  - material 분석 회귀에는 실제로 여러 주차가 섞인 multi-page fixture를 넣어 section 분산 여부를 확인할 것

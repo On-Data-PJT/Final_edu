@@ -11,6 +11,7 @@ from kiwipiepy import Kiwi
 from final_edu.models import ExtractedChunk, RawTextSegment
 
 WHITESPACE_RE = re.compile(r"\s+")
+SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?。！？])\s+")
 SAFE_FILENAME_RE = re.compile(r"[^0-9A-Za-z._-]+")
 SAFE_EXTENSION_RE = re.compile(r"\.[a-z0-9]{1,16}")
 KIWI_USER_TERM_RE = re.compile(r"[^A-Za-z가-힣]+")
@@ -327,6 +328,109 @@ def build_chunks(
         chunks.append(_chunk_from_segments(current))
 
     return chunks
+
+
+def build_preserved_segment_chunks(
+    segments: list[RawTextSegment],
+    target_tokens: int,
+) -> list[ExtractedChunk]:
+    chunks: list[ExtractedChunk] = []
+    for segment in segments:
+        text = normalize_text(segment.text)
+        if not text:
+            continue
+        if count_tokens(text) <= target_tokens:
+            chunks.append(_chunk_from_segments([segment]))
+            continue
+        chunks.extend(_split_segment_into_chunks(segment, target_tokens))
+    return chunks
+
+
+def _split_segment_into_chunks(
+    segment: RawTextSegment,
+    target_tokens: int,
+) -> list[ExtractedChunk]:
+    parts = _split_text_by_token_budget(segment.text, target_tokens)
+    if len(parts) <= 1:
+        return [_chunk_from_segments([segment])]
+
+    chunks: list[ExtractedChunk] = []
+    total_parts = len(parts)
+    for index, part in enumerate(parts, start=1):
+        split_segment = RawTextSegment(
+            source_id=segment.source_id,
+            instructor_name=segment.instructor_name,
+            source_label=segment.source_label,
+            source_type=segment.source_type,
+            locator=f"{segment.locator} ({index}/{total_parts})",
+            text=part,
+        )
+        chunks.append(_chunk_from_segments([split_segment]))
+    return chunks
+
+
+def _split_text_by_token_budget(text: str, target_tokens: int) -> list[str]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+
+    sentence_candidates = [part.strip() for part in SENTENCE_BOUNDARY_RE.split(normalized) if part.strip()]
+    if len(sentence_candidates) <= 1:
+        sentence_candidates = [part.strip() for part in normalized.split("  ") if part.strip()]
+    if len(sentence_candidates) <= 1:
+        sentence_candidates = [normalized]
+
+    parts: list[str] = []
+    current_sentences: list[str] = []
+    current_text = ""
+
+    for sentence in sentence_candidates:
+        candidate = normalize_text(" ".join([*current_sentences, sentence]))
+        if current_sentences and count_tokens(candidate) > target_tokens:
+            parts.append(current_text)
+            current_sentences = [sentence]
+            current_text = normalize_text(sentence)
+            continue
+        current_sentences.append(sentence)
+        current_text = candidate
+
+    if current_text:
+        parts.append(current_text)
+
+    if len(parts) == 1 and count_tokens(parts[0]) > target_tokens:
+        return _split_text_by_words(parts[0], target_tokens)
+
+    normalized_parts: list[str] = []
+    for part in parts:
+        if count_tokens(part) <= target_tokens:
+            normalized_parts.append(part)
+            continue
+        normalized_parts.extend(_split_text_by_words(part, target_tokens))
+    return normalized_parts
+
+
+def _split_text_by_words(text: str, target_tokens: int) -> list[str]:
+    words = [word for word in normalize_text(text).split(" ") if word]
+    if not words:
+        return []
+
+    parts: list[str] = []
+    current_words: list[str] = []
+    current_text = ""
+
+    for word in words:
+        candidate = normalize_text(" ".join([*current_words, word]))
+        if current_words and count_tokens(candidate) > target_tokens:
+            parts.append(current_text)
+            current_words = [word]
+            current_text = word
+            continue
+        current_words.append(word)
+        current_text = candidate
+
+    if current_text:
+        parts.append(current_text)
+    return parts
 
 
 def _chunk_from_segments(segments: list[RawTextSegment]) -> ExtractedChunk:

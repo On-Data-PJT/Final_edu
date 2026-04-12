@@ -167,6 +167,17 @@
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.12);
   }
 
+  .segmented-control input[type="radio"]:disabled+label {
+    color: #94a3b8;
+    cursor: not-allowed;
+    opacity: 0.72;
+  }
+
+  .segmented-control input[type="radio"]:disabled+label:hover {
+    background: transparent;
+    box-shadow: none;
+  }
+
   /* Instructor Selector */
   .instructor-selector {
     display: flex;
@@ -204,9 +215,79 @@
 
   /* Charts */
   .donut-wrapper {
-    position: relative;
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 32px;
+    align-items: center;
     width: 100%;
-    height: 380px;
+    min-height: 380px;
+  }
+
+  .donut-legend-panel {
+    min-width: 0;
+  }
+
+  .donut-legend {
+    display: grid;
+    gap: 10px;
+    padding: 20px 22px;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.06);
+  }
+
+  .donut-legend__row {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: default;
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .donut-legend__row:hover,
+  .donut-legend__row:focus-visible {
+    background: #f8fafc;
+    box-shadow: inset 0 0 0 1px #dbe4ee;
+    outline: none;
+    transform: translateY(-1px);
+  }
+
+  .donut-legend__swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+    flex: 0 0 12px;
+  }
+
+  .donut-legend__label {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .donut-legend__value {
+    color: #064e3b;
+    font-size: 13px;
+    font-weight: 900;
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  .donut-chart-area {
+    position: relative;
+    min-width: 0;
+    min-height: 380px;
   }
 
   .chart-container-donut {
@@ -217,7 +298,7 @@
   .donut-center-img {
     position: absolute;
     top: 50%;
-    left: 65%;
+    left: 50%;
     transform: translate(-50%, -50%);
     width: 160px;
     height: 160px;
@@ -250,6 +331,21 @@
   .chart-container-radar {
     width: 100%;
     height: 400px;
+  }
+
+  .chart-empty-state {
+    display: grid;
+    place-items: center;
+    min-height: 220px;
+    padding: 28px;
+    border: 1px dashed #dbe7db;
+    border-radius: 18px;
+    background: #f8fcf8;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.6;
+    text-align: center;
   }
 
   .panel-divider {
@@ -356,6 +452,48 @@
     margin: 2rem auto;
     max-width: 800px;
   }
+
+  @media (max-width: 1100px) {
+    .donut-wrapper {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .donut-legend-panel {
+      order: 2;
+    }
+
+    .donut-chart-area {
+      order: 1;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .donut-legend {
+      padding: 16px;
+    }
+
+    .donut-legend__row {
+      gap: 10px;
+      padding: 8px 10px;
+    }
+
+    .chart-container-donut,
+    .donut-chart-area {
+      min-height: 320px;
+      height: 320px;
+    }
+
+    .donut-center-img {
+      width: 124px;
+      height: 124px;
+    }
+
+    .donut-center-img svg {
+      width: 72px;
+      height: 72px;
+    }
+  }
 </style>
 
 <script id="page2-result-data" type="application/json" data-testid="page2-result-data"
@@ -444,61 +582,77 @@
       <div class="panel-header">
         <h2 class="panel-title">강사별 커리큘럼 구성 비중</h2>
         <div class="segmented-control">
-          <input type="radio" name="source_toggle" id="st_all" value="combined" checked>
-          <label for="st_all">전체</label>
-          <input type="radio" name="source_toggle" id="st_mat" value="material">
-          <label for="st_mat">강의자료</label>
-          <input type="radio" name="source_toggle" id="st_voc" value="speech">
-          <label for="st_voc">강의(발화)</label>
+          <input type="radio" name="source_toggle" id="st_all" value="combined" data-source-mode="combined" checked>
+          <label for="st_all" data-source-mode-label="combined">전체</label>
+          <input type="radio" name="source_toggle" id="st_mat" value="material" data-source-mode="material">
+          <label for="st_mat" data-source-mode-label="material">강의자료</label>
+          <input type="radio" name="source_toggle" id="st_voc" value="speech" data-source-mode="speech">
+          <label for="st_voc" data-source-mode-label="speech">강의(발화)</label>
         </div>
       </div>
 
-      <div class="donut-wrapper">
-        <div class="chart-container-donut" id="donutChart"></div>
-        <div class="donut-center-img" id="instructorIcon">
-          <svg viewBox="0 0 24 24" width="90" height="90" fill="#10b981" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
-          </svg>
+      <div id="donutPanelContent">
+        <div class="donut-wrapper">
+          <div class="donut-legend-panel">
+            <div class="donut-legend" id="donutLegend" data-testid="donut-legend"></div>
+          </div>
+          <div class="donut-chart-area">
+            <div class="chart-container-donut" id="donutChart"></div>
+            <div class="donut-center-img" id="instructorIcon">
+              <svg viewBox="0 0 24 24" width="90" height="90" fill="#10b981" xmlns="http://www.w3.org/2000/svg">
+                <path
+                  d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="instructor-selector">
+          <button class="arrow-btn" id="prevInstBtn">◀</button>
+          <span class="instructor-name" id="currentInstructorName">로딩 중...</span>
+          <button class="arrow-btn" id="nextInstBtn">▶</button>
         </div>
       </div>
-
-      <div class="instructor-selector">
-        <button class="arrow-btn" id="prevInstBtn">◀</button>
-        <span class="instructor-name" id="currentInstructorName">로딩 중...</span>
-        <button class="arrow-btn" id="nextInstBtn">▶</button>
-      </div>
+      <div class="chart-empty-state" id="donutEmptyState" hidden></div>
     </div>
 
     <div class="chart-panel" id="section-wordcloud">
       <div class="panel-header">
         <h2 class="panel-title" id="wordcloudTitle">주요 수업 키워드</h2>
       </div>
-      <div class="chart-container-wordcloud" id="wordcloudChart"></div>
+      <div id="wordcloudPanelContent">
+        <div class="chart-container-wordcloud" id="wordcloudChart"></div>
+      </div>
+      <div class="chart-empty-state" id="wordcloudEmptyState" hidden></div>
     </div>
 
     <div class="chart-panel" id="section-comparison">
       <div class="panel-header">
         <h2 class="panel-title">강사 커리큘럼 구성 비교</h2>
       </div>
-      <h3 style="margin-bottom: 16px;">강사 평균 커리큘럼 구성 비중</h3>
-      <div class="chart-container-bar" id="avgBarChart"></div>
-      <div class="panel-divider"></div>
-      <h3 style="margin-bottom: 16px;">강사별 커리큘럼 구성 비교</h3>
-      <div class="chart-container-bars-multi" id="multiBarChart"></div>
+      <div id="comparisonPanelContent">
+        <h3 style="margin-bottom: 16px;">강사 평균 커리큘럼 구성 비중</h3>
+        <div class="chart-container-bar" id="avgBarChart"></div>
+        <div class="panel-divider"></div>
+        <h3 style="margin-bottom: 16px;">강사별 커리큘럼 구성 비교</h3>
+        <div class="chart-container-bars-multi" id="multiBarChart"></div>
+      </div>
+      <div class="chart-empty-state" id="comparisonEmptyState" hidden></div>
     </div>
 
     <div class="chart-panel" id="section-radar">
       <div class="panel-header">
         <h2 class="panel-title">목표(강의계획서)와의 비교</h2>
       </div>
-      <div class="checkbox-group" id="radarInstructorCheckboxes">
-        <label class="checkbox-btn">
-          <input type="checkbox" id="radarCheckAll" checked>
-          <span>전체 선택</span>
-        </label>
+      <div id="radarPanelContent">
+        <div class="checkbox-group" id="radarInstructorCheckboxes">
+          <label class="checkbox-btn">
+            <input type="checkbox" id="radarCheckAll" checked>
+            <span>전체 선택</span>
+          </label>
+        </div>
+        <div class="chart-container-radar" id="radarChart"></div>
       </div>
-      <div class="chart-container-radar" id="radarChart"></div>
+      <div class="chart-empty-state" id="radarEmptyState" hidden></div>
     </div>
   </div>
 </div>
@@ -527,14 +681,42 @@
   const topicColors = ["#2E303B", "#CD483F", "#888C67", "#E89B8D", "#92C393", "#EDB6C3", "#B3D3C5", "#F2E7E7"];
   const instColors = ['#94a3b8', '#059669', '#d97706', '#4338ca', '#7c3aed', '#db2777'];
 
+  function inferLegacyModeActivity(mode) {
+    const instructorSeries = rawData.rose_series_by_mode?.[mode] || {};
+    return Object.values(instructorSeries)
+      .flat()
+      .reduce((sum, item) => sum + Number(item?.value || 0), 0);
+  }
+
   let currentIndex = 0;
   let currentMode = "combined";
+  const sourceModeStats = rawData.source_mode_stats || {};
+  const modeUnmappedSeries = rawData.mode_unmapped_series || {};
+  const availableSourceModes = new Set(
+    Array.isArray(rawData.available_source_modes) && rawData.available_source_modes.length
+      ? rawData.available_source_modes
+      : ["combined", "material", "speech"].filter((mode) => inferLegacyModeActivity(mode) > 0)
+  );
+  const sourceToggleInputs = Array.from(document.querySelectorAll('input[name="source_toggle"]'));
 
   const donutChart = echarts.init(document.getElementById('donutChart'));
+  const donutLegend = document.getElementById('donutLegend');
   const wordcloudChart = echarts.init(document.getElementById('wordcloudChart'));
   const avgBarChart = echarts.init(document.getElementById('avgBarChart'));
   const multiBarChart = echarts.init(document.getElementById('multiBarChart'));
   const radarChart = echarts.init(document.getElementById('radarChart'));
+  const panelContent = {
+    donut: document.getElementById('donutPanelContent'),
+    wordcloud: document.getElementById('wordcloudPanelContent'),
+    comparison: document.getElementById('comparisonPanelContent'),
+    radar: document.getElementById('radarPanelContent'),
+  };
+  const panelEmptyStates = {
+    donut: document.getElementById('donutEmptyState'),
+    wordcloud: document.getElementById('wordcloudEmptyState'),
+    comparison: document.getElementById('comparisonEmptyState'),
+    radar: document.getElementById('radarEmptyState'),
+  };
 
   window.addEventListener('resize', () => {
     [donutChart, wordcloudChart, avgBarChart, multiBarChart, radarChart].forEach(c => c && c.resize());
@@ -555,55 +737,214 @@
     });
   });
 
+  function sourceModeLabel(mode) {
+    if (mode === "material") {
+      return "강의자료";
+    }
+    if (mode === "speech") {
+      return "강의(발화)";
+    }
+    return "전체";
+  }
+
+  function sourceModeStat(mode) {
+    const stat = sourceModeStats?.[mode];
+    if (!stat) {
+      const inferredActivity = inferLegacyModeActivity(mode);
+      return {
+        asset_count: inferredActivity > 0 ? 1 : 0,
+        total_tokens: inferredActivity > 0 ? 1 : 0,
+      };
+    }
+    return {
+      asset_count: Number(stat?.asset_count || 0),
+      total_tokens: Number(stat?.total_tokens || 0),
+    };
+  }
+
+  function sourceModeReason(mode) {
+    const stat = sourceModeStat(mode);
+    if (stat.asset_count < 1) {
+      if (mode === "material") {
+        return "강의자료 업로드 없음";
+      }
+      if (mode === "speech") {
+        return "강의(발화) 링크 없음";
+      }
+      return "커버리지 분석용 강의자료와 강의(발화) 데이터 없음";
+    }
+    if (stat.total_tokens < 1) {
+      return `${sourceModeLabel(mode)}에서 분석 가능한 텍스트를 추출하지 못했습니다.`;
+    }
+    return "";
+  }
+
+  function modeIsAvailable(mode) {
+    return availableSourceModes.has(mode);
+  }
+
+  function firstAvailableMode() {
+    return ["combined", "material", "speech"].find(modeIsAvailable) || "";
+  }
+
+  function applySourceModeAvailability() {
+    sourceToggleInputs.forEach((input) => {
+      const mode = input.value;
+      const label = document.querySelector(`label[for="${input.id}"]`);
+      const available = modeIsAvailable(mode);
+      input.disabled = !available;
+      if (label) {
+        label.title = available ? "" : sourceModeReason(mode);
+      }
+    });
+    const fallbackMode = firstAvailableMode();
+    currentMode = modeIsAvailable(currentMode) ? currentMode : (fallbackMode || "combined");
+    const selectedInput = sourceToggleInputs.find((input) => input.value === currentMode);
+    if (selectedInput) {
+      selectedInput.checked = true;
+    }
+  }
+
+  function coverageModeMessage() {
+    if (!firstAvailableMode()) {
+      return "강의자료와 강의(발화) 데이터가 없어 커리큘럼 커버리지 차트를 표시할 수 없습니다.";
+    }
+    return sourceModeReason(currentMode) || `${sourceModeLabel(currentMode)} 데이터가 없어 이 모드를 표시할 수 없습니다.`;
+  }
+
+  function toggleCoverageEmptyState(visible, message) {
+    Object.values(panelContent).forEach((node) => {
+      if (node) {
+        node.hidden = visible;
+      }
+    });
+    Object.values(panelEmptyStates).forEach((node) => {
+      if (node) {
+        node.hidden = !visible;
+        if (visible) {
+          node.textContent = message;
+        }
+      }
+    });
+    if (visible) {
+      donutLegend.innerHTML = '';
+      [donutChart, wordcloudChart, avgBarChart, multiBarChart, radarChart].forEach((chart) => chart.clear());
+    }
+  }
+
   function getActiveData() {
     if (currentIndex === 0) {
-      return rawData.mode_series[currentMode].average.map(a => a.share * 100);
+      return (rawData.mode_series[currentMode]?.average || []).map(a => a.share * 100);
     } else {
       const instName = navInstructors[currentIndex];
-      const instData = rawData.rose_series_by_mode[currentMode][instName];
+      const instData = rawData.rose_series_by_mode[currentMode]?.[instName] || [];
       return rawData.sections.map(s => instData.find(d => d.section_id === s.id)?.value || 0);
     }
   }
 
+  function getActiveDonutData() {
+    let pieData;
+    let unmappedValue = 0;
+
+    if (currentIndex === 0) {
+      pieData = (rawData.mode_series[currentMode]?.average || []).map((item, index) => ({
+        value: Number(item.share || 0) * 100,
+        name: item.section_title,
+        section_id: item.section_id,
+        itemStyle: { color: topicColors[index % topicColors.length] }
+      }));
+      unmappedValue = Number(modeUnmappedSeries[currentMode]?.average || 0) * 100;
+    } else {
+      const instName = navInstructors[currentIndex];
+      pieData = (rawData.rose_series_by_mode[currentMode]?.[instName] || []).map((item, index) => ({
+        value: Number(item.value || 0),
+        name: item.name,
+        section_id: item.section_id,
+        itemStyle: { color: topicColors[index % topicColors.length] }
+      }));
+      unmappedValue = Number(modeUnmappedSeries[currentMode]?.instructors?.[instName] || 0) * 100;
+    }
+
+    if (unmappedValue > 0) {
+      pieData.push({
+        value: unmappedValue,
+        name: '미분류',
+        section_id: '__unmapped__',
+        itemStyle: { color: '#D7DEE8' }
+      });
+    }
+
+    return pieData;
+  }
+
+  function formatDonutPercent(value) {
+    return `${Number(value || 0).toFixed(1)}%`;
+  }
+
+  function setDonutLegendHighlight(dataIndex) {
+    donutChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+    donutChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex });
+  }
+
+  function clearDonutLegendHighlight() {
+    donutChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+  }
+
+  function renderDonutLegend(pieData) {
+    if (!donutLegend) {
+      return;
+    }
+    donutLegend.innerHTML = '';
+    pieData.forEach((item, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'donut-legend__row';
+      row.title = item.name;
+      row.setAttribute('aria-label', `${item.name} ${formatDonutPercent(item.value)}`);
+
+      const swatch = document.createElement('span');
+      swatch.className = 'donut-legend__swatch';
+      swatch.style.backgroundColor = item.itemStyle?.color || topicColors[index % topicColors.length];
+
+      const label = document.createElement('span');
+      label.className = 'donut-legend__label';
+      label.textContent = item.name;
+
+      const value = document.createElement('span');
+      value.className = 'donut-legend__value';
+      value.textContent = formatDonutPercent(item.value);
+
+      row.appendChild(swatch);
+      row.appendChild(label);
+      row.appendChild(value);
+
+      row.addEventListener('mouseenter', () => setDonutLegendHighlight(index));
+      row.addEventListener('mouseleave', clearDonutLegendHighlight);
+      row.addEventListener('focus', () => setDonutLegendHighlight(index));
+      row.addEventListener('blur', clearDonutLegendHighlight);
+
+      donutLegend.appendChild(row);
+    });
+  }
+
   function renderDonut() {
-    const dataSet = getActiveData();
-    let pieData = topics.map((top, i) => ({
-      value: dataSet[i],
-      name: top,
-      itemStyle: { color: topicColors[i % topicColors.length] }
-    }));
+    let pieData = getActiveDonutData();
     pieData.sort((a, b) => b.value - a.value);
-    const total = dataSet.reduce((a, b) => a + b, 0);
+    renderDonutLegend(pieData);
 
     donutChart.setOption({
       tooltip: {
         trigger: 'item',
-        formatter: (params) => {
-          const percent = ((params.value / total) * 100).toFixed(1);
-          return `${params.name}: <strong>${percent}%</strong>`;
-        }
+        formatter: (params) => `${params.name}: <strong>${formatDonutPercent(params.value)}</strong>`
       },
       legend: {
-        orient: 'vertical', left: '5%', top: 'middle', itemGap: 18, itemWidth: 16, itemHeight: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: [24, 28], borderRadius: 16,
-        borderWidth: 1, borderColor: '#e2e8f0', shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.05)',
-        textStyle: {
-          fontSize: 13, color: '#334155', fontWeight: 600,
-          rich: {
-            name: { width: 85, fontSize: 13, color: '#334155', fontWeight: 600 },
-            percent: { align: 'right', fontSize: 13, fontWeight: 900, color: '#064e3b' }
-          }
-        },
-        formatter: (name) => {
-          const item = pieData.find(d => d.name === name);
-          const percent = item ? ((item.value / total) * 100).toFixed(1) : "0.0";
-          return `{name|${name}} {percent|${percent}%}`;
-        }
+        show: false
       },
       series: [{
-        type: 'pie', radius: ['65%', '85%'], center: ['65%', '50%'],
+        type: 'pie', radius: ['65%', '85%'], center: ['50%', '50%'],
         avoidLabelOverlap: false, label: { show: false },
         itemStyle: { borderColor: '#fff', borderWidth: 8, borderRadius: 2 },
+        emphasis: { scale: true, scaleSize: 6 },
         data: pieData
       }]
     });
@@ -612,8 +953,8 @@
   function renderWordcloud() {
     const instName = navInstructors[currentIndex];
     const keywords = (currentIndex === 0)
-      ? Object.values(rawData.keywords_by_mode[currentMode]).flat().slice(0, 30)
-      : rawData.keywords_by_mode[currentMode][instName];
+      ? Object.values(rawData.keywords_by_mode[currentMode] || {}).flat().slice(0, 30)
+      : (rawData.keywords_by_mode[currentMode]?.[instName] || []);
 
     const wordTotal = keywords.reduce((s, i) => s + i.value, 0);
 
@@ -781,11 +1122,19 @@
   }
 
   function updateAll() {
+    applySourceModeAvailability();
     document.getElementById('currentInstructorName').innerText = navInstructors[currentIndex];
     document.getElementById('wordcloudTitle').innerText = `${navInstructors[currentIndex]} 주요 수업 키워드`;
     document.getElementById('instructorIcon').style.filter = currentIndex === 0 ? "grayscale(100%)" : "none";
+    if (!modeIsAvailable(currentMode)) {
+      toggleCoverageEmptyState(true, coverageModeMessage());
+      return;
+    }
+    toggleCoverageEmptyState(false, "");
     renderDonut();
     renderWordcloud();
+    renderBarCharts();
+    renderRadar();
   }
 
   document.getElementById('prevInstBtn').addEventListener('click', () => {
@@ -800,8 +1149,6 @@
     radio.addEventListener('change', (e) => {
       currentMode = e.target.value;
       updateAll();
-      renderBarCharts();
-      renderRadar();
     });
   });
 
@@ -819,8 +1166,6 @@
   });
 
   updateAll();
-  renderBarCharts();
-  renderRadar();
   }) ();
 
   {% if job.is_active %}

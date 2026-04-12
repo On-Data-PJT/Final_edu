@@ -210,8 +210,14 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - 주차별 시간표형 PDF는 `layout` 텍스트를 기준으로 로컬 시간표 파서가 과목 slot 수를 집계해 비중을 자동 산출할 수 있다
   - 비관련 PDF나 unreadable PDF는 자동 기본 섹션을 만들지 않고 저장 차단 대상으로 본다
   - 사용자가 수정/저장한 목표 비중이 canonical course contract 가 됨
-- 분석 방식:
-  - `Page 1`: 과정 선택 + 강사 자료/VOC/YouTube 등록
+  - 분석 방식:
+  - `Page 1`: 과정 선택 + 강사별 dropdown lane 입력
+    - lane 좌측 `+` 메뉴에서 `강의자료 / YouTube / VOC` 입력면을 전환
+    - 자산 저장은 항상 `files / youtubeUrls / vocFiles`로 분리 유지
+    - lane `mode`는 마지막으로 열어 둔 입력면 복원용 UI 상태로만 사용
+    - 파일 업로드는 현재 보이는 `files` 또는 `voc` surface에서만 받고, YouTube surface는 파일 drop/click 업로드를 받지 않는다
+    - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다
+    - persisted draft auto-restore 는 `page1_submission_version >= 2`인 payload만 허용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행
   - 명시적 `playlist?list=...`만 playlist 로 확장하고, `watch?v=...&list=...`는 단일 영상으로 유지한다
   - YouTube metadata/playlist 해석과 transcript fetch 는 object-storage shared cache + process-local throttle + distributed throttle 을 함께 사용한다
@@ -223,11 +229,12 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - Job enqueue 후 worker 가 배경 분석을 수행한다
   - `Page 2`: `sidebar + 4 panel` 대시보드 결과 페이지
     - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 dataset source 를 제어
+    - `available_source_modes`에 없는 mode 는 disabled 로 렌더하고, `source_mode_stats` 기준 empty state 를 보여준다
     - 결과 렌더는 저장된 course 와 실제 업로드/YouTube 분석 결과만 사용
   - `GET /review`: 강사별 실제 VOC 결과 페이지
   - `GET /solution`: 기존 인사이트 2섹션 + 별도 `VOC 기반 인사이트` 패널 페이지
 - 결과 payload contract:
-  - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `line_series_by_mode`를 사용
+  - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `line_series_by_mode`, `available_source_modes`, `source_mode_stats`를 사용
   - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
   - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있다
   - top-level 결과에는 `voc_summary`가 포함될 수 있다

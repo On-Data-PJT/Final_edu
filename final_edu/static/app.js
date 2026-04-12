@@ -17,6 +17,7 @@
       instructorMenuOpenBlockId: "",
       restoringCourseId: "",
       restoreRequestId: 0,
+      restoreNotice: "",
       pendingPreparation: null,
       isPreparingAnalysis: false,
     },
@@ -55,6 +56,8 @@
     courseInstructorTokens: "#course-instructor-tokens, [data-role='course-instructor-tokens']",
     courseInstructorNamesJson: "#course-instructor-names-json",
     analysisPrepareModal: "#analysis-prepare-modal, [data-testid='analysis-prepare-modal']",
+    page1LoadingOverlay: "#page1-loading-overlay, [data-testid='page1-loading-overlay']",
+    page1RestoreNotice: "#page1-restore-notice, [data-testid='page1-restore-notice']",
     selectedCourseId: "#selected-course-id, [data-testid='selected-course-id']",
     selectedCourseName: "#selected-course-name, [data-testid='selected-course-name']",
     page1Workspace: "#page1-workspace, [data-testid='page1-workspace']",
@@ -109,6 +112,7 @@
   };
 
   const CHART_COLORS = ["#2e303b", "#cd483f", "#888c67", "#e89b8d", "#92c393", "#edb6c3", "#b3d3c5", "#f2e7e7"];
+  const PAGE1_SUBMISSION_VERSION = 2;
 
   function init() {
     initPage1();
@@ -146,6 +150,8 @@
       analysisForm,
       workspace,
       prepareModal: $(SELECTORS.analysisPrepareModal),
+      loadingOverlay: $(SELECTORS.page1LoadingOverlay),
+      restoreNotice: $(SELECTORS.page1RestoreNotice),
       emptyState: $(SELECTORS.page1EmptyState),
       blocksRoot: $(SELECTORS.instructorBlocks),
       template: $(SELECTORS.instructorBlockTemplate),
@@ -157,6 +163,7 @@
       selectedCourseId: ensureHiddenInput(analysisForm, "course_id"),
       selectedCourseName: ensureHiddenInput(analysisForm, "course_name"),
       manifestInput: ensureHiddenInput(analysisForm, "instructor_manifest"),
+      page1SubmissionVersion: ensureHiddenInput(analysisForm, "page1_submission_version"),
       courseFileInput: findFirst(courseForm, [
         "input[type='file'][name='curriculum_pdf']",
         "[data-testid='course-curriculum-file']",
@@ -187,6 +194,8 @@
       prepareWarningsBlock: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-warnings-block']"]),
       prepareWarnings: findFirst($(SELECTORS.analysisPrepareModal), ["[data-role='prepare-warnings']"]),
       prepareConfirmButton: findFirst($(SELECTORS.analysisPrepareModal), ["[data-confirm-prepare]"]),
+      loadingTitle: findFirst($(SELECTORS.page1LoadingOverlay), ["[data-role='page1-loading-title']"]),
+      loadingDetail: findFirst($(SELECTORS.page1LoadingOverlay), ["[data-role='page1-loading-detail']"]),
     };
 
     state.page1.selectedCourseId = valueOf(refs.selectedCourseId);
@@ -685,6 +694,7 @@
     state.page1.selectedCourse = normalizedCourse;
     state.page1.selectedCourseId = normalizedCourse.id;
     state.page1.restoringCourseId = normalizedCourse.id;
+    state.page1.restoreNotice = "";
     const restoreRequestId = ++state.page1.restoreRequestId;
     const { selectedCourseId, selectedCourseName, courseListPanel } = refs;
 
@@ -718,7 +728,7 @@
     }
     return Object.entries(payload).reduce((acc, [courseId, draft]) => {
       const normalized = normalizeCourseDraft(draft);
-      if (normalized.blocks.length) {
+      if (normalized.blocks.length || normalized.requiresReset) {
         acc[courseId] = normalized;
       }
       return acc;
@@ -727,11 +737,21 @@
 
   function normalizeCourseDraft(draft) {
     const blocks = Array.isArray(draft?.blocks) ? draft.blocks.map(normalizeCourseDraftBlock).filter(Boolean) : [];
+    const page1SubmissionVersion = Number(draft?.page1_submission_version || draft?.page1SubmissionVersion || 1) || 1;
+    const requiresReset = Boolean(draft?.requires_reset || draft?.requiresReset || page1SubmissionVersion < 2);
+    const resetMessage = String(
+      draft?.reset_message
+      || draft?.resetMessage
+      || "이전 저장 상태는 구버전이라 초기화되었습니다. 자료를 다시 연결해 주세요."
+    ).trim();
     return {
       courseId: String(draft?.course_id || draft?.courseId || ""),
       jobId: String(draft?.job_id || draft?.jobId || ""),
       updatedAt: String(draft?.updated_at || draft?.updatedAt || ""),
       updatedAtLabel: String(draft?.updated_at_label || draft?.updatedAtLabel || ""),
+      page1SubmissionVersion,
+      requiresReset,
+      resetMessage,
       blocks,
     };
   }
@@ -781,7 +801,7 @@
       return null;
     }
     return {
-      mode: files.length ? mode : (youtubeUrls.length ? "youtube" : (vocFiles.length ? "voc" : mode)),
+      mode,
       instructorName,
       files,
       vocFiles,
@@ -830,12 +850,19 @@
     const normalizedCourseId = String(courseId || "").trim();
     const localDraft = state.page1.courseDrafts[normalizedCourseId];
     if (localDraft?.blocks?.length) {
+      state.page1.restoreNotice = "";
       applyCourseDraft(refs, localDraft);
       return true;
     }
 
     const persistedDraft = state.page1.persistedCourseDrafts[normalizedCourseId];
+    if (persistedDraft?.requiresReset) {
+      state.page1.restoreNotice = persistedDraft.resetMessage
+        || "이전 저장 상태는 구버전이라 초기화되었습니다. 자료를 다시 연결해 주세요.";
+      return false;
+    }
     if (!persistedDraft?.blocks?.length) {
+      state.page1.restoreNotice = "";
       return false;
     }
 
@@ -843,6 +870,7 @@
     if (!resolvedDraft || restoreRequestId !== state.page1.restoreRequestId || state.page1.selectedCourseId !== normalizedCourseId) {
       return false;
     }
+    state.page1.restoreNotice = "";
     state.page1.courseDrafts[normalizedCourseId] = resolvedDraft;
     applyCourseDraft(refs, resolvedDraft);
     return true;
@@ -866,9 +894,7 @@
         usedFallbackNames.add(instructorName);
       }
       resolvedBlocks.push({
-        mode: block.mode === "youtube"
-          ? "youtube"
-          : (block.mode === "voc" ? "voc" : (restoredFiles.length ? "files" : (restoredVocFiles.length ? "voc" : "youtube"))),
+        mode: block.mode === "youtube" ? "youtube" : (block.mode === "voc" ? "voc" : "files"),
         instructorName,
         files: restoredFiles.filter((file) => file instanceof File),
         vocFiles: restoredVocFiles.filter((file) => file instanceof File),
@@ -913,7 +939,16 @@
   }
 
   function syncPage1State(refs) {
-    const { workspace, emptyState, selectedCourseId, selectedCourseName, submitButton, manifestInput, addBlockButton } = refs;
+    const {
+      workspace,
+      emptyState,
+      selectedCourseId,
+      selectedCourseName,
+      submitButton,
+      manifestInput,
+      addBlockButton,
+      page1SubmissionVersion,
+    } = refs;
     const selectedId = state.page1.selectedCourseId || valueOf(selectedCourseId);
     const selectedCourse = state.page1.courses.find((item) => item.id === selectedId) || state.page1.selectedCourse;
     state.page1.selectedCourse = selectedCourse || null;
@@ -933,11 +968,15 @@
     if (manifestInput) {
       manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
     }
+    if (page1SubmissionVersion) {
+      page1SubmissionVersion.value = String(PAGE1_SUBMISSION_VERSION);
+    }
 
     state.page1.blocks.forEach((block) => {
       renderBlock(block);
       setBlockDisabled(block, !selectedCourse);
     });
+    renderPage1RestoreNotice(refs);
 
     if (addBlockButton) {
       setButtonDisabled(addBlockButton, !canAddMoreBlocks());
@@ -947,6 +986,18 @@
     }
 
     updateCourseSaveButtonState(refs);
+  }
+
+  function renderPage1RestoreNotice(refs) {
+    const notice = refs?.restoreNotice;
+    if (!(notice instanceof HTMLElement)) {
+      return;
+    }
+    const message = String(state.page1.restoreNotice || "").trim();
+    const hidden = !message;
+    notice.hidden = hidden;
+    notice.classList.toggle(CSS.hidden, hidden);
+    notice.textContent = message;
   }
 
   function syncAnalysisFormSubmission(refs) {
@@ -961,12 +1012,49 @@
       const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
       setFieldValue(instructorInput, instructorName);
       setFieldValue(youtubeHidden, blockState.youtubeUrls.join("\n"));
-      syncBlockFileInput(block);
       renderBlock(block);
     });
     if (refs.manifestInput) {
       refs.manifestInput.value = JSON.stringify(getInstructorManifest(), null, 0);
     }
+    if (refs.page1SubmissionVersion) {
+      refs.page1SubmissionVersion.value = String(PAGE1_SUBMISSION_VERSION);
+    }
+  }
+
+  function buildAnalysisFormData(refs) {
+    const fd = new FormData();
+    const selectedCourseId = state.page1.selectedCourse?.id || state.page1.selectedCourseId || valueOf(refs?.selectedCourseId);
+    const selectedCourseName = state.page1.selectedCourse?.name || valueOf(refs?.selectedCourseName);
+    const manifest = getInstructorManifest();
+
+    fd.append("course_id", selectedCourseId || "");
+    fd.append("course_name", selectedCourseName || "");
+    fd.append("instructor_manifest", JSON.stringify(manifest, null, 0));
+    fd.append("page1_submission_version", String(PAGE1_SUBMISSION_VERSION));
+
+    state.page1.blocks.forEach((block) => {
+      const blockId = String(block?.dataset?.blockId || "").trim();
+      if (!blockId) {
+        return;
+      }
+      const blockState = getBlockState(block);
+      const instructorName = resolveBlockInstructorName(block, blockState);
+      blockState.instructorName = instructorName;
+      fd.append(`instructor_name__${blockId}`, instructorName || "");
+      fd.append(`instructor_youtube_urls__${blockId}`, blockState.youtubeUrls.join("\n"));
+      (Array.isArray(blockState.files) ? blockState.files : []).forEach((file) => {
+        if (file instanceof File) {
+          fd.append(`instructor_files__${blockId}`, file, file.name || fileDisplayName(file));
+        }
+      });
+      (Array.isArray(blockState.vocFiles) ? blockState.vocFiles : []).forEach((file) => {
+        if (file instanceof File) {
+          fd.append(`instructor_voc__${blockId}`, file, file.name || fileDisplayName(file));
+        }
+      });
+    });
+    return fd;
   }
 
   async function prepareAnalysisSubmission(refs) {
@@ -981,18 +1069,26 @@
     state.page1.isPreparingAnalysis = true;
     setButtonDisabled(refs.submitButton, true);
     try {
+      showPage1Loading(
+        refs,
+        "분석 범위를 확인하는 중입니다",
+        "입력하신 자료와 링크를 정리하고 있습니다. 잠시만 기다려 주세요.",
+      );
+      await waitForNextPaint();
       const payload = await fetchJson("/analyze/prepare", {
         method: "POST",
-        body: new FormData(refs.analysisForm),
+        body: buildAnalysisFormData(refs),
       });
       state.page1.pendingPreparation = payload;
       if (payload.requires_confirmation) {
+        hidePage1Loading(refs);
         renderPrepareSummary(refs, payload);
         openSurface(refs.prepareModal);
         return;
       }
-      await confirmPreparedAnalysis(refs, payload.request_id);
+      await confirmPreparedAnalysis(refs, payload.request_id, { loadingVisible: true });
     } catch (error) {
+      hidePage1Loading(refs);
       setStatus(refs.previewState, `분석 준비에 실패했습니다. ${error.message}`);
     } finally {
       state.page1.isPreparingAnalysis = false;
@@ -1013,7 +1109,7 @@
         if (!requestId) {
           return;
         }
-        await confirmPreparedAnalysis(refs, requestId);
+        await confirmPreparedAnalysis(refs, requestId, { closePrepareModalFirst: true });
       });
     }
     refs.prepareModal.addEventListener("click", (event) => {
@@ -1035,24 +1131,57 @@
     }
   }
 
-  async function confirmPreparedAnalysis(refs, requestId) {
+  async function confirmPreparedAnalysis(refs, requestId, options = {}) {
     if (!requestId) {
       return;
+    }
+    const closePrepareModalFirst = options.closePrepareModalFirst === true;
+    let redirecting = false;
+    if (closePrepareModalFirst) {
+      closePrepareModal(refs);
+    }
+    showPage1Loading(
+      refs,
+      "분석을 시작하는 중입니다",
+      "자료를 업로드하고 결과 페이지로 이동하고 있습니다. 잠시만 기다려 주세요.",
+    );
+    if (!options.loadingVisible || closePrepareModalFirst) {
+      await waitForNextPaint();
     }
     setBusy(refs.prepareConfirmButton, true, "시작 중");
     try {
       const payload = await fetchJson(`/analyze/prepare/${encodeURIComponent(requestId)}/confirm`, {
         method: "POST",
       });
-      closePrepareModal(refs);
       if (payload.redirect_url) {
+        redirecting = true;
         window.location.href = payload.redirect_url;
       }
     } catch (error) {
+      hidePage1Loading(refs);
       setStatus(refs.previewState, `분석 시작에 실패했습니다. ${error.message}`);
     } finally {
+      if (!redirecting) {
+        hidePage1Loading(refs);
+      }
       setBusy(refs.prepareConfirmButton, false);
     }
+  }
+
+  function showPage1Loading(refs, title, detail) {
+    if (!refs?.loadingOverlay) {
+      return;
+    }
+    setFieldValue(refs.loadingTitle, title || "처리 중입니다");
+    setFieldValue(refs.loadingDetail, detail || "잠시만 기다려 주세요.");
+    openSurface(refs.loadingOverlay);
+  }
+
+  function hidePage1Loading(refs) {
+    if (!refs?.loadingOverlay) {
+      return;
+    }
+    closeSurface(refs.loadingOverlay);
   }
 
   function renderPrepareSummary(refs, payload) {
@@ -1144,19 +1273,19 @@
         </div>
       </div>
       <div class="composer-lane__main">
-        <div class="lane-surface lane-surface-files" data-role="files-surface">
-          <input class="sr-only" type="file" multiple accept=".pdf,.pptx,.txt,.md" data-role="instructor-files" name="instructor_files__${blockId}">
-          <button type="button" class="lane-surface__tap" data-action="open-file-picker">강의 자료를 드래그하거나 클릭해 업로드</button>
+        <div class="lane-surface lane-surface-files" data-role="files-surface" data-upload-source="files">
+          <input class="sr-only" type="file" multiple accept=".pdf,.pptx,.txt,.md" data-role="instructor-files" data-upload-source="files" name="instructor_files__${blockId}">
+          <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="files">강의 자료를 드래그하거나 클릭해 업로드</button>
         </div>
-        <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+        <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" data-upload-source="youtube" hidden>
           <div class="lane-token-shell">
             <input type="text" class="lane-token-input" data-role="youtube-draft" placeholder="유튜브 링크를 입력하고 콤마를 누르세요">
           </div>
           <input type="hidden" data-role="instructor-youtube" name="instructor_youtube_urls__${blockId}" value="">
         </div>
-        <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
-          <input class="sr-only" type="file" multiple accept=".pdf,.csv,.txt" data-role="instructor-voc" name="instructor_voc__${blockId}">
-          <button type="button" class="lane-surface__tap" data-action="open-file-picker">강의평가서(VOC)를 드래그하거나 클릭해 업로드</button>
+        <div class="lane-surface lane-surface-voc" data-role="voc-surface" data-upload-source="voc" hidden>
+          <input class="sr-only" type="file" multiple accept=".pdf,.csv,.txt" data-role="instructor-voc" data-upload-source="voc" name="instructor_voc__${blockId}">
+          <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="voc">강의평가서(VOC)를 드래그하거나 클릭해 업로드</button>
         </div>
         <div class="lane-asset-rail" data-role="asset-rail" hidden>
           <div class="lane-asset-strip" data-role="asset-list"></div>
@@ -1205,6 +1334,7 @@
       files: [],
       vocFiles: [],
       youtubeUrls: [],
+      notice: "",
     };
     renderBlock(block);
   }
@@ -1212,15 +1342,31 @@
   function bindInstructorBlock(block, index) {
     const blockId = block.dataset.blockId || uniqueId("instructor");
     decorateInstructorBlock(block, blockId, index);
-
-    bindDropzone(block, {
+    const filesSurface = findOne(block, ["[data-role='files-surface']"]);
+    const youtubeSurface = findOne(block, ["[data-role='youtube-surface']"]);
+    const vocSurface = findOne(block, ["[data-role='voc-surface']"]);
+    bindDropzone(filesSurface, {
       canAccept() {
         return canAcceptBlockFileDrop(block);
       },
       onFiles(files) {
-        const blockState = getBlockState(block);
-        const type = blockState.mode === "voc" ? "voc" : "files";
-        addBlockFiles(block, files, type);
+        addBlockFiles(block, files, "files");
+      },
+    });
+    bindDropzone(vocSurface, {
+      canAccept() {
+        return canAcceptBlockFileDrop(block);
+      },
+      onFiles(files) {
+        addBlockFiles(block, files, "voc");
+      },
+    });
+    bindDropzone(youtubeSurface, {
+      canAccept() {
+        return false;
+      },
+      onReject(files) {
+        rejectYoutubeSurfaceFiles(block, files);
       },
     });
 
@@ -1237,20 +1383,21 @@
           toggleModeMenu(block);
           return;
         }
+        if (actionName === "switch-mode") {
+          event.preventDefault();
+          switchBlockMode(block, action.getAttribute("data-mode"));
+          syncPage1State(page1Refs());
+          return;
+        }
         if (actionName === "toggle-instructor-menu") {
           event.preventDefault();
           toggleInstructorMenu(block);
           return;
         }
-        if (actionName === "switch-mode") {
-          event.preventDefault();
-          switchBlockMode(block, action.getAttribute("data-mode") || "files");
-          return;
-        }
         if (actionName === "open-file-picker") {
           event.preventDefault();
-          const blockState = getBlockState(block);
-          const role = blockState.mode === "voc" ? "instructor-voc" : "instructor-files";
+          const uploadSource = resolveUploadSource(action);
+          const role = uploadSource === "voc" ? "instructor-voc" : "instructor-files";
           const fileInput = findOne(block, [`[data-role='${role}']`]);
           if (fileInput) {
             fileInput.click();
@@ -1261,7 +1408,7 @@
           event.preventDefault();
           const blockState = getBlockState(block);
           blockState.instructorName = (action.getAttribute("data-instructor-value") || "").trim();
-          state.page1.instructorMenuOpenBlockId = "";
+          closeAllBlockMenus();
           renderBlock(block);
           syncPage1State(page1Refs());
           return;
@@ -1349,7 +1496,9 @@
     block.dataset.instructorName = selectedInstructorName;
     if (status) {
       let statusLabel = "";
-      if (!hasName && !hasAssets) {
+      if (blockState.notice) {
+        statusLabel = blockState.notice;
+      } else if (!hasName && !hasAssets) {
         statusLabel = "자료 없음";
       } else if (hasName && !hasAssets) {
         statusLabel = "자료 대기";
@@ -1422,7 +1571,13 @@
   function getInstructorManifest() {
     return state.page1.blocks
       .filter((block) => block.dataset.blockId)
-      .map((block) => ({ id: block.dataset.blockId }));
+      .map((block) => {
+        const blockState = getBlockState(block);
+        return {
+          id: block.dataset.blockId,
+          mode: blockState.mode === "youtube" ? "youtube" : (blockState.mode === "voc" ? "voc" : "files"),
+        };
+      });
   }
 
   function canSubmitAnalysis() {
@@ -1453,6 +1608,7 @@
       courseForm: $(SELECTORS.courseForm),
       analysisForm: $(SELECTORS.analysisForm),
       workspace: $(SELECTORS.page1Workspace),
+      restoreNotice: $(SELECTORS.page1RestoreNotice),
       emptyState: $(SELECTORS.page1EmptyState),
       blocksRoot: $(SELECTORS.instructorBlocks),
       template: $(SELECTORS.instructorBlockTemplate),
@@ -1464,6 +1620,7 @@
       selectedCourseId: $(SELECTORS.selectedCourseId),
       selectedCourseName: $(SELECTORS.selectedCourseName),
       manifestInput: ensureHiddenInput($(SELECTORS.analysisForm), "instructor_manifest"),
+      page1SubmissionVersion: ensureHiddenInput($(SELECTORS.analysisForm), "page1_submission_version"),
       courseFileInput: findFirst($(SELECTORS.courseForm), ["input[type='file'][name='curriculum_pdf']", "[data-testid='course-curriculum-file']"]),
       courseNameInput: findFirst($(SELECTORS.courseForm), ["input[name='course_name']", "[data-testid='course-name']"]),
       courseFileTokens: $(SELECTORS.courseFileTokens),
@@ -1654,6 +1811,7 @@
       files: [],
       vocFiles: [],
       youtubeUrls: [],
+      notice: "",
     };
     return state.page1.blockData[blockId];
   }
@@ -1670,22 +1828,20 @@
     const youtubeDraft = findOne(block, ["[data-role='youtube-draft']"]);
     const youtubeHidden = findOne(block, ["[data-role='instructor-youtube']"]);
     const vocSurface = findOne(block, ["[data-role='voc-surface']"]);
-    const vocHidden = findOne(block, ["[data-role='instructor-voc']"]);
     const assetRail = findOne(block, ["[data-role='asset-rail']"]);
     const assetList = findOne(block, ["[data-role='asset-list']"]);
     const instructorInput = findOne(block, ["[data-role='instructor-name']"]);
     const instructorTrigger = findOne(block, ["[data-action='toggle-instructor-menu']"]);
     const instructorMenu = findOne(block, ["[data-role='instructor-menu']"]);
-    const activeSurface = blockState.mode === "voc" ? vocSurface : filesSurface;
+
+    const activeSurface = blockState.mode === "youtube"
+      ? youtubeSurface
+      : (blockState.mode === "voc" ? vocSurface : filesSurface);
     const activeTap = activeSurface ? findOne(activeSurface, ["[data-action='open-file-picker']"]) : null;
 
     if (trigger) {
       trigger.classList.toggle("is-youtube", blockState.mode === "youtube");
-      if (blockState.mode !== "youtube") {
-        trigger.textContent = "+";
-      } else {
-        trigger.textContent = "";
-      }
+      trigger.textContent = blockState.mode === "youtube" ? "" : "+";
     }
     if (menu) {
       menu.hidden = state.page1.menuOpenBlockId !== block.dataset.blockId;
@@ -1705,9 +1861,7 @@
     if (youtubeDraft) {
       youtubeDraft.value = youtubeDraft.value || "";
     }
-    if (assetList) {
-      renderBlockAssets(block, assetList, assetRail);
-    }
+    renderBlockAssets(block, assetList, assetRail);
     updateBlockPrompts(block, activeTap, youtubeDraft, blockState);
     if (instructorInput && instructorTrigger && instructorMenu) {
       populateBlockInstructorMenu(block, instructorInput, instructorTrigger, instructorMenu);
@@ -1735,9 +1889,12 @@
 
   function renderBlockAssets(block, container, rail) {
     const blockState = getBlockState(block);
+    if (!container) {
+      return;
+    }
     container.innerHTML = "";
     blockState.files.forEach((file, index) => {
-      container.appendChild(createChip(file.name, {
+      container.appendChild(createChip(fileDisplayName(file), {
         kind: "file",
         removeAttr: "data-remove-file-index",
         removeValue: String(index),
@@ -1745,7 +1902,7 @@
     });
     const vocFiles = Array.isArray(blockState.vocFiles) ? blockState.vocFiles : [];
     vocFiles.forEach((file, index) => {
-      container.appendChild(createChip(file.name, {
+      container.appendChild(createChip(fileDisplayName(file), {
         kind: "voc",
         removeAttr: "data-remove-voc-index",
         removeValue: String(index),
@@ -1759,7 +1916,7 @@
       }));
     });
     if (rail) {
-      rail.hidden = !container.children.length;
+      rail.hidden = container.children.length < 1;
     }
   }
 
@@ -1819,13 +1976,6 @@
     return currentCourseInstructorNamesForCourse(state.page1.selectedCourse?.id || "");
   }
 
-  function toggleModeMenu(block) {
-    const blockId = block.dataset.blockId || "";
-    state.page1.menuOpenBlockId = state.page1.menuOpenBlockId === blockId ? "" : blockId;
-    state.page1.instructorMenuOpenBlockId = "";
-    state.page1.blocks.forEach((item) => renderBlock(item));
-  }
-
   function toggleInstructorMenu(block) {
     const blockId = block.dataset.blockId || "";
     state.page1.instructorMenuOpenBlockId = state.page1.instructorMenuOpenBlockId === blockId ? "" : blockId;
@@ -1842,8 +1992,16 @@
     state.page1.blocks.forEach((block) => renderBlock(block));
   }
 
+  function toggleModeMenu(block) {
+    const blockId = block.dataset.blockId || "";
+    state.page1.menuOpenBlockId = state.page1.menuOpenBlockId === blockId ? "" : blockId;
+    state.page1.instructorMenuOpenBlockId = "";
+    state.page1.blocks.forEach((item) => renderBlock(item));
+  }
+
   function switchBlockMode(block, mode) {
     const blockState = getBlockState(block);
+    clearBlockNotice(blockState);
     if (mode === "youtube") {
       blockState.mode = "youtube";
     } else if (mode === "voc") {
@@ -1862,6 +2020,7 @@
     if (!nextFiles.length) {
       return;
     }
+    clearBlockNotice(blockState);
     const targetArr = type === "voc" ? blockState.vocFiles : blockState.files;
     const seen = new Set(targetArr.map(fileIdentity));
     nextFiles.forEach((file) => {
@@ -1895,6 +2054,7 @@
     if (!nextUrls.length) {
       return;
     }
+    clearBlockNotice(blockState);
     nextUrls.forEach((url) => {
       if (!blockState.youtubeUrls.includes(url)) {
         blockState.youtubeUrls.push(url);
@@ -1952,6 +2112,34 @@
     return !block.classList.contains(CSS.disabled);
   }
 
+  function resolveUploadSource(node) {
+    const sourceNode = node?.closest?.("[data-upload-source]");
+    const source = String(sourceNode?.getAttribute?.("data-upload-source") || "").trim();
+    if (source === "voc") {
+      return "voc";
+    }
+    if (source === "files") {
+      return "files";
+    }
+    return "";
+  }
+
+  function clearBlockNotice(blockState) {
+    if (blockState && blockState.notice) {
+      blockState.notice = "";
+    }
+  }
+
+  function rejectYoutubeSurfaceFiles(block, files) {
+    const blockState = getBlockState(block);
+    if (!(Array.isArray(files) && files.length)) {
+      return;
+    }
+    blockState.notice = "유튜브 입력면에서는 파일을 업로드할 수 없습니다. 강의자료 또는 VOC로 전환해 주세요.";
+    renderBlock(block);
+    syncPage1State(page1Refs());
+  }
+
   function canAddMoreBlocks() {
     const roster = currentCourseInstructorNames();
     if (!state.page1.selectedCourseId || state.page1.restoringCourseId === state.page1.selectedCourseId) {
@@ -1988,6 +2176,7 @@
       return;
     }
     const onFiles = typeof options.onFiles === "function" ? options.onFiles : () => { };
+    const onReject = typeof options.onReject === "function" ? options.onReject : () => { };
     const canAccept = typeof options.canAccept === "function" ? options.canAccept : () => true;
     const hasTransferFiles = (event) => {
       const dataTransfer = event?.dataTransfer;
@@ -2023,6 +2212,7 @@
       event.preventDefault();
       node.classList.remove("is-dragover");
       if (!canAccept(event)) {
+        onReject(Array.from(event.dataTransfer?.files || []), event);
         return;
       }
       const files = Array.from(event.dataTransfer?.files || []);
@@ -2039,7 +2229,7 @@
       chip.dataset.kind = options.kind;
       const kind = document.createElement("span");
       kind.className = `lane-chip__kind lane-chip__kind-${options.kind}`;
-      kind.textContent = options.kind === "youtube" ? "YT" : "파일";
+      kind.textContent = options.kind === "youtube" ? "YT" : (options.kind === "voc" ? "VOC" : "파일");
       chip.appendChild(kind);
     }
     const text = document.createElement("span");
@@ -2059,6 +2249,13 @@
 
   function fileIdentity(file) {
     return `${file.name}:${file.size}:${file.lastModified}`;
+  }
+
+  function fileDisplayName(file) {
+    if (file instanceof File) {
+      return file.name;
+    }
+    return String(file?.name || file?.originalName || file?.original_name || "업로드 파일");
   }
 
   function renderPage2Charts(containers, options = {}) {
@@ -2821,6 +3018,14 @@
 
   function courseSaveButton() {
     return $(SELECTORS.courseSaveButton);
+  }
+
+  function waitForNextPaint() {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+    });
   }
 
   function summaryPreviewWeights(sections) {

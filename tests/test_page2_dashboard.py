@@ -20,6 +20,7 @@ from final_edu.models import (
     SourceAsset,
     UploadedAsset,
 )
+from final_edu.utils import build_preserved_segment_chunks
 
 
 def _sample_sections() -> list[CurriculumSection]:
@@ -87,7 +88,47 @@ def _fake_extract_youtube_asset(url: str, instructor_name: str, settings=None, s
     )
 
 
-def _build_result_payload() -> dict:
+def _fake_extract_pdf_asset(upload: UploadedAsset, instructor_name: str):
+    source_id = f"{instructor_name}-pdf"
+    return (
+        SourceAsset(
+            id=source_id,
+            instructor_name=instructor_name,
+            asset_type="pdf",
+            label=upload.original_name,
+            origin="upload",
+        ),
+        [
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.1",
+                text="SQL 데이터 분석 전처리 시각화 pandas SQL 데이터 분석 전처리",
+            ),
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.2",
+                text="딥러닝 신경망 모델 학습 추론 딥러닝 신경망 모델 실습",
+            ),
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.3",
+                text="SQL 데이터 분석 리포트 시각화 pandas 데이터 분석 SQL",
+            ),
+        ],
+        [],
+    )
+
+
+def _build_result_payload(*, include_material: bool = True, include_speech: bool = True) -> dict:
     with tempfile.TemporaryDirectory() as temp_dir:
         material_path_a = Path(temp_dir) / "instructor-a.txt"
         material_path_b = Path(temp_dir) / "instructor-b.txt"
@@ -97,13 +138,13 @@ def _build_result_payload() -> dict:
         submissions = [
             InstructorSubmission(
                 name="강사 A",
-                files=[UploadedAsset(path=material_path_a, original_name="a.txt")],
-                youtube_urls=["https://example.com/a"],
+                files=[UploadedAsset(path=material_path_a, original_name="a.txt")] if include_material else [],
+                youtube_urls=["https://example.com/a"] if include_speech else [],
             ),
             InstructorSubmission(
                 name="강사 B",
-                files=[UploadedAsset(path=material_path_b, original_name="b.txt")],
-                youtube_urls=["https://example.com/b"],
+                files=[UploadedAsset(path=material_path_b, original_name="b.txt")] if include_material else [],
+                youtube_urls=["https://example.com/b"] if include_speech else [],
             ),
         ]
 
@@ -135,10 +176,18 @@ class Page2DashboardTests(unittest.TestCase):
     def test_analysis_builds_mode_specific_payloads_for_page2(self) -> None:
         result = _build_result_payload()
 
+        self.assertIn("available_source_modes", result)
+        self.assertIn("source_mode_stats", result)
+        self.assertIn("mode_unmapped_series", result)
         self.assertIn("rose_series_by_mode", result)
         self.assertIn("keywords_by_mode", result)
         self.assertEqual(sorted(result["rose_series_by_mode"].keys()), ["combined", "material", "speech"])
         self.assertEqual(sorted(result["keywords_by_mode"].keys()), ["combined", "material", "speech"])
+        self.assertEqual(sorted(result["available_source_modes"]), ["combined", "material", "speech"])
+        self.assertEqual(result["source_mode_stats"]["material"]["asset_count"], 2)
+        self.assertGreater(result["source_mode_stats"]["material"]["total_tokens"], 0)
+        self.assertEqual(result["source_mode_stats"]["speech"]["asset_count"], 2)
+        self.assertGreater(result["source_mode_stats"]["speech"]["total_tokens"], 0)
 
         material_rose = {
             item["section_id"]: item["value"]
@@ -169,6 +218,88 @@ class Page2DashboardTests(unittest.TestCase):
             result["keywords_by_instructor"],
             result["keywords_by_mode"]["combined"],
         )
+        self.assertIn("material", result["mode_unmapped_series"])
+        self.assertIn("강사 A", result["mode_unmapped_series"]["material"]["instructors"])
+
+    def test_analysis_marks_material_mode_unavailable_when_no_material_assets_exist(self) -> None:
+        result = _build_result_payload(include_material=False, include_speech=True)
+
+        self.assertNotIn("material", result["available_source_modes"])
+        self.assertIn("combined", result["available_source_modes"])
+        self.assertIn("speech", result["available_source_modes"])
+        self.assertEqual(result["source_mode_stats"]["material"]["asset_count"], 0)
+        self.assertEqual(result["source_mode_stats"]["material"]["total_tokens"], 0)
+        self.assertEqual(result["mode_unmapped_series"]["material"]["average"], 0.0)
+        self.assertEqual(result["source_mode_stats"]["speech"]["asset_count"], 2)
+        self.assertGreater(result["source_mode_stats"]["speech"]["total_tokens"], 0)
+
+    def test_material_pdf_chunks_preserve_page_boundaries(self) -> None:
+        segments = [
+            RawTextSegment(
+                source_id="material-1",
+                instructor_name="강사 A",
+                source_label="study.pdf",
+                source_type="pdf",
+                locator="p.1",
+                text="SQL 데이터 분석 전처리 시각화 pandas SQL 데이터 분석 전처리",
+            ),
+            RawTextSegment(
+                source_id="material-1",
+                instructor_name="강사 A",
+                source_label="study.pdf",
+                source_type="pdf",
+                locator="p.2",
+                text="딥러닝 신경망 모델 학습 추론 딥러닝 신경망 모델 실습",
+            ),
+            RawTextSegment(
+                source_id="material-1",
+                instructor_name="강사 A",
+                source_label="study.pdf",
+                source_type="pdf",
+                locator="p.3",
+                text="SQL 데이터 분석 리포트 시각화 pandas 데이터 분석 SQL",
+            ),
+        ]
+
+        chunks = build_preserved_segment_chunks(segments, target_tokens=1000)
+
+        self.assertEqual([chunk.locator for chunk in chunks], ["p.1", "p.2", "p.3"])
+
+    def test_analysis_spreads_material_pdf_across_multiple_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            material_path = Path(temp_dir) / "study.pdf"
+            material_path.write_text("placeholder", encoding="utf-8")
+            submissions = [
+                InstructorSubmission(
+                    name="강사 A",
+                    files=[UploadedAsset(path=material_path, original_name="study.pdf")],
+                )
+            ]
+            settings = replace(
+                get_settings(),
+                openai_api_key=None,
+                chunk_target_tokens=1000,
+                chunk_overlap_segments=1,
+                max_evidence_per_section=1,
+            )
+
+            with patch("final_edu.analysis.extract_file_asset", side_effect=_fake_extract_pdf_asset):
+                result = analyze_submissions(
+                    course_id="course-1",
+                    course_name="AI 데이터 과정",
+                    sections=_sample_sections(),
+                    submissions=submissions,
+                    settings=settings,
+                    analysis_mode="lexical",
+                ).to_dict()
+
+        material_rose = {
+            item["section_id"]: item["value"]
+            for item in result["rose_series_by_mode"]["material"]["강사 A"]
+        }
+        self.assertGreater(material_rose["data-analysis"], 0.0)
+        self.assertGreater(material_rose["deep-learning"], 0.0)
+        self.assertEqual(result["mode_unmapped_series"]["material"]["instructors"]["강사 A"], 0.0)
 
     def test_job_detail_renders_real_dashboard_shell_without_demo_seed_data(self) -> None:
         result = _build_result_payload()
@@ -209,6 +340,10 @@ class Page2DashboardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('id="section-donut"', response.text)
+        self.assertIn('id="donutLegend"', response.text)
+        self.assertIn('data-source-mode-label="material"', response.text)
+        self.assertIn('id="donutEmptyState"', response.text)
+        self.assertIn("mode_unmapped_series", response.text)
         self.assertIn("강사별 커리큘럼 구성 비중", response.text)
         self.assertIn("Final Edu Dashboard", response.text)
         self.assertIn("VOC Analysis", response.text)

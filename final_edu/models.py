@@ -153,6 +153,9 @@ class AnalysisRun:
     scorer_mode: str
     duration_ms: int
     course: dict = field(default_factory=dict)
+    available_source_modes: list[str] = field(default_factory=list)
+    source_mode_stats: dict = field(default_factory=dict)
+    mode_unmapped_series: dict = field(default_factory=dict)
     mode_series: dict = field(default_factory=dict)
     average_series_by_mode: dict = field(default_factory=dict)
     keywords_by_instructor: dict = field(default_factory=dict)
@@ -216,9 +219,19 @@ class StoredUploadRef:
         )
 
 
+def _normalize_lane_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "youtube":
+        return "youtube"
+    if normalized == "voc":
+        return "voc"
+    return "files"
+
+
 @dataclass(slots=True)
 class JobInstructorInput:
     name: str
+    mode: str = "files"
     files: list[StoredUploadRef] = field(default_factory=list)
     youtube_inputs: list[str] = field(default_factory=list)
     youtube_urls: list[str] = field(default_factory=list)
@@ -227,6 +240,7 @@ class JobInstructorInput:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "mode": _normalize_lane_mode(self.mode),
             "files": [file_ref.to_dict() for file_ref in self.files],
             "youtube_inputs": list(self.youtube_inputs),
             "youtube_urls": list(self.youtube_urls),
@@ -235,8 +249,19 @@ class JobInstructorInput:
 
     @classmethod
     def from_dict(cls, payload: dict) -> "JobInstructorInput":
+        if "mode" in payload:
+            mode = _normalize_lane_mode(payload.get("mode"))
+        else:
+            mode = "files"
+            if payload.get("files"):
+                mode = "files"
+            elif payload.get("youtube_inputs") or payload.get("youtube_urls"):
+                mode = "youtube"
+            elif payload.get("voc_files"):
+                mode = "voc"
         return cls(
             name=payload["name"],
+            mode=mode,
             files=[StoredUploadRef.from_dict(item) for item in payload.get("files", [])],
             youtube_inputs=list(payload.get("youtube_inputs", payload.get("youtube_urls", []))),
             youtube_urls=list(payload.get("youtube_urls", [])),
@@ -254,6 +279,7 @@ class AnalysisJobPayload:
     instructors: list[JobInstructorInput]
     submitted_at: str
     analysis_mode: str = "auto"
+    page1_submission_version: int = 1
 
     def to_dict(self) -> dict:
         return {
@@ -264,6 +290,7 @@ class AnalysisJobPayload:
             "curriculum_text": self.curriculum_text,
             "submitted_at": self.submitted_at,
             "analysis_mode": self.analysis_mode,
+            "page1_submission_version": int(self.page1_submission_version or 1),
             "instructors": [instructor.to_dict() for instructor in self.instructors],
         }
 
@@ -277,6 +304,7 @@ class AnalysisJobPayload:
             curriculum_text=payload["curriculum_text"],
             submitted_at=payload["submitted_at"],
             analysis_mode=payload.get("analysis_mode", "auto"),
+            page1_submission_version=int(payload.get("page1_submission_version", 1) or 1),
             instructors=[JobInstructorInput.from_dict(item) for item in payload.get("instructors", [])],
         )
 

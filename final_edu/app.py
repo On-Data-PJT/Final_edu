@@ -52,6 +52,59 @@ from final_edu.youtube import estimate_openai_cost_usd, recommend_analysis_mode,
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
+STATIC_ROOT = (PACKAGE_ROOT / "static").resolve()
+
+
+def _normalize_lane_mode(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "youtube":
+        return "youtube"
+    if normalized == "voc":
+        return "voc"
+    return "files"
+
+
+def _normalize_submitted_instructor_name(raw_name: str, index: int, roster: list[str]) -> str:
+    normalized_name = str(raw_name or "").strip()
+    normalized_roster = [str(item or "").strip() for item in roster if str(item or "").strip()]
+    if normalized_name and normalized_name in normalized_roster:
+        return normalized_name
+
+    generic_index = None
+    if normalized_name.startswith("강사 "):
+        try:
+            generic_index = int(normalized_name.split(" ", maxsplit=1)[1]) - 1
+        except (TypeError, ValueError):
+            generic_index = None
+
+    if generic_index is not None and 0 <= generic_index < len(normalized_roster):
+        return normalized_roster[generic_index]
+    if len(normalized_roster) == 1:
+        return normalized_roster[0]
+    if normalized_name:
+        return normalized_name
+    return f"강사 {index}"
+
+
+def _normalize_page1_submission_version(value: Any) -> int:
+    try:
+        normalized = int(str(value or "").strip() or "1")
+    except (TypeError, ValueError):
+        return 1
+    return normalized if normalized >= 1 else 1
+
+
+def _static_asset_url(request: Request, path: str) -> str:
+    normalized_path = str(path or "").lstrip("/")
+    url = request.url_for("static", path=normalized_path)
+    asset_path = (STATIC_ROOT / normalized_path).resolve()
+    try:
+        asset_path.relative_to(STATIC_ROOT)
+    except ValueError:
+        return str(url)
+    if not asset_path.is_file():
+        return str(url)
+    return str(url.include_query_params(v=asset_path.stat().st_mtime_ns))
 
 
 def create_app() -> FastAPI:
@@ -63,6 +116,7 @@ def create_app() -> FastAPI:
         description="강의 자료 기반 커리큘럼 커버리지 분석 MVP",
     )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_ROOT / "static")), name="static")
+    templates.env.globals["static_asset_url"] = _static_asset_url
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
@@ -689,6 +743,7 @@ async def _build_job_instructor(
     job_id: str,
     temp_dir: Path,
     name: str,
+    mode: str,
     youtube_urls: str,
     uploads: list[UploadFile],
     voc_uploads: list[UploadFile],
@@ -734,6 +789,7 @@ async def _build_job_instructor(
     urls = [line.strip() for line in youtube_urls.splitlines() if line.strip()]
     return JobInstructorInput(
         name=normalized_name,
+        mode=_normalize_lane_mode(mode),
         files=stored_uploads,
         youtube_inputs=urls,
         youtube_urls=[],
@@ -781,7 +837,12 @@ def _parse_instructor_manifest(raw: str) -> list[dict]:
         block_id = str(item.get("id", "")).strip()
         if not block_id:
             continue
-        manifest.append({"id": block_id})
+        manifest.append(
+            {
+                "id": block_id,
+                "mode": _normalize_lane_mode(item.get("mode")),
+            }
+        )
 
     return manifest
 
@@ -813,6 +874,7 @@ async def _prepare_analysis_request(
         raise ValueError("분석할 과정을 먼저 선택해 주세요.")
 
     manifest = _parse_instructor_manifest(str(form.get("instructor_manifest", "[]") or "[]"))
+    page1_submission_version = _normalize_page1_submission_version(form.get("page1_submission_version"))
     if len(manifest) < 1:
         raise ValueError("최소 1명의 강사 자료가 필요합니다.")
 
@@ -831,7 +893,9 @@ async def _prepare_analysis_request(
     with tempfile.TemporaryDirectory() as temp_dir:
         for block_index, item in enumerate(manifest, start=1):
             block_id = item["id"]
-            name = str(form.get(f"instructor_name__{block_id}", "") or "")
+            block_mode = _normalize_lane_mode(item.get("mode"))
+            raw_name = str(form.get(f"instructor_name__{block_id}", "") or "")
+            name = _normalize_submitted_instructor_name(raw_name, block_index, course.instructor_names)
             youtube_urls = str(form.get(f"instructor_youtube_urls__{block_id}", "") or "")
             uploads = [
                 upload
@@ -848,6 +912,7 @@ async def _prepare_analysis_request(
                 job_id=request_id,
                 temp_dir=Path(temp_dir),
                 name=name,
+                mode=block_mode,
                 youtube_urls=youtube_urls,
                 uploads=uploads,
                 voc_uploads=voc_uploads,
@@ -912,6 +977,7 @@ async def _prepare_analysis_request(
         instructors=instructors,
         submitted_at=_now_iso(),
         analysis_mode=recommended_analysis_mode,
+        page1_submission_version=page1_submission_version,
     )
     return AnalysisPreparation(
         request_id=request_id,
@@ -983,51 +1049,61 @@ def _serialize_course_restore_drafts(request: Request, settings, jobs) -> dict: 
             continue
         if payload is None or not payload.instructors:
             continue
+        submission_version = _normalize_page1_submission_version(
+            getattr(payload, "page1_submission_version", 1)
+        )
         drafts[course_id] = {
             "course_id": course_id,
             "job_id": job.id,
             "updated_at": job.updated_at,
             "updated_at_label": _format_timestamp(job.updated_at),
-            "blocks": [
-                {
-                    "instructor_name": instructor.name,
-                    "mode": (
-                        "files"
-                        if instructor.files
-                        else ("youtube" if instructor.youtube_urls else ("voc" if instructor.voc_files else "files"))
-                    ),
-                    "youtube_urls": list(instructor.youtube_inputs or instructor.youtube_urls),
-                    "files": [
-                        {
-                            "original_name": asset_ref.original_name,
-                            "download_url": str(
-                                request.url_for(
-                                    "job_asset_download",
-                                    job_id=job.id,
-                                    instructor_index=str(instructor_index),
-                                    asset_index=str(asset_index),
-                                )
-                            ),
-                        }
-                        for asset_index, asset_ref in enumerate(instructor.files, start=1)
-                    ],
-                    "voc_files": [
-                        {
-                            "original_name": asset_ref.original_name,
-                            "download_url": str(
-                                request.url_for(
-                                    "job_voc_asset_download",
-                                    job_id=job.id,
-                                    instructor_index=str(instructor_index),
-                                    asset_index=str(asset_index),
-                                )
-                            ),
-                        }
-                        for asset_index, asset_ref in enumerate(instructor.voc_files, start=1)
-                    ],
-                }
-                for instructor_index, instructor in enumerate(payload.instructors, start=1)
-            ],
+            "page1_submission_version": submission_version,
+            "requires_reset": submission_version < 2,
+            "reset_message": (
+                "이전 저장 상태는 구버전이라 초기화되었습니다. 자료를 다시 연결해 주세요."
+                if submission_version < 2
+                else ""
+            ),
+            "blocks": (
+                []
+                if submission_version < 2
+                else [
+                    {
+                        "instructor_name": instructor.name,
+                        "mode": _normalize_lane_mode(getattr(instructor, "mode", "")),
+                        "youtube_urls": list(instructor.youtube_inputs or instructor.youtube_urls),
+                        "files": [
+                            {
+                                "original_name": asset_ref.original_name,
+                                "download_url": str(
+                                    request.url_for(
+                                        "job_asset_download",
+                                        job_id=job.id,
+                                        instructor_index=str(instructor_index),
+                                        asset_index=str(asset_index),
+                                    )
+                                ),
+                            }
+                            for asset_index, asset_ref in enumerate(instructor.files, start=1)
+                        ],
+                        "voc_files": [
+                            {
+                                "original_name": asset_ref.original_name,
+                                "download_url": str(
+                                    request.url_for(
+                                        "job_voc_asset_download",
+                                        job_id=job.id,
+                                        instructor_index=str(instructor_index),
+                                        asset_index=str(asset_index),
+                                    )
+                                ),
+                            }
+                            for asset_index, asset_ref in enumerate(instructor.voc_files, start=1)
+                        ],
+                    }
+                    for instructor_index, instructor in enumerate(payload.instructors, start=1)
+                ]
+            ),
         }
     return drafts
 

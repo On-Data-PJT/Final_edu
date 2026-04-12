@@ -1,6 +1,6 @@
 # Design System
 
-Last Updated: 2026-04-09
+Last Updated: 2026-04-12
 
 ## 1. Visual Theme
 
@@ -73,6 +73,7 @@ Last Updated: 2026-04-09
 - 배경은 `#f1f5f9` 계열의 옅은 neutral capsule을 사용한다.
 - 활성 버튼은 흰색 capsule + 얕은 shadow + green text 를 쓴다.
 - 결과 페이지의 dataset toggle 은 시각적으로 가볍지만 분명해야 한다.
+- unavailable mode 는 숨기지 말고 muted disabled 상태로 남겨 왜 비어 있는지 예측 가능하게 보여준다.
 
 ### Navigation
 
@@ -84,16 +85,15 @@ Last Updated: 2026-04-09
 
 ### Page 1 Exception
 
-- Page 1은 **구조, 크기, interaction contract 를 유지**하고 색감과 재질감만 바꾼다.
+- Page 1은 headline + centered composer 흐름은 유지하되, 각 lane 내부는 `+` dropdown 으로 입력면을 전환하는 single-surface capsule 구조를 기본값으로 사용한다.
 - 금지:
-  - composer lane 구조 변경
+  - composer 를 sidebar/dashboard 구조로 바꾸기
   - modal 구조 변경
-  - 입력 hit area 크기 변경
-  - 버튼 위치/개수 변경
+  - lane 추가/submit/강사 선택 버튼 위치를 크게 바꾸기
 - 허용:
-  - 배경 그라데이션을 green 계열로 전환
-  - border/shadow/hover 색상 전환
-  - chip / modal / notice / dropzone tone 전환
+  - lane 내부 trigger / surface / asset rail 배치 조정
+  - 자료/VOC 업로드 hit area를 각 source card 로 분리
+  - 배경 그라데이션, border, shadow, chip tone 조정
 
 ### Page 2
 
@@ -101,6 +101,7 @@ Last Updated: 2026-04-09
 - 좌측 sticky sidebar + 우측 세로 panel stack 을 기본 골격으로 쓴다.
 - 첫 패널 우측 상단의 dataset toggle 이 페이지 전체 dataset source 를 바꾸는 기준 control 이어야 한다.
 - 강사 이동 UI는 donut 패널 아래 중앙 정렬을 유지한다.
+- 데이터가 없는 mode 는 disabled toggle + 패널 empty state 로 처리하고, misleading `0%` 차트는 피한다.
 
 ### Page 3
 
@@ -112,7 +113,7 @@ Last Updated: 2026-04-09
 - desktop 에서는 `sidebar + content` 2열 구조를 유지한다.
 - tablet 이하에서는 sidebar 를 content 위의 full-width panel 로 내린다.
 - mobile 에서는 panel padding 을 줄이고 donut 중심 avatar 크기를 줄인다.
-- Page 1은 mobile 에서도 기존 composer lane 구조를 그대로 유지한다.
+- Page 1은 mobile 에서도 dropdown trigger, 단일 input surface, 공통 asset rail 의 capsule 구조를 유지한다.
 
 ## 7. Do / Don't
 

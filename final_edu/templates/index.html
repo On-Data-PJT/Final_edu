@@ -43,6 +43,10 @@
       <input type="hidden" id="selected-course-name" data-testid="selected-course-name" name="course_name"
         value="{{ selected_course_name }}" />
       <input type="hidden" name="instructor_manifest" id="instructor-manifest" value="[]" />
+      <input type="hidden" name="page1_submission_version" id="page1-submission-version" value="2" />
+
+      <section id="page1-restore-notice" class="notice page1-notice page1-restore-notice is-hidden"
+        data-testid="page1-restore-notice" aria-live="polite" hidden></section>
 
       <div class="page1-empty-state {% if selected_course_id %}is-hidden{% endif %}" data-workspace-disabled>
         <strong>과정을 먼저 선택하거나 추가하세요</strong>
@@ -63,15 +67,16 @@
           </div>
 
           <div class="composer-lane__main">
-            <div class="lane-surface lane-surface-files" data-role="files-surface">
+            <div class="lane-surface lane-surface-files" data-role="files-surface" data-upload-source="files">
               <input class="sr-only" type="file" name="instructor_files__primary" data-role="instructor-files"
+                data-upload-source="files"
                 data-testid="instructor-files" multiple accept=".pdf,.pptx,.txt,.md" />
-              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="files">
                 강의 자료를 드래그하거나 클릭해 업로드
               </button>
             </div>
 
-            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" data-upload-source="youtube" hidden>
               <div class="lane-token-shell">
                 <input type="text" class="lane-token-input" data-role="youtube-draft"
                   placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
@@ -79,10 +84,11 @@
               <input type="hidden" name="instructor_youtube_urls__primary" data-role="instructor-youtube"
                 data-testid="instructor-youtube" value="" />
             </div>
-            <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
+            <div class="lane-surface lane-surface-voc" data-role="voc-surface" data-upload-source="voc" hidden>
               <input class="sr-only" type="file" name="instructor_voc__primary" data-role="instructor-voc"
+                data-upload-source="voc"
                 data-testid="instructor-voc" multiple accept=".pdf,.csv,.txt" />
-              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="voc">
                 강의평가서(VOC)를 드래그하거나 클릭해 업로드
               </button>
             </div>
@@ -122,25 +128,25 @@
           </div>
 
           <div class="composer-lane__main">
-            <div class="lane-surface lane-surface-files" data-role="files-surface">
-              <input class="sr-only" type="file" data-role="instructor-files" data-testid="instructor-files" multiple
+            <div class="lane-surface lane-surface-files" data-role="files-surface" data-upload-source="files">
+              <input class="sr-only" type="file" data-role="instructor-files" data-upload-source="files" data-testid="instructor-files" multiple
                 accept=".pdf,.pptx,.txt,.md" />
-              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="files">
                 강의 자료를 드래그하거나 클릭해 업로드
               </button>
             </div>
 
-            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" hidden>
+            <div class="lane-surface lane-surface-youtube" data-role="youtube-surface" data-upload-source="youtube" hidden>
               <div class="lane-token-shell">
                 <input type="text" class="lane-token-input" data-role="youtube-draft"
                   placeholder="유튜브 링크를 입력하고 콤마를 누르세요" />
               </div>
               <input type="hidden" data-role="instructor-youtube" data-testid="instructor-youtube" value="" />
             </div>
-            <div class="lane-surface lane-surface-voc" data-role="voc-surface" hidden>
-              <input class="sr-only" type="file" data-role="instructor-voc" data-testid="instructor-voc" multiple
+            <div class="lane-surface lane-surface-voc" data-role="voc-surface" data-upload-source="voc" hidden>
+              <input class="sr-only" type="file" data-role="instructor-voc" data-upload-source="voc" data-testid="instructor-voc" multiple
                 accept=".pdf,.csv,.txt" />
-              <button type="button" class="lane-surface__tap" data-action="open-file-picker">
+              <button type="button" class="lane-surface__tap" data-action="open-file-picker" data-upload-source="voc">
                 강의평가서(VOC)를 드래그하거나 클릭해 업로드
               </button>
             </div>
@@ -334,6 +340,22 @@
     <div class="modal-actions">
       <button type="button" class="secondary-button" data-close-prepare>취소</button>
       <button type="button" class="primary-button" data-confirm-prepare>분석 시작</button>
+    </div>
+  </div>
+</section>
+
+<section id="page1-loading-overlay" class="floating-panel modal-shell" data-testid="page1-loading-overlay"
+  aria-hidden="true" hidden>
+  <div class="panel page1-loading-card" role="status" aria-live="polite" aria-busy="true">
+    <div class="page1-loading-spinner" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path
+          d="M10.56 1h2.88l.36 2.26c.54.15 1.05.36 1.53.63l1.9-1.28 2.03 2.03-1.28 1.9c.27.48.48.99.63 1.53L21 10.56v2.88l-2.26.36c-.15.54-.36 1.05-.63 1.53l1.28 1.9-2.03 2.03-1.9-1.28c-.48.27-.99.48-1.53.63L13.44 23h-2.88l-.36-2.26a8.72 8.72 0 0 1-1.53-.63l-1.9 1.28-2.03-2.03 1.28-1.9a8.72 8.72 0 0 1-.63-1.53L3 13.44v-2.88l2.26-.36c.15-.54.36-1.05.63-1.53l-1.28-1.9 2.03-2.03 1.9 1.28c.48-.27.99-.48 1.53-.63L10.56 1Zm1.44 7.1a3.9 3.9 0 1 0 0 7.8 3.9 3.9 0 0 0 0-7.8Z" />
+      </svg>
+    </div>
+    <div class="page1-loading-copy">
+      <strong data-role="page1-loading-title">분석 범위를 확인하는 중입니다</strong>
+      <p data-role="page1-loading-detail">입력하신 자료와 링크를 정리하고 있습니다. 잠시만 기다려 주세요.</p>
     </div>
   </div>
 </section>

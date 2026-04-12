@@ -32,6 +32,7 @@ from final_edu.youtube_cache import (
     has_youtube_request_limit_warning,
 )
 from final_edu.utils import (
+    build_preserved_segment_chunks,
     build_chunks,
     build_custom_dictionary,
     count_tokens,
@@ -203,13 +204,7 @@ def analyze_submissions(
             instructor_warnings[submission.name].extend(source_warnings)
             if segments:
                 instructor_assets[submission.name] += 1
-                all_chunks.extend(
-                    build_chunks(
-                        segments,
-                        target_tokens=settings.chunk_target_tokens,
-                        overlap_segments=settings.chunk_overlap_segments,
-                    )
-                )
+                all_chunks.extend(_build_chunks_for_source_segments(segments, settings))
 
         for youtube_url in submission.youtube_urls:
             source, segments, source_warnings = extract_youtube_asset(
@@ -224,13 +219,7 @@ def analyze_submissions(
             if segments:
                 caption_success_count += 1
                 instructor_assets[submission.name] += 1
-                all_chunks.extend(
-                    build_chunks(
-                        segments,
-                        target_tokens=settings.chunk_target_tokens,
-                        overlap_segments=settings.chunk_overlap_segments,
-                    )
-                )
+                all_chunks.extend(_build_chunks_for_source_segments(segments, settings))
             else:
                 caption_failure_count += 1
             _emit_progress(
@@ -291,7 +280,14 @@ def analyze_submissions(
         instructor_warnings=instructor_warnings,
         max_evidence=settings.max_evidence_per_section,
     )
-    mode_series, average_series_by_mode, line_series_by_mode = _build_mode_series(
+    (
+        mode_series,
+        average_series_by_mode,
+        line_series_by_mode,
+        available_source_modes,
+        source_mode_stats,
+        mode_unmapped_series,
+    ) = _build_mode_series(
         sections=normalized_sections,
         submissions=active_submissions,
         assignments=assignments,
@@ -350,6 +346,9 @@ def analyze_submissions(
                 for section in normalized_sections
             ],
         },
+        available_source_modes=available_source_modes,
+        source_mode_stats=source_mode_stats,
+        mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
@@ -512,7 +511,14 @@ def _analyze_submissions_lexical_streaming(
         instructor_assets=instructor_assets,
         instructor_warnings=instructor_warnings,
     )
-    mode_series, average_series_by_mode, line_series_by_mode = _build_mode_series_from_aggregates(
+    (
+        mode_series,
+        average_series_by_mode,
+        line_series_by_mode,
+        available_source_modes,
+        source_mode_stats,
+        mode_unmapped_series,
+    ) = _build_mode_series_from_aggregates(
         sections=sections,
         submissions=submissions,
         mode_aggregates=mode_aggregates,
@@ -570,6 +576,9 @@ def _analyze_submissions_lexical_streaming(
                 for section in sections
             ],
         },
+        available_source_modes=available_source_modes,
+        source_mode_stats=source_mode_stats,
+        mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_instructor,
@@ -681,7 +690,14 @@ def _build_voc_only_run(
         submissions=submissions,
         voc_analyses_by_instructor=voc_analyses_by_instructor,
     )
-    mode_series, average_series_by_mode, line_series_by_mode = _build_mode_series(
+    (
+        mode_series,
+        average_series_by_mode,
+        line_series_by_mode,
+        available_source_modes,
+        source_mode_stats,
+        mode_unmapped_series,
+    ) = _build_mode_series(
         sections=sections,
         submissions=submissions,
         assignments=[],
@@ -713,6 +729,9 @@ def _build_voc_only_run(
                 for section in sections
             ],
         },
+        available_source_modes=available_source_modes,
+        source_mode_stats=source_mode_stats,
+        mode_unmapped_series=mode_unmapped_series,
         mode_series=mode_series,
         average_series_by_mode=average_series_by_mode,
         keywords_by_instructor=keywords_by_mode.get("combined", {}),
@@ -1050,11 +1069,7 @@ def _stream_segments_into_aggregates(
     max_evidence: int,
 ) -> int:
     removed_duplicates = 0
-    chunks = build_chunks(
-        segments,
-        target_tokens=settings.chunk_target_tokens,
-        overlap_segments=settings.chunk_overlap_segments,
-    )
+    chunks = _build_chunks_for_source_segments(segments, settings)
     for chunk in chunks:
         dedupe_key = (chunk.instructor_name, chunk.fingerprint)
         if dedupe_key in dedupe_seen:
@@ -1181,10 +1196,13 @@ def _build_mode_series_from_aggregates(
     sections: list[CurriculumSection],
     submissions: list[InstructorSubmission],
     mode_aggregates: dict,
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict, dict, dict, list[str], dict, dict]:
     mode_series: dict[str, dict] = {}
     average_series_by_mode: dict[str, list[dict]] = {}
     line_series_by_mode: dict[str, dict] = {}
+    source_mode_stats: dict[str, dict[str, int]] = {}
+    mode_unmapped_series: dict[str, dict] = {}
+    asset_counts = _count_source_assets_by_mode(submissions)
 
     for mode in RESULT_MODES:
         aggregates = mode_aggregates.get(mode, {})
@@ -1194,7 +1212,11 @@ def _build_mode_series_from_aggregates(
         for submission in submissions:
             aggregate = aggregates.get(
                 submission.name,
-                {"total_tokens": 0, "section_tokens": {section.id: 0 for section in sections}},
+                {
+                    "total_tokens": 0,
+                    "unmapped_tokens": 0,
+                    "section_tokens": {section.id: 0 for section in sections},
+                },
             )
             total_tokens = int(aggregate.get("total_tokens", 0))
             section_tokens = aggregate.get("section_tokens", {})
@@ -1227,6 +1249,36 @@ def _build_mode_series_from_aggregates(
             "average": average_values,
             "instructors": instructor_values,
         }
+        mode_unmapped_series[mode] = {
+            "average": round(
+                mean(
+                    [
+                        (
+                            int(aggregates.get(submission.name, {}).get("unmapped_tokens", 0))
+                            / int(aggregates.get(submission.name, {}).get("total_tokens", 0))
+                        )
+                        if int(aggregates.get(submission.name, {}).get("total_tokens", 0)) > 0
+                        else 0.0
+                        for submission in submissions
+                    ]
+                ),
+                6,
+            )
+            if submissions
+            else 0.0,
+            "instructors": {
+                submission.name: round(
+                    (
+                        int(aggregates.get(submission.name, {}).get("unmapped_tokens", 0))
+                        / int(aggregates.get(submission.name, {}).get("total_tokens", 0))
+                    ),
+                    6,
+                )
+                if int(aggregates.get(submission.name, {}).get("total_tokens", 0)) > 0
+                else 0.0
+                for submission in submissions
+            },
+        }
         average_series_by_mode[mode] = average_values
         line_series_by_mode[mode] = {
             "target": [
@@ -1239,8 +1291,25 @@ def _build_mode_series_from_aggregates(
             ],
             "instructors": instructor_values,
         }
+        source_mode_stats[mode] = {
+            "asset_count": int(asset_counts.get(mode, 0)),
+            "total_tokens": sum(
+                int(aggregates.get(submission.name, {}).get("total_tokens", 0))
+                for submission in submissions
+            ),
+        }
 
-    return mode_series, average_series_by_mode, line_series_by_mode
+    available_source_modes = [
+        mode for mode in RESULT_MODES if _mode_has_available_source(source_mode_stats.get(mode))
+    ]
+    return (
+        mode_series,
+        average_series_by_mode,
+        line_series_by_mode,
+        available_source_modes,
+        source_mode_stats,
+        mode_unmapped_series,
+    )
 
 
 def _build_keywords_from_counters(grouped: dict[str, Counter[str]], grouped_off_curriculum: dict[str, Counter[str]]) -> dict[str, list[dict]]:
@@ -1341,6 +1410,22 @@ def _dedupe_chunks(chunks):
         warnings.append(f"반복 텍스트 청크 {removed}개를 중복 제거했습니다.")
 
     return deduped, warnings
+
+
+def _build_chunks_for_source_segments(segments, settings: Settings):
+    if not segments:
+        return []
+    source_type = str(getattr(segments[0], "source_type", "") or "").lower()
+    if source_type in MATERIAL_SOURCE_TYPES:
+        return build_preserved_segment_chunks(
+            segments,
+            target_tokens=settings.chunk_target_tokens,
+        )
+    return build_chunks(
+        segments,
+        target_tokens=settings.chunk_target_tokens,
+        overlap_segments=settings.chunk_overlap_segments,
+    )
 
 
 def _assign_chunks(chunks, sections, settings: Settings):
@@ -1543,10 +1628,13 @@ def _build_mode_series(
     sections: list[CurriculumSection],
     submissions: list[InstructorSubmission],
     assignments: list[ChunkAssignment],
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict, dict, dict, list[str], dict, dict]:
     mode_series: dict[str, dict] = {}
     average_series_by_mode: dict[str, list[dict]] = {}
     line_series_by_mode: dict[str, dict] = {}
+    source_mode_stats: dict[str, dict[str, int]] = {}
+    mode_unmapped_series: dict[str, dict] = {}
+    asset_counts = _count_source_assets_by_mode(submissions)
 
     for mode, allowed_types in MODE_SOURCE_FILTERS.items():
         summaries = _build_instructor_summaries(
@@ -1590,6 +1678,13 @@ def _build_mode_series(
             "average": average_values,
             "instructors": instructor_values,
         }
+        mode_unmapped_series[mode] = {
+            "average": round(mean([summary.unmapped_share for summary in summaries]), 6) if summaries else 0.0,
+            "instructors": {
+                summary.name: round(summary.unmapped_share, 6)
+                for summary in summaries
+            },
+        }
         average_series_by_mode[mode] = average_values
         line_series_by_mode[mode] = {
             "target": [
@@ -1602,8 +1697,38 @@ def _build_mode_series(
             ],
             "instructors": instructor_values,
         }
+        source_mode_stats[mode] = {
+            "asset_count": int(asset_counts.get(mode, 0)),
+            "total_tokens": sum(int(summary.total_tokens) for summary in summaries),
+        }
 
-    return mode_series, average_series_by_mode, line_series_by_mode
+    available_source_modes = [
+        mode for mode in RESULT_MODES if _mode_has_available_source(source_mode_stats.get(mode))
+    ]
+    return (
+        mode_series,
+        average_series_by_mode,
+        line_series_by_mode,
+        available_source_modes,
+        source_mode_stats,
+        mode_unmapped_series,
+    )
+
+
+def _count_source_assets_by_mode(submissions: list[InstructorSubmission]) -> dict[str, int]:
+    material_asset_count = sum(len(submission.files) for submission in submissions)
+    speech_asset_count = sum(len(submission.youtube_urls) for submission in submissions)
+    return {
+        "combined": material_asset_count + speech_asset_count,
+        "material": material_asset_count,
+        "speech": speech_asset_count,
+    }
+
+
+def _mode_has_available_source(stats: dict | None) -> bool:
+    if not isinstance(stats, dict):
+        return False
+    return int(stats.get("asset_count", 0)) > 0 and int(stats.get("total_tokens", 0)) > 0
 
 
 def _build_keywords_by_instructor(chunks, sections: list[CurriculumSection]) -> dict[str, list[dict]]:
