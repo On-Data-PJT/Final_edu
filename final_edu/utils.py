@@ -17,6 +17,7 @@ SAFE_FILENAME_RE = re.compile(r"[^0-9A-Za-z._-]+")
 SAFE_EXTENSION_RE = re.compile(r"\.[a-z0-9]{1,16}")
 KIWI_USER_TERM_RE = re.compile(r"[^A-Za-z가-힣]+")
 KIWI_VALID_TAGS = {"NNG", "NNP", "SL", "SN"}
+KEYWORD_VALID_TAGS = {"NNG", "NNP", "SL"}
 MATERIAL_SOURCE_TYPES = {"pdf", "pptx", "text"}
 MATERIAL_SEMANTIC_SPLIT_RE = re.compile(
     r"(?=(?:■|□|▪|▫|▷|▶|◆|◇|Q\d+\s*[.:]|(?:\d+\s*주차)|(?:주차\s*\d+)|(?:chapter\s*\d+)|(?:part\s*\d+)))",
@@ -168,6 +169,7 @@ STOP_WORDS = {
     "어떤가요",
     "어떠신가요",
 }
+KEYWORD_EXTRA_STOP_WORDS = {"다음", "생각", "모양"}
 _KIWI: Kiwi | None = None
 _REGISTERED_KIWI_TERMS: set[str] = set()
 
@@ -209,7 +211,14 @@ def ensure_kiwi_ready() -> None:
     _get_kiwi()
 
 
-def _append_chunk_token(tokens: list[str], current_chunk: list[str]) -> None:
+def _append_chunk_token(
+    tokens: list[str],
+    current_chunk: list[str],
+    *,
+    stop_words: set[str],
+    drop_pure_numeric: bool = False,
+    require_alpha: bool = False,
+) -> None:
     if not current_chunk:
         return
     chunk = "".join(current_chunk).strip()
@@ -217,7 +226,11 @@ def _append_chunk_token(tokens: list[str], current_chunk: list[str]) -> None:
     if len(chunk) <= 1:
         return
     lowered = chunk.lower()
-    if lowered not in STOP_WORDS:
+    if drop_pure_numeric and lowered.isdigit():
+        return
+    if require_alpha and not any(character.isalpha() for character in lowered):
+        return
+    if lowered not in stop_words:
         tokens.append(lowered)
 
 
@@ -244,7 +257,14 @@ def build_custom_dictionary(titles: list[str]) -> None:
             _REGISTERED_KIWI_TERMS.add(term_key)
 
 
-def tokenize(text: str) -> list[str]:
+def _tokenize_with_kiwi(
+    text: str,
+    *,
+    valid_tags: set[str],
+    stop_words: set[str],
+    drop_pure_numeric: bool = False,
+    require_alpha: bool = False,
+) -> list[str]:
     kiwi = _get_kiwi()
     clean_text = re.sub(r"([A-Za-z가-힣])-([0-9])", r"\1\2", str(text or ""))
     tokens: list[str] = []
@@ -256,17 +276,53 @@ def tokenize(text: str) -> list[str]:
         if not isinstance(token_start, int):
             token_start = previous_end
         if current_chunk and token_start > previous_end:
-            _append_chunk_token(tokens, current_chunk)
+            _append_chunk_token(
+                tokens,
+                current_chunk,
+                stop_words=stop_words,
+                drop_pure_numeric=drop_pure_numeric,
+                require_alpha=require_alpha,
+            )
 
-        if getattr(token, "tag", "") in KIWI_VALID_TAGS:
+        if getattr(token, "tag", "") in valid_tags:
             current_chunk.append(str(getattr(token, "form", "")))
         else:
-            _append_chunk_token(tokens, current_chunk)
+            _append_chunk_token(
+                tokens,
+                current_chunk,
+                stop_words=stop_words,
+                drop_pure_numeric=drop_pure_numeric,
+                require_alpha=require_alpha,
+            )
 
         previous_end = token_start + _token_span_length(token)
 
-    _append_chunk_token(tokens, current_chunk)
+    _append_chunk_token(
+        tokens,
+        current_chunk,
+        stop_words=stop_words,
+        drop_pure_numeric=drop_pure_numeric,
+        require_alpha=require_alpha,
+    )
     return tokens
+
+
+def tokenize(text: str) -> list[str]:
+    return _tokenize_with_kiwi(
+        text,
+        valid_tags=KIWI_VALID_TAGS,
+        stop_words=STOP_WORDS,
+    )
+
+
+def tokenize_keywords(text: str) -> list[str]:
+    return _tokenize_with_kiwi(
+        text,
+        valid_tags=KEYWORD_VALID_TAGS,
+        stop_words=STOP_WORDS | KEYWORD_EXTRA_STOP_WORDS,
+        drop_pure_numeric=True,
+        require_alpha=True,
+    )
 
 
 def count_tokens(text: str) -> int:

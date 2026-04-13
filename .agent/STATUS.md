@@ -47,6 +47,8 @@ Last Updated: 2026-04-13
   - word cloud 는 raw 텍스트 기준을 유지하고, 주변 발화/비커리큘럼 표현도 계속 관찰할 수 있다.
   - `전체 평균` word cloud 는 `average_keywords_by_mode`를 사용해 실제 강사 keyword list만 집계하고, 공개 `keywords_by_mode`에는 더 이상 `__off_curriculum` pseudo-key를 넣지 않는다.
   - 강사가 1명뿐인 결과에서는 `전체 평균` word cloud 와 해당 강사 word cloud 가 같은 term/value set 을 사용한다.
+  - word cloud keyword 생성은 coverage/tokenizer 경로와 분리된 전용 tokenizer 를 사용하고, 저신호 구어체(`다음`, `생각`, `모양`)와 숫자형 noise 를 더 공격적으로 제거한다.
+  - word cloud ranking 은 현재 분석 run 내부 chunk 집합 기준 TF-IDF 와 반복 등장 가중을 사용하되, 저장소 전체 historical job 상태에 따라 결과가 변하지 않게 유지한다.
   - source 는 있었지만 mapped coverage 가 0인 mode 는 toggle 을 유지한 채 차트 대신 empty state 를 보여준다.
   - speech 분류는 transcript 를 1차 근거로 쓰되, section `title + description`에서 뽑은 generic fragment anchor 와 strict glossary anchor 를 함께 사용해 coverage 후보를 만든다.
   - YouTube chapter title 은 semantic nearest-neighbor 가 아니라 exact/normalized fragment match 와 bounded chapter-index rescue 로만 보조되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
@@ -85,6 +87,8 @@ Last Updated: 2026-04-13
   - material section assignment 는 section `title + description`에서 뽑은 generic fragment anchor 를 기본으로 사용하고, glossary 는 보강용으로만 남긴다.
   - material chunk 에 explicit anchor evidence 가 없으면 nearest-neighbor 로 억지 배정하지 않고 unmapped 로 남긴다.
   - 커버리지 share 는 raw total token 이 아니라 mapped token 만을 분모로 계산한다.
+  - word cloud keyword 집계는 전역 `tokenize()`와 별도의 `tokenize_keywords()` 경로를 사용해 coverage 분류 규칙과 분리한다.
+  - word cloud keyword ranking 은 current-run TF-IDF 와 per-chunk repeat weighting 을 쓰고, storage 전체 과거 job 결과를 문서 집합으로 쓰지 않는다.
   - speech section assignment 는 section `title + description` 기반 generic fragment anchor 와 strict speech anchor glossary 를 함께 사용한다.
   - speech anchor matching 은 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절이 `지니` anchor 로 오탐되지 않게 한다.
   - YouTube source label 은 cache 된 human title 을 우선 사용한다.
@@ -294,6 +298,7 @@ Last Updated: 2026-04-13
 - `tests.test_voc_analysis`에 configured `Kiwi` model path 사용과 startup failure 메시지 회귀를 추가했다.
 - chapter형 커리큘럼 speech 분류에서 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하던 문제를 줄이기 위해, section `title + description` 기반 generic fragment anchor 와 exact/normalized fragment + bounded chapter-index title rescue 를 도입했다.
 - Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제 `mapped_tokens` 비율이 낮을 때 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 보조 설명을 노출하도록 정리했다.
+- `yeon_copy`의 wordcloud filtering 강화 의도는 최신 `dev` 계약 위로 선별 이식했고, 전역 tokenizer 회귀나 storage-wide TF-IDF 대신 wordcloud 전용 tokenizer + current-run TF-IDF 로 재구성했다.
 - `tests.test_page2_dashboard`에 chaptered playlist title rescue 회귀와 coverage note shell 회귀를 추가했다.
 
 ### 2026-04-11

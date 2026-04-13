@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from final_edu.analysis import analyze_submissions
 from final_edu.analysis import (
     _apply_speech_title_prior,
+    _build_keyword_payloads_by_mode,
     _build_section_assignment_texts,
     _material_candidate_section_ids,
     _material_anchor_counts_by_section,
@@ -35,7 +36,7 @@ from final_edu.models import (
     SourceAsset,
     UploadedAsset,
 )
-from final_edu.utils import build_preserved_segment_chunks
+from final_edu.utils import build_preserved_segment_chunks, tokenize_keywords
 
 
 def _sample_sections() -> list[CurriculumSection]:
@@ -440,6 +441,79 @@ class Page2DashboardTests(unittest.TestCase):
                 result["average_keywords_by_mode"][mode],
                 result["keywords_by_mode"][mode]["강사 A"],
             )
+
+    def test_keyword_tokenizer_filters_low_signal_terms_but_keeps_english_terms(self) -> None:
+        tokens = tokenize_keywords("다음 생각 모양 SQL SVM 데이터 2026 강의 자료")
+
+        self.assertIn("sql", tokens)
+        self.assertIn("svm", tokens)
+        self.assertIn("데이터", tokens)
+        self.assertNotIn("다음", tokens)
+        self.assertNotIn("생각", tokens)
+        self.assertNotIn("모양", tokens)
+        self.assertNotIn("2026", tokens)
+
+    def test_keyword_payloads_use_current_run_tfidf_without_needing_history(self) -> None:
+        sections = [
+            CurriculumSection(
+                id="ml",
+                title="머신러닝",
+                description="sql 신경망 데이터",
+                target_weight=100,
+            )
+        ]
+        chunks = [
+            ExtractedChunk(
+                id="chunk-a-1",
+                source_id="material-a",
+                instructor_name="강사 A",
+                source_label="study-a.pdf",
+                source_type="pdf",
+                locator="p.1",
+                text="다음 생각 데이터 데이터 데이터 sql sql sql",
+                token_count=6,
+                fingerprint="chunk-a-1",
+            ),
+            ExtractedChunk(
+                id="chunk-a-2",
+                source_id="material-a",
+                instructor_name="강사 A",
+                source_label="study-a.pdf",
+                source_type="pdf",
+                locator="p.2",
+                text="데이터 데이터 데이터 sql sql sql",
+                token_count=6,
+                fingerprint="chunk-a-2",
+            ),
+            ExtractedChunk(
+                id="chunk-b-1",
+                source_id="material-b",
+                instructor_name="강사 B",
+                source_label="study-b.pdf",
+                source_type="pdf",
+                locator="p.1",
+                text="데이터 데이터 데이터 신경망 신경망 신경망",
+                token_count=6,
+                fingerprint="chunk-b-1",
+            ),
+        ]
+
+        keywords_by_mode, _off_curriculum, average_keywords_by_mode = _build_keyword_payloads_by_mode(
+            chunks,
+            sections,
+        )
+
+        combined_a_keywords = [item["text"] for item in keywords_by_mode["combined"]["강사 A"][:3]]
+        combined_b_keywords = [item["text"] for item in keywords_by_mode["combined"]["강사 B"][:3]]
+
+        self.assertEqual(combined_a_keywords[0], "sql")
+        self.assertEqual(combined_b_keywords[0], "신경망")
+        self.assertNotIn("다음", combined_a_keywords)
+        self.assertNotIn("생각", combined_a_keywords)
+        self.assertEqual(
+            [item["text"] for item in average_keywords_by_mode["combined"][:3]],
+            ["데이터", "sql", "신경망"],
+        )
 
     def test_analysis_marks_material_mode_unavailable_when_no_material_assets_exist(self) -> None:
         result = _build_result_payload(include_material=False, include_speech=True)

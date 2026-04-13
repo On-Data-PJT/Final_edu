@@ -41,6 +41,7 @@ from final_edu.utils import (
     safe_snippet,
     slugify,
     tokenize,
+    tokenize_keywords,
 )
 
 SECTION_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[\.\)]?)\s*")
@@ -1158,9 +1159,15 @@ def _analyze_submissions_lexical_streaming(
     off_curriculum_counters_by_mode: dict[str, dict[str, Counter[str]]] = {
         mode: defaultdict(Counter) for mode in RESULT_MODES
     }
+    keyword_documents_by_mode: dict[str, list[set[str]]] = {
+        mode: [] for mode in RESULT_MODES
+    }
+    off_curriculum_keyword_documents_by_mode: dict[str, list[set[str]]] = {
+        mode: [] for mode in RESULT_MODES
+    }
     curriculum_tokens = set()
     for section in sections:
-        curriculum_tokens.update(tokenize(section.search_text))
+        curriculum_tokens.update(tokenize_keywords(section.search_text))
     lexical_index = _build_lexical_index(sections)
     dedupe_seen: set[tuple[str, str]] = set()
     removed_duplicates = 0
@@ -1197,6 +1204,8 @@ def _analyze_submissions_lexical_streaming(
                 evidence_map=evidence_map,
                 keyword_counters_by_mode=keyword_counters_by_mode,
                 off_curriculum_counters_by_mode=off_curriculum_counters_by_mode,
+                keyword_documents_by_mode=keyword_documents_by_mode,
+                off_curriculum_keyword_documents_by_mode=off_curriculum_keyword_documents_by_mode,
                 curriculum_tokens=curriculum_tokens,
                 max_evidence=settings.max_evidence_per_section,
             )
@@ -1228,6 +1237,8 @@ def _analyze_submissions_lexical_streaming(
                     evidence_map=evidence_map,
                     keyword_counters_by_mode=keyword_counters_by_mode,
                     off_curriculum_counters_by_mode=off_curriculum_counters_by_mode,
+                    keyword_documents_by_mode=keyword_documents_by_mode,
+                    off_curriculum_keyword_documents_by_mode=off_curriculum_keyword_documents_by_mode,
                     curriculum_tokens=curriculum_tokens,
                     max_evidence=settings.max_evidence_per_section,
                 )
@@ -1308,6 +1319,8 @@ def _analyze_submissions_lexical_streaming(
     ) = _build_keywords_by_mode_from_counters(
         grouped_by_mode=keyword_counters_by_mode,
         grouped_off_curriculum_by_mode=off_curriculum_counters_by_mode,
+        documents_by_mode=keyword_documents_by_mode,
+        off_curriculum_documents_by_mode=off_curriculum_keyword_documents_by_mode,
     )
     keywords_by_instructor = keywords_by_mode.get("combined", {})
     rose_series_by_instructor = rose_series_by_mode.get("combined", {})
@@ -1924,6 +1937,8 @@ def _stream_segments_into_aggregates(
     evidence_map: dict,
     keyword_counters_by_mode: dict[str, dict[str, Counter[str]]],
     off_curriculum_counters_by_mode: dict[str, dict[str, Counter[str]]],
+    keyword_documents_by_mode: dict[str, list[set[str]]],
+    off_curriculum_keyword_documents_by_mode: dict[str, list[set[str]]],
     curriculum_tokens: set[str],
     max_evidence: int,
 ) -> tuple[int, list[str]]:
@@ -1939,12 +1954,21 @@ def _stream_segments_into_aggregates(
         dedupe_seen.add(dedupe_key)
 
         assignment, title_warning = _assign_chunk_lexical(chunk, sections, lexical_index)
-        tokens = tokenize(chunk.text)
+        keyword_counts = _keyword_counter_for_text(chunk.text)
+        off_curriculum_counts = Counter(
+            {
+                token: value
+                for token, value in keyword_counts.items()
+                if token not in curriculum_tokens
+            }
+        )
         for mode in _modes_for_source_type(chunk.source_type):
-            keyword_counters_by_mode[mode][instructor_name].update(tokens)
-            off_curriculum_counters_by_mode[mode][instructor_name].update(
-                token for token in tokens if token not in curriculum_tokens
-            )
+            if keyword_counts:
+                keyword_counters_by_mode[mode][instructor_name].update(keyword_counts)
+                keyword_documents_by_mode[mode].append(set(keyword_counts))
+            if off_curriculum_counts:
+                off_curriculum_counters_by_mode[mode][instructor_name].update(off_curriculum_counts)
+                off_curriculum_keyword_documents_by_mode[mode].append(set(off_curriculum_counts))
             aggregate = mode_aggregates[mode][instructor_name]
             aggregate["total_tokens"] += chunk.token_count
             if assignment.is_unmapped:
@@ -2236,43 +2260,106 @@ def _build_mode_series_from_aggregates(
     )
 
 
+def _keyword_counter_for_text(text: str) -> Counter[str]:
+    raw_counts = Counter(tokenize_keywords(text))
+    weighted = Counter()
+    for token, count in raw_counts.items():
+        weighted[token] = count * 2 if count >= 3 else count
+    return weighted
+
+
+def _apply_current_run_tfidf_weights(
+    counts: Counter[str],
+    documents: list[set[str]],
+    *,
+    min_docs: int = 3,
+) -> Counter[str]:
+    if not counts or len(documents) < min_docs:
+        return Counter(counts)
+
+    document_frequencies: Counter[str] = Counter()
+    for document in documents:
+        document_frequencies.update(document)
+
+    document_total = len(documents)
+    weighted = Counter()
+    for token, value in counts.items():
+        df = document_frequencies.get(token, 0)
+        idf = math.log((1 + document_total) / (1 + df)) + 1.0
+        weighted[token] = value * idf
+    return weighted
+
+
 def _build_keywords_from_counters(
     grouped: dict[str, Counter[str]],
     grouped_off_curriculum: dict[str, Counter[str]],
+    documents: list[set[str]] | None = None,
+    off_curriculum_documents: list[set[str]] | None = None,
 ) -> tuple[dict[str, list[dict]], dict[str, list[dict]]]:
     keywords: dict[str, list[dict]] = {}
     off_curriculum_keywords: dict[str, list[dict]] = {}
     for instructor_name, counts in grouped.items():
         off_counts = grouped_off_curriculum.get(instructor_name, Counter())
 
+        tfidf_counts = _apply_current_run_tfidf_weights(counts, documents or [])
+        tfidf_off_counts = _apply_current_run_tfidf_weights(
+            off_counts,
+            off_curriculum_documents or [],
+        )
+
         # 커리큘럼 기반 단어에 가중치 크게 부여
         boosted = Counter()
-        for token, count in counts.items():
+        for token, score in tfidf_counts.items():
             if token not in off_counts:
-                boosted[token] = count * 50
+                boosted[token] = score * 5
             else:
-                boosted[token] = count
+                boosted[token] = score
 
+        ranked_tokens = sorted(
+            boosted.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
         best_tokens = [
             token
-            for token, _ in sorted(
-                boosted.items(),
-                key=lambda item: (-item[1], item[0]),
-            )[:25]
-        ]
+            for token, _ in ranked_tokens
+            if counts.get(token, 0) >= 2
+        ][:25]
+        if len(best_tokens) < min(8, len(ranked_tokens)):
+            seen = set(best_tokens)
+            for token, _ in ranked_tokens:
+                if token in seen:
+                    continue
+                seen.add(token)
+                best_tokens.append(token)
+                if len(best_tokens) >= 25:
+                    break
 
         keywords[instructor_name] = [
             {"text": token, "value": int(counts[token])}
             for token in best_tokens
         ]
 
-        top_off_curriculum = sorted(
-            off_counts.items(),
+        ranked_off_curriculum = sorted(
+            tfidf_off_counts.items(),
             key=lambda item: (-item[1], item[0]),
-        )[:15]
+        )
+        top_off_curriculum = [
+            token
+            for token, _ in ranked_off_curriculum
+            if off_counts.get(token, 0) >= 2
+        ][:15]
+        if len(top_off_curriculum) < min(5, len(ranked_off_curriculum)):
+            seen_off = set(top_off_curriculum)
+            for token, _ in ranked_off_curriculum:
+                if token in seen_off:
+                    continue
+                seen_off.add(token)
+                top_off_curriculum.append(token)
+                if len(top_off_curriculum) >= 15:
+                    break
         off_curriculum_keywords[instructor_name] = [
-            {"text": token, "value": int(value)}
-            for token, value in top_off_curriculum
+            {"text": token, "value": int(off_counts.get(token, 0))}
+            for token in top_off_curriculum
         ]
     return keywords, off_curriculum_keywords
 
@@ -2311,6 +2398,8 @@ def _build_keywords_by_mode_from_counters(
     *,
     grouped_by_mode: dict[str, dict[str, Counter[str]]],
     grouped_off_curriculum_by_mode: dict[str, dict[str, Counter[str]]],
+    documents_by_mode: dict[str, list[set[str]]] | None = None,
+    off_curriculum_documents_by_mode: dict[str, list[set[str]]] | None = None,
 ) -> tuple[dict[str, dict[str, list[dict]]], dict[str, dict[str, list[dict]]], dict[str, list[dict]]]:
     keywords_by_mode: dict[str, dict[str, list[dict]]] = {}
     off_curriculum_keywords_by_mode: dict[str, dict[str, list[dict]]] = {}
@@ -2319,6 +2408,8 @@ def _build_keywords_by_mode_from_counters(
         keywords, off_curriculum = _build_keywords_from_counters(
             grouped_by_mode.get(mode, {}),
             grouped_off_curriculum_by_mode.get(mode, {}),
+            documents=(documents_by_mode or {}).get(mode, []),
+            off_curriculum_documents=(off_curriculum_documents_by_mode or {}).get(mode, []),
         )
         keywords_by_mode[mode] = keywords
         off_curriculum_keywords_by_mode[mode] = off_curriculum
@@ -2877,7 +2968,7 @@ def _build_keyword_payloads_by_mode(
 ) -> tuple[dict[str, dict[str, list[dict]]], dict[str, dict[str, list[dict]]], dict[str, list[dict]]]:
     curriculum_tokens = set()
     for section in sections:
-        curriculum_tokens.update(tokenize(section.search_text))
+        curriculum_tokens.update(tokenize_keywords(section.search_text))
 
     grouped_by_mode: dict[str, dict[str, Counter[str]]] = {
         mode: defaultdict(Counter) for mode in RESULT_MODES
@@ -2885,17 +2976,39 @@ def _build_keyword_payloads_by_mode(
     grouped_off_curriculum_by_mode: dict[str, dict[str, Counter[str]]] = {
         mode: defaultdict(Counter) for mode in RESULT_MODES
     }
+    documents_by_mode: dict[str, list[set[str]]] = {
+        mode: [] for mode in RESULT_MODES
+    }
+    off_curriculum_documents_by_mode: dict[str, list[set[str]]] = {
+        mode: [] for mode in RESULT_MODES
+    }
     for chunk in chunks:
-        tokens = tokenize(chunk.text)
+        keyword_counts = _keyword_counter_for_text(chunk.text)
+        if not keyword_counts:
+            continue
+
+        off_curriculum_counts = Counter(
+            {
+                token: value
+                for token, value in keyword_counts.items()
+                if token not in curriculum_tokens
+            }
+        )
+        keyword_document = set(keyword_counts)
+        off_curriculum_document = set(off_curriculum_counts)
+
         for mode in _modes_for_source_type(chunk.source_type):
-            grouped_by_mode[mode][chunk.instructor_name].update(tokens)
-            grouped_off_curriculum_by_mode[mode][chunk.instructor_name].update(
-                token for token in tokens if token not in curriculum_tokens
-            )
+            grouped_by_mode[mode][chunk.instructor_name].update(keyword_counts)
+            grouped_off_curriculum_by_mode[mode][chunk.instructor_name].update(off_curriculum_counts)
+            documents_by_mode[mode].append(keyword_document)
+            if off_curriculum_document:
+                off_curriculum_documents_by_mode[mode].append(off_curriculum_document)
 
     return _build_keywords_by_mode_from_counters(
         grouped_by_mode=grouped_by_mode,
         grouped_off_curriculum_by_mode=grouped_off_curriculum_by_mode,
+        documents_by_mode=documents_by_mode,
+        off_curriculum_documents_by_mode=off_curriculum_documents_by_mode,
     )
 
 

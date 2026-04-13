@@ -223,6 +223,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `tests/test_page2_dashboard.py`
   Trigger Commands: material PDF 분석, `/jobs/{job_id}` material coverage review
   Must Read When: material section assignment, lexical/openai share contract, chapter형 커리큘럼 material 쏠림을 바꿀 때
+- `DBG-046` `active` Lane: `Web / Demo Agent`
+  Tags: `page2`, `wordcloud`, `keyword-filtering`, `tfidf`, `branch-port`
+  Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `git diff dev..origin/yeon_copy`, Page 2 word cloud filtering 강화 포팅, keyword ranking drift 조사
+  Must Read When: word cloud keyword tokenizer, TF-IDF scope, stale branch feature cherry-pick/port, keyword ranking determinism 을 바꿀 때
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -731,6 +736,31 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 커리큘럼에 없는 주제는 nearest-neighbor 로 억지 매핑하지 말고 unmapped 로 남길 것
   - `closest()`를 쓸 이벤트 target은 `Element` 기준으로 정규화할 것
   - icon-only 버튼은 시각 크기와 별개로 최소 40px 전후의 tappable area를 유지할 것
+
+### DBG-046 `active` `yeon_copy`의 wordcloud filtering 강화는 그대로 merge 하면 최신 `dev` 계약을 되돌리고, storage-wide TF-IDF 때문에 결과 재현성도 깨질 수 있었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page2`, `wordcloud`, `keyword-filtering`, `tfidf`, `branch-port`
+- Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `git diff dev..origin/yeon_copy`, Page 2 word cloud filtering 강화 포팅, keyword ranking drift 조사
+- Must Read When: word cloud keyword tokenizer, TF-IDF scope, stale branch feature cherry-pick/port, keyword ranking determinism 을 바꿀 때
+- Symptom:
+  - 팀원 branch `yeon_copy`에는 wordcloud filtering 강화 의도가 있었지만, branch 가 `1ce45e7` 시점에서 갈라져 최신 `dev`의 average keyword payload, coverage note, Kiwi hardening, survey VOC 같은 후속 계약이 대거 빠져 있었음
+  - branch 원본의 TF-IDF는 현재 분석 건이 아니라 storage 전체 `jobs/*/result.json`을 문서 집합으로 사용해, 같은 입력도 저장소에 어떤 historical job 이 쌓여 있는지에 따라 wordcloud 결과가 달라질 수 있었음
+  - 같은 branch 에서는 전역 `tokenize()` 자체를 `NNG/NNP` 중심으로 바꿔 coverage/VOC까지 같이 흔들 위험도 있었음
+- Root Cause:
+  - wordcloud 강화 기능이 UI 브랜치가 아니라 오래된 backend snapshot 위에서 구현돼 있었고, keyword filtering, TF-IDF scope, 전역 tokenizer 변경이 한 commit 안에 섞여 있었음
+  - storage-wide TF-IDF는 filtering 강도는 높지만 현재 run 과 무관한 외부 상태를 ranking 에 끌어와 결정성을 깨뜨렸음
+- Resolution:
+  - `yeon_copy`를 그대로 merge/cherry-pick 하지 않고, 의도만 최신 `dev` 위로 선별 이식했음
+  - 전역 `tokenize()`는 유지하고, wordcloud 전용 `tokenize_keywords()`를 새로 두어 저신호 단어와 숫자형 noise 를 분리 제거하도록 정리했음
+  - TF-IDF는 storage 전체가 아니라 현재 analysis run 내부 chunk 집합 기준으로만 계산해, 같은 입력이면 다시 돌려도 같은 ranking 이 나오도록 고정했음
+  - `tests.test_page2_dashboard`에 low-signal keyword 제거, 영어 기술 용어 보존, current-run TF-IDF ranking 회귀를 추가했음
+- Prevention Rule:
+  - 오래된 feature branch 에서 Page 2 wordcloud 관련 변경을 가져올 때는 branch 전체를 merge 하지 말고 최신 `dev`의 Page 2 payload/UI 계약과 충돌 여부를 먼저 확인할 것
+  - wordcloud filtering 을 강화할 때 coverage/VOC/token counting 용 전역 tokenizer 를 함께 바꾸지 말고 keyword 전용 경로로 분리할 것
+  - TF-IDF 기반 ranking 을 넣더라도 storage 전체 historical results 를 문서 집합으로 쓰지 말고 현재 analysis run 내부 corpus 기준으로 고정할 것
 
 ## Archive
 
