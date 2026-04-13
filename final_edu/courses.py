@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - handled at runtime when dependency is 
     OpenAI = None
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+from pypdf.errors import EmptyFileError, FileNotDecryptedError, ParseError, PdfReadError
 
 from final_edu.config import Settings
 from final_edu.models import (
@@ -86,6 +87,11 @@ WEEKDAY_HINT_TOKENS = ("월", "화", "수", "목", "금", "토", "일")
 SCHEDULE_CURRICULUM_HINT_TOKENS = ("시간표", "강의", "교육", "과정", "교과목", "커리큘럼", "종합반")
 CHAPTER_ROADMAP_START_HINTS = ("강의 구성 로드맵", "구성 로드맵")
 CHAPTER_ROADMAP_END_HINTS = ("챕터별 강의 세부 계획", "세부 계획")
+ENCRYPTED_PDF_BLOCKING_REASON = (
+    "암호화/보호된 PDF라 자동 분석할 수 없습니다. 비밀번호를 제거하거나 일반 PDF로 다시 저장해 주세요."
+)
+BROKEN_PDF_BLOCKING_REASON = "PDF 구조를 읽지 못해 자동 분석할 수 없습니다. 일반 PDF로 다시 저장한 뒤 다시 시도해 주세요."
+UNREADABLE_PDF_BLOCKING_REASON = "텍스트형 PDF가 아니어서 커리큘럼 구조를 읽지 못했습니다."
 
 
 class CurriculumClassificationEvidenceSchema(BaseModel):
@@ -153,17 +159,24 @@ class LocalCourseRepository:
 
 
 def preview_course_pdf(path: Path, max_sections: int, settings: Settings) -> CurriculumPreviewResult:
-    page_records, warnings = _extract_pdf_pages(path)
+    try:
+        page_records, warnings = _extract_pdf_pages(path)
+    except FileNotDecryptedError:
+        return _build_unreadable_preview_result(
+            warning="PDF가 암호화/보호되어 있어 내용을 읽지 못했습니다.",
+            blocking_reason=ENCRYPTED_PDF_BLOCKING_REASON,
+        )
+    except (EmptyFileError, ParseError, PdfReadError, OSError, ValueError) as exc:
+        return _build_unreadable_preview_result(
+            warning=f"PDF 구조를 읽지 못했습니다. ({_summarize_pdf_read_error(exc)})",
+            blocking_reason=BROKEN_PDF_BLOCKING_REASON,
+        )
+
     raw_text = "\n".join(record["text"] for record in page_records).strip()
     if not raw_text:
-        return CurriculumPreviewResult(
-            decision="rejected",
-            document_kind="unreadable",
-            document_confidence=0.0,
-            weight_status="missing",
-            raw_curriculum_text="",
+        return _build_unreadable_preview_result(
             warnings=warnings,
-            blocking_reasons=["텍스트형 PDF가 아니어서 커리큘럼 구조를 읽지 못했습니다."],
+            blocking_reason=UNREADABLE_PDF_BLOCKING_REASON,
         )
 
     preview = _preview_with_openai(page_records, raw_text, warnings, max_sections, settings)
@@ -282,6 +295,33 @@ def _extract_pdf_pages(path: Path) -> tuple[list[dict], list[str]]:
             }
         )
     return page_records, warnings
+
+
+def _build_unreadable_preview_result(
+    *,
+    warning: str | None = None,
+    warnings: list[str] | None = None,
+    blocking_reason: str,
+) -> CurriculumPreviewResult:
+    resolved_warnings = list(warnings or [])
+    if warning:
+        resolved_warnings.append(warning)
+    return CurriculumPreviewResult(
+        decision="rejected",
+        document_kind="unreadable",
+        document_confidence=0.0,
+        weight_status="missing",
+        raw_curriculum_text="",
+        warnings=resolved_warnings,
+        blocking_reasons=[blocking_reason],
+    )
+
+
+def _summarize_pdf_read_error(exc: Exception) -> str:
+    if isinstance(exc, FileNotDecryptedError):
+        return "암호화된 PDF"
+    message = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    return message if len(message) <= 120 else f"{message[:117]}..."
 
 
 def _preview_with_openai(

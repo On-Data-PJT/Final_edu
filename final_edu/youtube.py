@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice
 from urllib.parse import parse_qs, urlparse
 
@@ -27,6 +28,7 @@ YOUTUBE_HOSTS = {
 }
 
 YOUTUBE_METADATA_SOCKET_TIMEOUT_SECONDS = 15
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -53,6 +55,7 @@ class ResolvedYoutubeInput:
     source_id: str
     videos: list[ResolvedYoutubeVideo]
     total_video_count: int
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def is_playlist(self) -> bool:
@@ -129,6 +132,7 @@ def summarize_youtube_inputs(
             storage=storage,
         )
         resolved_inputs.append(resolved)
+        warnings.extend(resolved.warnings)
         has_playlist = has_playlist or resolved.is_playlist
         expanded_urls.extend(video.url for video in resolved.videos if video.url)
 
@@ -363,6 +367,13 @@ def _resolve_youtube_input_with_settings(
         if not treat_as_playlist:
             fallback = _build_single_video_fallback(normalized_url)
             if fallback is not None:
+                warning = _build_single_video_metadata_fallback_warning(normalized_url, exc)
+                logger.warning(
+                    "YouTube metadata fallback used for %s (%s)",
+                    normalized_url,
+                    _compact_youtube_error_reason(exc),
+                )
+                fallback.warnings.append(warning)
                 return fallback
         raise ValueError(_summarize_youtube_metadata_error(normalized_url, exc, treat_as_playlist=treat_as_playlist)) from exc
 
@@ -492,6 +503,13 @@ def _build_single_video_fallback(url: str) -> ResolvedYoutubeInput | None:
     )
 
 
+def _build_single_video_metadata_fallback_warning(url: str, exc: Exception) -> str:
+    return (
+        f"{url}: YouTube 메타데이터를 읽지 못해 재생시간 추정은 제외하고 계속 진행합니다. "
+        f"실제 자막 분석은 계속 시도합니다. ({_compact_youtube_error_reason(exc)})"
+    )
+
+
 def _extract_video_id_from_url(url: str) -> str | None:
     parsed = urlparse(str(url or "").strip())
     host = (parsed.hostname or "").lower()
@@ -513,7 +531,7 @@ def _extract_video_id_from_url(url: str) -> str | None:
 
 
 def _summarize_youtube_metadata_error(url: str, exc: Exception, *, treat_as_playlist: bool) -> str:
-    compact_reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    compact_reason = _compact_youtube_error_reason(exc)
     if treat_as_playlist:
         return (
             f"{url}: YouTube 재생목록 메타데이터를 읽지 못했습니다. 잠시 후 다시 시도하거나 "
@@ -523,6 +541,18 @@ def _summarize_youtube_metadata_error(url: str, exc: Exception, *, treat_as_play
         f"{url}: YouTube 메타데이터를 읽지 못했고 URL에서 단일 영상 정보를 복구하지 못했습니다. "
         f"({compact_reason})"
     )
+
+
+def _compact_youtube_error_reason(exc: Exception) -> str:
+    message = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    lowered = message.lower()
+    if "sign in to confirm you’re not a bot" in lowered or "sign in to confirm you're not a bot" in lowered:
+        return "YouTube가 봇 확인(sign-in)을 요구했습니다."
+    if "requested format is not available" in lowered:
+        return "YouTube 메타데이터 포맷을 읽지 못했습니다."
+    if len(message) > 140:
+        return f"{message[:137]}..."
+    return message
 
 
 def _serialize_info_for_cache(info: dict | None) -> dict:

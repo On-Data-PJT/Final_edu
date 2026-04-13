@@ -233,6 +233,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `render.yaml`
   Trigger Commands: Render Blueprint 생성, `render.yaml` validation, Key Value 배포 설정 변경
   Must Read When: Render Blueprint 스키마, Key Value 배포, secret env 주입 방식을 바꿀 때
+- `DBG-048` `active` Lane: `Lead / Integration`
+  Tags: `courses`, `preview`, `pdf`, `encrypted`, `render`
+  Related Files: `final_edu/courses.py`, `final_edu/app.py`, `tests/test_course_preview.py`
+  Trigger Commands: `POST /courses/preview`, Render course preview 로그, 보호 PDF 업로드
+  Must Read When: unreadable/encrypted PDF preview fallback, Render preview 500 조사
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -610,11 +615,13 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - `yt-dlp` metadata/playlist resolution 을 direct 경로로 분리
   - metadata 옵션에 `ignoreconfig=True`, `socket_timeout`, `process=False`를 적용해 local/global config 오염과 format selection 을 차단
   - 단일 `watch` URL은 metadata 해석이 실패해도 URL에서 `video_id`를 복구하면 fallback 으로 계속 진행
+  - 단일 `watch` URL fallback 시에는 prepare warnings 에 `재생시간 추정은 제외하고 계속 진행` 문구를 남기고, 서버 로그에도 `metadata fallback used`를 남겨 anti-bot/format-error와 transcript 제한을 구분할 수 있게 함
   - explicit playlist metadata 실패는 `ValueError`로 정리해 route 에서 user-facing 4xx 로 반환되게 함
 - Prevention Rule:
   - transcript unblock 용 proxy와 `yt-dlp` metadata resolution 경로를 같은 것으로 가정하지 말 것
   - metadata-only `yt-dlp` 호출은 `process=False`와 `ignoreconfig=True` 여부를 먼저 점검할 것
   - 단일 YouTube `watch` URL은 metadata 실패만으로 `prepare` 전체가 500으로 끝나지 않게 할 것
+  - metadata fallback 으로 `duration_seconds=0`이 들어가면 사용자에게 추정치 부정확 warning 을 같이 노출하고, 서버 로그에는 fallback 여부를 남길 것
   - `POST /analyze/prepare` 회귀 테스트에는 direct metadata + transcript proxy 분리 시나리오를 남길 것
 
 ### DBG-027 `active` Page 1 mixed lane 이 명시적 mode 없이 저장돼 복원 시 VOC가 사라진 것처럼 보였음
@@ -1304,3 +1311,26 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - Windows/비ASCII 경로에서 `Kiwi` 문제를 해결할 때 repo 코드에 `C:\\...` 같은 OS 전용 모델 경로를 하드코딩하지 말 것
   - 공식 실행 경로와 다른 `uvicorn module:app` 방식에서만 생기는 증상을 앱 버그와 혼동하지 말 것
   - `Kiwi` 같은 핵심 분석 의존성은 업로드 후 뒤늦게 만나지 말고 web/worker startup 에서 readiness check 로 먼저 검증할 것
+
+### DBG-048 `active` 보호/손상 PDF가 `/courses/preview`에서 그대로 예외를 올리며 500으로 터질 수 있었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `courses`, `preview`, `pdf`, `encrypted`, `render`
+- Related Files: `final_edu/courses.py`, `final_edu/app.py`, `tests/test_course_preview.py`
+- Trigger Commands: `POST /courses/preview`, Render course preview 로그, 보호 PDF 업로드
+- Must Read When: unreadable/encrypted PDF preview fallback, Render preview 500 조사
+- Symptom:
+  - Render 실배포에서 일부 커리큘럼 PDF 업로드 시 `POST /courses/preview`가 `500 Internal Server Error`로 실패했음
+  - 대표 로그는 `pypdf.errors.FileNotDecryptedError: File has not been decrypted`였고, 프론트에는 generic failure만 보였음
+- Root Cause:
+  - `preview_course_pdf()`가 `_extract_pdf_pages()`의 `PdfReader(...).pages` 순회 예외를 잡지 않아, 암호화/보호 PDF와 일부 손상 PDF가 그대로 route-level 500으로 전파됐음
+  - 현재 Page 1 계약은 unreadable PDF도 `rejected` preview로 내려 사용자 수동 편집을 허용해야 하는데, backend fallback이 그 계약을 지키지 못했음
+- Resolution:
+  - `preview_course_pdf()`에서 `FileNotDecryptedError`, `PdfReadError`, `ParseError`, `EmptyFileError` 계열을 `rejected/unreadable` preview payload로 변환
+  - 암호화 PDF는 `암호화/보호된 PDF라 자동 분석할 수 없습니다` blocking reason으로, 손상 PDF는 `PDF 구조를 읽지 못했습니다` blocking reason으로 분리
+  - `tests.test_course_preview`에 encrypted/broken PDF 예외가 더 이상 raise되지 않고 rejected payload가 반환되는 회귀 테스트를 추가
+- Prevention Rule:
+  - `/courses/preview`에서 PDF reader 예외를 route-level 500으로 그대로 올리지 말 것
+  - unreadable/encrypted PDF도 현재 Page 1 편집 계약상 `rejected` preview payload로 내려 수동 저장 경로를 유지할 것
+  - Render 로그에 `FileNotDecryptedError`나 `PdfReadError`가 보이면 PDF parse fallback부터 먼저 확인할 것

@@ -253,6 +253,9 @@ Last Updated: 2026-04-13
 - `DBG-035`
 - `DBG-036`
 - `DBG-037`
+- `DBG-026`
+- `DBG-047`
+- `DBG-048`
 - `DBG-038`
 - `DBG-043`
 - `DBG-006`
@@ -299,6 +302,10 @@ Last Updated: 2026-04-13
 - `render.yaml`에 Render Blueprint 검증용 `region`, Key Value `ipAllowList: []`, `maxmemoryPolicy: noeviction`를 추가해 Blueprint schema 오류 없이 web/worker/keyvalue를 같은 리전으로 생성할 수 있게 정리했다.
 - Render 대상 사용자 지연시간을 줄이기 위해 Blueprint의 `web`, `worker`, `keyvalue` 리전을 `singapore`로 통일했다.
 - Render secret env 는 저장소의 `.env`를 자동 sync 하지 않으므로, `OPENAI_API_KEY`, `FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY`, `R2_*` 값은 계속 `sync: false` 상태로 Render 대시보드에서 직접 입력해야 한다.
+- Render 실배포 로그에서 보인 보호 PDF 500 회귀를 잡기 위해, `/courses/preview`가 `FileNotDecryptedError`와 주요 PDF parse 오류를 더 이상 route-level 500으로 올리지 않고 `rejected/unreadable` preview payload로 반환하도록 보강했다.
+- YouTube prepare에서 단일 영상 metadata anti-bot/format 오류가 fallback으로 숨겨질 때도, prepare warnings 에 `재생시간 추정은 제외하고 계속 진행` 문구를 남기고 서버 로그에도 `metadata fallback used`를 기록하도록 정리했다.
+- transcript fetch 실패 로그에 `scraperapi_enabled`, `proxy_active`, 예외 타입을 함께 남겨 Render에서 ScraperAPI 사용 여부와 transcript 제한을 더 쉽게 판별할 수 있게 보강했다.
+- `tests.test_course_preview`, `tests.test_youtube_inputs`에 encrypted/broken PDF rejected preview와 single-video metadata fallback warning surface 회귀를 추가했다.
 - `origin/jiye`의 오래된 브랜치를 merge 하지 않고, 현재 `dev` 위에 필요한 세 변경만 선별 이식했다.
 - VOC OpenAI text analysis 호출에 `temperature=0`을 추가해 강사별 자유의견 요약의 비결정성을 줄였다.
 - solution payload 의 gap benchmark 를 강사 평균 actual share 대신 과정 `target_weight` 기준으로 바꿔, `표준커리큘럼 준수도` 해석이 목표 비중과 직접 비교되도록 정리했다.

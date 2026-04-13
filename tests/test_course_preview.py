@@ -10,10 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pypdf.errors import FileNotDecryptedError, PdfReadError
 
 from final_edu.app import create_app
 from final_edu.config import get_settings
-from final_edu.courses import _preview_with_openai, _preview_without_openai
+from final_edu.courses import preview_course_pdf, _preview_with_openai, _preview_without_openai
 from final_edu.models import CurriculumPreviewResult
 
 
@@ -112,6 +113,24 @@ class CoursePreviewTests(unittest.TestCase):
             timeout=7.5,
             max_retries=0,
         )
+
+    def test_preview_course_pdf_rejects_encrypted_pdf_without_raising(self) -> None:
+        with patch("final_edu.courses._extract_pdf_pages", side_effect=FileNotDecryptedError("File has not been decrypted")):
+            preview = preview_course_pdf(Path("encrypted.pdf"), 8, get_settings())
+
+        self.assertEqual(preview.decision, "rejected")
+        self.assertEqual(preview.document_kind, "unreadable")
+        self.assertTrue(any("암호화/보호된 PDF" in reason for reason in preview.blocking_reasons))
+        self.assertTrue(any("암호화/보호" in warning for warning in preview.warnings))
+
+    def test_preview_course_pdf_rejects_broken_pdf_without_raising(self) -> None:
+        with patch("final_edu.courses._extract_pdf_pages", side_effect=PdfReadError("broken xref table")):
+            preview = preview_course_pdf(Path("broken.pdf"), 8, get_settings())
+
+        self.assertEqual(preview.decision, "rejected")
+        self.assertEqual(preview.document_kind, "unreadable")
+        self.assertTrue(any("PDF 구조를 읽지 못해" in reason for reason in preview.blocking_reasons))
+        self.assertTrue(any("broken xref table" in warning for warning in preview.warnings))
 
     def test_create_course_accepts_manual_sections_without_preview_decision_gate(self) -> None:
         with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(

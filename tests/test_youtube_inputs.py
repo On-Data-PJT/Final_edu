@@ -279,6 +279,36 @@ class YoutubeInputTests(unittest.TestCase):
         self.assertEqual(resolved.source_id, "U5De-0aglaE")
         self.assertEqual(resolved.videos[0].video_id, "U5De-0aglaE")
         self.assertEqual(resolved.videos[0].duration_seconds, 0)
+        self.assertTrue(any("재생시간 추정은 제외" in warning for warning in resolved.warnings))
+
+    def test_single_video_metadata_fallback_warning_is_surface_in_prepare_summary(self) -> None:
+        url = "https://www.youtube.com/watch?v=U5De-0aglaE"
+        settings = replace(get_settings(), openai_api_key=None, chunk_target_tokens=200)
+
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            settings = replace(settings, runtime_dir=Path(runtime_dir))
+            storage = create_object_storage(settings)
+
+            with patch("final_edu.youtube.YoutubeDL", _ExplodingYoutubeDL), patch(
+                "final_edu.youtube.probe_transcript_samples",
+                return_value={
+                    "sample_count": 1,
+                    "success_count": 0,
+                    "average_tokens_per_second": 0.0,
+                    "average_fetch_seconds": 1.0,
+                    "warnings": [],
+                },
+            ):
+                summary = summarize_youtube_inputs(
+                    [url],
+                    settings=settings,
+                    instructor_count=1,
+                    section_count=3,
+                    storage=storage,
+                )
+
+        self.assertTrue(any("재생시간 추정은 제외" in warning for warning in summary["warnings"]))
+        self.assertEqual(summary["expanded_video_count"], 1)
 
     def test_playlist_metadata_failure_becomes_user_facing_value_error(self) -> None:
         url = "https://www.youtube.com/playlist?list=PLIYf0rAjO5mY-xE36xaBCJdZzLFH6QjKI"

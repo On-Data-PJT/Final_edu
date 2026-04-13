@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 import tempfile
@@ -116,6 +117,7 @@ VOC_SURVEY_FREE_TEXT_HINTS = (
     "feedback",
     "suggestion",
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -1127,14 +1129,26 @@ def _fetch_youtube_transcript(
         return list(cached_transcript.value or []), []
 
     stale_transcript = cache.get_transcript(video_id=video_id, allow_stale=True)
-    http_client = build_youtube_scraperapi_http_client(settings, session_seed=f"video:{video_id}")
+    proxy_requested = bool(settings.youtube_scraperapi_enabled)
+    http_client = None
+    proxy_active = False
     try:
+        http_client = build_youtube_scraperapi_http_client(settings, session_seed=f"video:{video_id}")
+        proxy_active = http_client is not None
         throttle_youtube_requests(settings)
         transcript = YouTubeTranscriptApi(http_client=http_client).fetch(
             video_id,
             languages=["ko", "en", "en-US"],
         )
     except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "YouTube transcript fetch failed for %s (scraperapi_enabled=%s, proxy_active=%s, error=%s: %s)",
+            video_id,
+            proxy_requested,
+            proxy_active,
+            type(exc).__name__,
+            _summarize_youtube_exception_for_log(exc),
+        )
         if is_youtube_request_limited_error(exc):
             mark_youtube_request_limited(settings)
         if stale_transcript is not None and is_youtube_request_limited_error(exc):
@@ -1152,6 +1166,11 @@ def _fetch_youtube_transcript(
     ]
     cache.put_transcript(video_id=video_id, value=serialized)
     return serialized, []
+
+
+def _summarize_youtube_exception_for_log(exc: Exception) -> str:
+    message = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+    return message if len(message) <= 160 else f"{message[:157]}..."
 
 
 def _extract_video_id(url: str) -> str | None:
