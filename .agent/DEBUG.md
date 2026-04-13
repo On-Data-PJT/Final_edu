@@ -218,6 +218,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `tests/test_page2_dashboard.py`
   Trigger Commands: `/jobs/{job_id}` Page 2 `전체 평균`/단일 강사 word cloud 비교
   Must Read When: Page 2 word cloud aggregate, keyword payload public/private 분리, overall average title/renderer 계약 변경
+- `DBG-045` `active` Lane: `Web / Demo Agent`
+  Tags: `material`, `mapped-only`, `generic-anchors`, `openai-vs-lexical`, `coverage`
+  Related Files: `final_edu/analysis.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: material PDF 분석, `/jobs/{job_id}` material coverage review
+  Must Read When: material section assignment, lexical/openai share contract, chapter형 커리큘럼 material 쏠림을 바꿀 때
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -698,6 +703,32 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 삭제 버튼 hit area를 40px로 키워 아이콘 주변을 눌러도 첫 클릭 성공률이 떨어지지 않게 보강
 - Prevention Rule:
   - SVG/icon 버튼을 delegated click으로 처리할 때 `event.target instanceof HTMLElement`로 필터링하지 말 것
+
+### DBG-045 `active` material coverage 가 chapter형 커리큘럼에서 특정 대단원으로 과매핑되고, lexical/openai share 분모도 서로 달랐음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `material`, `mapped-only`, `generic-anchors`, `openai-vs-lexical`, `coverage`
+- Related Files: `final_edu/analysis.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: material PDF 분석, `/jobs/{job_id}` material coverage review
+- Must Read When: material section assignment, lexical/openai share contract, chapter형 커리큘럼 material 쏠림을 바꿀 때
+- Symptom:
+  - 같은 강의자료 PDF가 `Chapter 6` 같은 특정 대단원으로 과도하게 쏠리거나, 강의자료에 없는/커리큘럼에 없는 주제가 가장 가까운 대단원으로 빨려 들어가는 현상이 있었음
+  - 저장된 `openai-embeddings` material 결과와 로컬 `lexical-streaming` material 결과가 같은 자료인데도 값 체계가 크게 달랐음
+  - 특히 lexical streaming 경로에서는 mapped coverage 가 일부만 있어도 `mode_series`가 raw total token 분모를 써서 share 합이 100이 아닌 값으로 내려갈 수 있었음
+- Root Cause:
+  - material lexical aggregate builder인 `_build_mode_series_from_aggregates()`가 `mapped_tokens`가 아니라 `total_tokens`를 분모로 사용하고 있었음
+  - material assignment text 는 course-specific `SECTION_ALIAS_GLOSSARY` 의존도가 높았고, section `title + description` 자체에서 generic anchor 를 안정적으로 뽑지 못했음
+  - material chunk 는 speech처럼 strict candidate gate 가 없어, 명시 근거가 약한 청크도 nearest-neighbor 로 가장 비슷한 대단원에 배정될 수 있었음
+- Resolution:
+  - lexical streaming 의 material `mode_series`도 `mapped_tokens`를 분모로 쓰도록 고쳐 openai path 와 같은 mapped-only share 계약으로 통일
+  - material section assignment 1차 기준을 `section title + description` 기반 generic fragment anchor 로 재구성하고, 기존 glossary 는 보강용으로만 유지
+  - material chunk 는 explicit anchor evidence 가 없는 경우 candidate 를 만들지 않고 unmapped 로 남기도록 보수적 gate 를 추가
+  - 회귀 테스트에 `mapped_tokens < total_tokens`인 material 케이스에서도 rose share 합이 100으로 유지되는지, chapter형 material 이 단일 chapter 100%로 붕괴하지 않는지를 고정
+- Prevention Rule:
+  - material coverage 를 바꿀 때는 `openai-embeddings`와 `lexical-streaming`이 같은 share 분모 계약을 쓰는지 먼저 확인할 것
+  - course-specific glossary 를 1차 판단 기준으로 두지 말고, `title + description`에서 generic anchor 를 먼저 만들 것
+  - 커리큘럼에 없는 주제는 nearest-neighbor 로 억지 매핑하지 말고 unmapped 로 남길 것
   - `closest()`를 쓸 이벤트 target은 `Element` 기준으로 정규화할 것
   - icon-only 버튼은 시각 크기와 별개로 최소 40px 전후의 tappable area를 유지할 것
 

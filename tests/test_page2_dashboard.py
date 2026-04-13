@@ -13,9 +13,12 @@ from final_edu.analysis import analyze_submissions
 from final_edu.analysis import (
     _apply_speech_title_prior,
     _build_section_assignment_texts,
+    _material_candidate_section_ids,
+    _material_anchor_counts_by_section,
     _restrict_scored_sections_to_candidates,
     _resolve_speech_title_rescue,
     _score_speech_title_sections,
+    _section_material_anchor_terms,
     _section_speech_anchor_terms,
     _speech_anchor_counts,
     _speech_transcript_anchor_counts_by_section,
@@ -245,6 +248,78 @@ def _fake_extract_material_mixed_topic_asset(upload: UploadedAsset, instructor_n
                     "Q1. 확인 문제 답: _____"
                 ),
             )
+        ],
+        [],
+    )
+
+
+def _fake_extract_material_partial_coverage_asset(upload: UploadedAsset, instructor_name: str):
+    source_id = f"{instructor_name}-partial-material"
+    return (
+        SourceAsset(
+            id=source_id,
+            instructor_name=instructor_name,
+            asset_type="pdf",
+            label=upload.original_name,
+            origin="upload",
+        ),
+        [
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.1",
+                text="SQL 데이터 분석 전처리 시각화 pandas SQL 데이터 분석",
+            ),
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.2",
+                text="이번 페이지는 학생 활동 안내와 수업 운영 메모만 포함합니다.",
+            ),
+        ],
+        [],
+    )
+
+
+def _fake_extract_chaptered_material_drift_asset(upload: UploadedAsset, instructor_name: str):
+    source_id = f"{instructor_name}-chaptered-material"
+    return (
+        SourceAsset(
+            id=source_id,
+            instructor_name=instructor_name,
+            asset_type="pdf",
+            label=upload.original_name,
+            origin="upload",
+        ),
+        [
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.1",
+                text="2주차 서포트 벡터 머신 Support Vector Machine SVM 최대 마진 초평면 커널",
+            ),
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.2",
+                text="신경망 모델 역전파 활성화 함수 은닉층 가중치 업데이트",
+            ),
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label=upload.original_name,
+                source_type="pdf",
+                locator="p.3",
+                text="정규화 Regularization 과적합 방지 L1 L2 Dropout 모델 선택",
+            ),
         ],
         [],
     )
@@ -547,6 +622,42 @@ class Page2DashboardTests(unittest.TestCase):
         material_rose = result["rose_series_by_mode"]["material"]["강사 A"]
         self.assertTrue(all(item["value"] == 0.0 for item in material_rose))
 
+    def test_material_mode_uses_mapped_only_denominator_in_streaming_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            material_path = Path(temp_dir) / "partial-study.pdf"
+            material_path.write_text("placeholder", encoding="utf-8")
+            submissions = [
+                InstructorSubmission(
+                    name="강사 A",
+                    files=[UploadedAsset(path=material_path, original_name="partial-study.pdf")],
+                )
+            ]
+            settings = replace(
+                get_settings(),
+                openai_api_key=None,
+                chunk_target_tokens=64,
+                chunk_overlap_segments=0,
+                max_evidence_per_section=1,
+            )
+
+            with patch(
+                "final_edu.analysis.extract_file_asset",
+                side_effect=_fake_extract_material_partial_coverage_asset,
+            ):
+                result = analyze_submissions(
+                    course_id="course-1",
+                    course_name="AI 데이터 과정",
+                    sections=_sample_sections(),
+                    submissions=submissions,
+                    settings=settings,
+                    analysis_mode="lexical",
+                ).to_dict()
+
+        material_stat = result["source_mode_stats"]["material"]
+        self.assertGreater(material_stat["total_tokens"], material_stat["mapped_tokens"])
+        material_rose = result["rose_series_by_mode"]["material"]["강사 A"]
+        self.assertAlmostEqual(sum(item["value"] for item in material_rose), 100.0, places=2)
+
     def test_decision_tree_assignment_text_includes_entropy_aliases(self) -> None:
         sections = [
             CurriculumSection(
@@ -562,6 +673,88 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertIn("information gain", assignment_text.lower())
         self.assertIn("지니", assignment_text)
         self.assertIn("가지치기", assignment_text)
+
+    def test_generic_material_anchor_terms_include_title_and_description_fragments(self) -> None:
+        chapter_two, chapter_three, *_rest = _sample_chaptered_ml_sections()[1:]
+        chapter_six = _sample_chaptered_ml_sections()[5]
+
+        chapter_two_anchors = _section_material_anchor_terms(chapter_two)
+        chapter_three_anchors = _section_material_anchor_terms(chapter_three)
+        chapter_six_anchors = _section_material_anchor_terms(chapter_six)
+
+        self.assertIn("rule based", chapter_two_anchors)
+        self.assertIn("decision tree", chapter_two_anchors)
+        self.assertIn("규칙 기반", chapter_two_anchors)
+        self.assertIn("의사결정트리", chapter_two_anchors)
+        self.assertIn("naive bayes", chapter_three_anchors)
+        self.assertIn("나이브 베이즈", chapter_three_anchors)
+        self.assertIn("정규화", chapter_six_anchors)
+        self.assertIn("모델 선택", chapter_six_anchors)
+
+    def test_material_candidate_gate_keeps_neural_network_chunk_unmapped_for_chaptered_course(self) -> None:
+        sections = _sample_chaptered_ml_sections()
+        chunk = ExtractedChunk(
+            id="chunk-material-1",
+            source_id="material-1",
+            instructor_name="강사 A",
+            source_label="study.pdf",
+            source_type="pdf",
+            locator="p.6 (2/5)",
+            text="인공 뉴런 다층 뉴럴 네트워크 손실 함수 역전파 활성화 함수",
+            token_count=20,
+            fingerprint="chunk-material-1",
+        )
+
+        candidate_ids = _material_candidate_section_ids(
+            material_anchor_counts=_material_anchor_counts_by_section(
+                chunk=chunk,
+                sections=sections,
+            )
+        )
+
+        self.assertEqual(candidate_ids, set())
+
+    def test_chaptered_material_analysis_does_not_collapse_into_single_chapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            material_path = Path(temp_dir) / "chaptered-study.pdf"
+            material_path.write_text("placeholder", encoding="utf-8")
+            submissions = [
+                InstructorSubmission(
+                    name="점매",
+                    files=[UploadedAsset(path=material_path, original_name="chaptered-study.pdf")],
+                )
+            ]
+            settings = replace(
+                get_settings(),
+                openai_api_key=None,
+                chunk_target_tokens=64,
+                chunk_overlap_segments=0,
+                max_evidence_per_section=1,
+            )
+
+            with patch(
+                "final_edu.analysis.extract_file_asset",
+                side_effect=_fake_extract_chaptered_material_drift_asset,
+            ):
+                result = analyze_submissions(
+                    course_id="course-1",
+                    course_name="AI chapter 과정",
+                    sections=_sample_chaptered_ml_sections(),
+                    submissions=submissions,
+                    settings=settings,
+                    analysis_mode="lexical",
+                ).to_dict()
+
+        material_stat = result["source_mode_stats"]["material"]
+        self.assertGreater(material_stat["total_tokens"], material_stat["mapped_tokens"])
+        material_rose = {
+            item["section_id"]: item["value"]
+            for item in result["rose_series_by_mode"]["material"]["점매"]
+        }
+        self.assertGreater(material_rose["chapter-5-support-vector-machine-svm"], 0.0)
+        self.assertGreater(material_rose["chapter-6-overfitting-regularization-model-selection"], 0.0)
+        self.assertLess(material_rose["chapter-6-overfitting-regularization-model-selection"], 100.0)
+        self.assertAlmostEqual(sum(material_rose.values()), 100.0, places=2)
 
     def test_generic_speech_anchor_terms_include_title_and_description_fragments(self) -> None:
         chapter_two = _sample_chaptered_ml_sections()[1]

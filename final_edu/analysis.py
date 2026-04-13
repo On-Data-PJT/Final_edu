@@ -115,6 +115,15 @@ VOC_SUGGESTION_MAP = {
 VOC_WEEK_RE = re.compile(r"(\d+\s*(?:주차|주|차시))")
 YOUTUBE_GENERIC_LABEL_RE = re.compile(r"^youtube\s+[0-9a-z_-]{11}$", re.IGNORECASE)
 YOUTUBE_TITLE_CHAPTER_RE = re.compile(r"\[[^\]]+\]\s*(.+)$")
+MATERIAL_FRAGMENT_SPLIT_RE = re.compile(
+    r"\s*(?::|/|&|·|\||,|\(|\)|(?:\s+-\s+)|(?:\s+및\s+)|(?:\s+and\s+))\s*",
+    re.IGNORECASE,
+)
+MATERIAL_CHAPTER_PREFIX_RE = re.compile(
+    r"^\s*(?:chapter|part|lesson|lecture)\s*\d+\s*[:\-]?\s*",
+    re.IGNORECASE,
+)
+MATERIAL_TOTAL_LECTURES_RE = re.compile(r"총\s*\d+\s*강", re.IGNORECASE)
 SPEECH_FRAGMENT_SPLIT_RE = re.compile(
     r"\s*(?::|/|&|·|\||,|\(|\)|(?:\s+-\s+)|(?:\s+및\s+)|(?:\s+and\s+))\s*",
     re.IGNORECASE,
@@ -130,6 +139,39 @@ SPEECH_ACRONYM_SUFFIX_RE = re.compile(r"^(?P<lemma>.+?)\s+(?P<acronym>[A-Z]{2,8}
 SPEECH_TITLE_INDEX_ONLY_SCORE = 0.25
 SPEECH_TITLE_PRIOR_BONUS_MAX = 0.06
 SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA = 0.03
+MATERIAL_STRUCTURAL_TOKENS = {
+    "chapter",
+    "part",
+    "lesson",
+    "lecture",
+    "lectures",
+    "course",
+    "courses",
+    "week",
+    "weeks",
+    "class",
+    "classes",
+    "session",
+    "sessions",
+    "총",
+    "강",
+    "주차",
+    "차시",
+}
+MATERIAL_LOW_SIGNAL_TOKENS = {
+    "motivation",
+    "motivations",
+    "basic",
+    "basics",
+    "overview",
+    "intro",
+    "introduction",
+    "summary",
+    "wrap",
+    "up",
+    "application",
+    "applications",
+}
 SPEECH_STRUCTURAL_TOKENS = {
     "chapter",
     "part",
@@ -395,7 +437,7 @@ def _section_assignment_text(section: CurriculumSection) -> str:
             [
                 section.title,
                 section.description,
-                *_section_alias_terms(section),
+                *_section_material_anchor_terms(section),
             ]
         )
     )
@@ -403,6 +445,74 @@ def _section_assignment_text(section: CurriculumSection) -> str:
 
 def _build_section_assignment_texts(sections: list[CurriculumSection]) -> dict[str, str]:
     return {section.id: _section_assignment_text(section) for section in sections}
+
+
+def _clean_material_fragment(text: str) -> str:
+    cleaned = normalize_text(text)
+    if not cleaned:
+        return ""
+    cleaned = MATERIAL_TOTAL_LECTURES_RE.sub(" ", cleaned)
+    cleaned = MATERIAL_CHAPTER_PREFIX_RE.sub("", cleaned)
+    return normalize_text(cleaned.strip(" -–:/|,·()"))
+
+
+def _normalize_material_fragment_token(token: str) -> str:
+    lowered = normalize_text(token).lower()
+    if not lowered or lowered.isdigit():
+        return ""
+    lowered = SPEECH_SINGULAR_TOKEN_MAP.get(lowered, lowered)
+    if lowered in MATERIAL_STRUCTURAL_TOKENS:
+        return ""
+    return lowered
+
+
+def _material_fragment_key(text: str) -> str:
+    tokens = [
+        normalized
+        for token in tokenize(_clean_material_fragment(text))
+        if (normalized := _normalize_material_fragment_token(token))
+    ]
+    if not tokens or all(token in MATERIAL_LOW_SIGNAL_TOKENS for token in tokens):
+        return ""
+    return " ".join(tokens)
+
+
+def _material_fragment_terms(text: str) -> list[str]:
+    cleaned = _clean_material_fragment(text)
+    if not cleaned:
+        return []
+
+    candidates = [cleaned]
+    candidates.extend(part for part in MATERIAL_FRAGMENT_SPLIT_RE.split(cleaned) if part)
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = _material_fragment_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        terms.append(key)
+
+        acronym_match = SPEECH_ACRONYM_SUFFIX_RE.match(candidate)
+        if acronym_match:
+            lemma_key = _material_fragment_key(acronym_match.group("lemma"))
+            acronym_key = _material_fragment_key(acronym_match.group("acronym"))
+            for variant in (lemma_key, acronym_key):
+                if variant and variant not in seen:
+                    seen.add(variant)
+                    terms.append(variant)
+
+    return terms
+
+
+def _section_material_anchor_terms(section: CurriculumSection) -> list[str]:
+    anchors: list[str] = []
+    anchors.extend(_material_fragment_terms(section.title))
+    anchors.extend(_material_fragment_terms(section.description))
+    for alias in _section_alias_terms(section):
+        anchors.extend(_material_fragment_terms(alias))
+    return _dedupe_terms(anchors)
 
 
 def _rank_scored_sections(scored: list[tuple[CurriculumSection, float]]) -> list[tuple[CurriculumSection, float]]:
@@ -555,6 +665,42 @@ def _speech_anchor_counts(*, text: str, anchors: list[str]) -> dict[str, int]:
         if count > 0:
             counts[anchor] = count
     return counts
+
+
+def _material_anchor_counts(*, text: str, anchors: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for anchor in anchors:
+        count = _count_anchor_occurrences(text, anchor)
+        if count > 0:
+            counts[anchor] = count
+    return counts
+
+
+def _material_anchor_counts_by_section(
+    *,
+    chunk,
+    sections: list[CurriculumSection],
+) -> dict[str, dict[str, int]]:
+    if chunk.source_type not in MATERIAL_SOURCE_TYPES:
+        return {}
+    return {
+        section.id: _material_anchor_counts(
+            text=chunk.text,
+            anchors=_section_material_anchor_terms(section),
+        )
+        for section in sections
+    }
+
+
+def _material_candidate_section_ids(
+    *,
+    material_anchor_counts: dict[str, dict[str, int]],
+) -> set[str]:
+    return {
+        section_id
+        for section_id, counts in material_anchor_counts.items()
+        if counts
+    }
 
 
 def _speech_transcript_anchor_counts_by_section(
@@ -757,7 +903,11 @@ def analyze_submissions(
         [
             term
             for section in normalized_sections
-            for term in [section.title, *_section_alias_terms(section)]
+            for term in [
+                section.title,
+                *_section_alias_terms(section),
+                *_section_material_anchor_terms(section),
+            ]
         ]
     )
     active_submissions = [
@@ -1836,7 +1986,17 @@ def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> tuple[ChunkAs
     )
     transcript_scored = list(scored)
     title_warning = None
-    if chunk.source_type in SPEECH_SOURCE_TYPES:
+    if chunk.source_type in MATERIAL_SOURCE_TYPES:
+        scored = _restrict_scored_sections_to_candidates(
+            scored=scored,
+            candidate_ids=_material_candidate_section_ids(
+                material_anchor_counts=_material_anchor_counts_by_section(
+                    chunk=chunk,
+                    sections=sections,
+                )
+            ),
+        )
+    elif chunk.source_type in SPEECH_SOURCE_TYPES:
         transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
             chunk=chunk,
             sections=sections,
@@ -1973,12 +2133,14 @@ def _build_mode_series_from_aggregates(
                 },
             )
             total_tokens = int(aggregate.get("total_tokens", 0))
+            unmapped_tokens = int(aggregate.get("unmapped_tokens", 0))
+            mapped_tokens = max(total_tokens - unmapped_tokens, 0)
             section_tokens = aggregate.get("section_tokens", {})
             instructor_values[submission.name] = [
                 {
                     "section_id": section.id,
                     "section_title": section.title,
-                    "share": round((int(section_tokens.get(section.id, 0)) / total_tokens), 6) if total_tokens else 0.0,
+                    "share": round((int(section_tokens.get(section.id, 0)) / mapped_tokens), 6) if mapped_tokens else 0.0,
                 }
                 for section in sections
             ]
@@ -2282,7 +2444,17 @@ def _assign_with_lexical(chunks, sections):
         )
         transcript_scored = list(scored)
         title_warning = None
-        if chunk.source_type in SPEECH_SOURCE_TYPES:
+        if chunk.source_type in MATERIAL_SOURCE_TYPES:
+            scored = _restrict_scored_sections_to_candidates(
+                scored=scored,
+                candidate_ids=_material_candidate_section_ids(
+                    material_anchor_counts=_material_anchor_counts_by_section(
+                        chunk=chunk,
+                        sections=sections,
+                    )
+                ),
+            )
+        elif chunk.source_type in SPEECH_SOURCE_TYPES:
             transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
                 chunk=chunk,
                 sections=sections,
@@ -2351,7 +2523,17 @@ def _assign_with_openai(chunks, sections, settings: Settings):
         )
         transcript_scored = list(scored)
         title_warning = None
-        if chunk.source_type in SPEECH_SOURCE_TYPES:
+        if chunk.source_type in MATERIAL_SOURCE_TYPES:
+            scored = _restrict_scored_sections_to_candidates(
+                scored=scored,
+                candidate_ids=_material_candidate_section_ids(
+                    material_anchor_counts=_material_anchor_counts_by_section(
+                        chunk=chunk,
+                        sections=sections,
+                    )
+                ),
+            )
+        elif chunk.source_type in SPEECH_SOURCE_TYPES:
             transcript_anchor_counts = _speech_transcript_anchor_counts_by_section(
                 chunk=chunk,
                 sections=sections,

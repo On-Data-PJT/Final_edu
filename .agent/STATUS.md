@@ -82,6 +82,8 @@ Last Updated: 2026-04-13
   - section title 사용자 사전을 미리 등록한다.
   - curriculum-first keyword ranking 을 유지한다.
   - material 파일 chunking 은 PDF/슬라이드 경계를 넘겨 합치지 않고, overlap 없이 page/slide 단위로 처리한다.
+  - material section assignment 는 section `title + description`에서 뽑은 generic fragment anchor 를 기본으로 사용하고, glossary 는 보강용으로만 남긴다.
+  - material chunk 에 explicit anchor evidence 가 없으면 nearest-neighbor 로 억지 배정하지 않고 unmapped 로 남긴다.
   - 커버리지 share 는 raw total token 이 아니라 mapped token 만을 분모로 계산한다.
   - speech section assignment 는 section `title + description` 기반 generic fragment anchor 와 strict speech anchor glossary 를 함께 사용한다.
   - speech anchor matching 은 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절이 `지니` anchor 로 오탐되지 않게 한다.
@@ -134,6 +136,8 @@ Last Updated: 2026-04-13
 - speech anchor matching 을 token sequence 기준으로 바꿔 `지니고` 같은 일반 어절이 `지니`로 오탐되던 회귀를 막고, exact title match + 단일 transcript anchor 가 있는 SVM/Decision Tree chapter 는 rescue 되도록 보강했다.
 - chapter형 커리큘럼에서도 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하지 않도록, speech anchor 를 section `title + description`에서 generic fragment 로 추출하고 title rescue 를 exact fragment / bounded chapter index 로 일반화했다.
 - Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제로는 `mapped_tokens`만 작게 잡힌 결과가 mapped-only normalization 때문에 `100%`처럼 보일 때 해석 근거를 함께 보여주도록 했다.
+- material lexical-streaming aggregate 가 raw total token 분모를 쓰던 회귀를 고쳐, material `mode_series`와 `rose_series_by_mode`도 openai path 와 같은 mapped-only share 계약을 따르도록 통일했다.
+- material section assignment 는 ML 강의 전용 glossary 편향을 줄이기 위해 section `title + description` 기반 generic fragment anchor 를 1차 기준으로 재구성했고, explicit anchor evidence 가 없는 chunk 는 unmapped 로 남기도록 보수적으로 조정했다.
 - Page 2 결과 payload 에 `mode_unmapped_series`를 추가하고, 도넛 차트가 보이는 slice 들만 다시 100으로 정규화하지 않도록 수정했다.
 - Page 2 `source_mode_stats`에 `mapped_tokens`를 추가하고, 커버리지 도넛/bar/radar를 mapped-only share 기준으로 재정의했다.
 - Page 2 상단 도넛에서 `미분류` slice 를 제거하고, source는 있으나 mapped coverage가 0인 mode는 empty state 로 처리하도록 정리했다.
