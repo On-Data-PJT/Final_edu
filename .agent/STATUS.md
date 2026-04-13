@@ -74,13 +74,17 @@ Last Updated: 2026-04-13
 - YouTube 처리 계약:
   - 명시적 `playlist?list=...`만 playlist 로 확장한다.
   - `watch?v=...&list=...`는 단일 영상으로 유지한다.
-  - `prepare`와 worker 는 object-storage 기반 shared cache 를 재사용한다.
+- `prepare`와 worker 는 object-storage 기반 shared cache 를 재사용한다.
   - process-local throttle + distributed throttle + cooldown 을 함께 사용한다.
   - `yt-dlp` metadata/playlist 해석은 direct 경로 + `ignoreconfig=True` + `process=False` 정책을 사용한다.
   - ScraperAPI trial 이 켜져 있으면 transcript fetch 에만 ScraperAPI proxy port 를 사용한다.
   - 공개 자막이 없으면 selective STT fallback 이 동작할 수 있다.
   - 단일 `watch` URL은 metadata 해석이 실패해도 URL에서 video id 를 복구할 수 있으면 계속 진행한다.
   - probe 정책은 `30개 이하 full / 31~200 partial / 200+ skip`이다.
+- 과정 메타데이터(`CourseRecord`)는 local runtime filesystem 대신 storage mode에 따라 저장소를 선택한다.
+  - `local` 모드: `runtime_dir/courses/*.json`
+  - `r2` 모드: `course-records/{course_id}.json`
+- 따라서 Render처럼 `storage_mode == "r2"`인 배포에서는 Blueprint sync / redeploy 이후에도 과정 목록이 object storage에 남는다.
 - lexical 분석 계약:
   - `kiwipiepy` 기반 tokenization 을 사용한다.
   - 공식 웹 실행은 factory entrypoint(`uv run python -m final_edu --reload`) 기준이며, module-level `final_edu.app:app` 객체 존재를 전제로 하지 않는다.
@@ -185,6 +189,8 @@ Last Updated: 2026-04-13
 - Page 2 speech coverage note 는 도넛/범례 의미는 그대로 둔 채, `전체 발화 중 ...만` 반영됐다는 사실만 더 명시적으로 안내하도록 카피를 정리했다.
 - solution `trendAnalysis` prompt 는 더 이상 한국사/수학/과학 예시를 박아두지 않고, 도메인과 직접 관련된 기관·시험·정책만 언급하라는 중립 규칙으로 정리했다.
 - speech 회귀 테스트 fixture 는 한국사 강의 대신 생명과학 다단원 라이브 예제로 바꿔, 일반 anchor/chunking 로직이 특정 과목 하드코딩 없이 동작하는지만 검증하도록 정리했다.
+- course repository selection을 `storage_mode` 기반 factory로 분리해, Render R2 배포에서는 과정 목록 JSON도 `course-records/{course_id}.json` prefix로 object storage에 저장되도록 보강했다.
+- `tests.test_course_repository`를 추가해 object-backed course save/get/list/delete와 app 재기동 뒤 과정 목록 persistence를 검증했다.
 
 ## Verification
 

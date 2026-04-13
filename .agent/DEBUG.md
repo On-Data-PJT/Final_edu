@@ -253,6 +253,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
   Trigger Commands: Page 2 `speech` toggle, long livestream YouTube 분석, `0%` 대단원 과다 조사
   Must Read When: speech chunk budget, transcript preprocessing, speech coverage note wording, anchor gate 완화/강화 변경
+- `DBG-052` `active` Lane: `Lead / Integration`
+  Tags: `render`, `courses`, `storage`, `r2`, `persistence`
+  Related Files: `final_edu/courses.py`, `final_edu/app.py`, `final_edu/storage.py`, `tests/test_course_repository.py`
+  Trigger Commands: Render Blueprint sync, redeploy 뒤 과정 목록 확인, `GET /courses`, `POST /courses`
+  Must Read When: course repository selection, Render persistence, object-storage key prefix 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1426,3 +1431,27 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - nonverbal-only transcript cue 는 coverage chunking 전에 제거할 것
   - mapped-only 차트 의미를 유지할 때는 raw-share 를 범례/툴팁에 섞지 말고, 제외된 발화 비율은 상단 note 에서만 설명할 것
   - speech candidate gate 를 완화할 때도 `single populated section` 같은 broad shortcut 은 넣지 말고, exact title fragment 같은 좁은 근거만 허용할 것
+
+### DBG-052 `active` Render redeploy/sync 때 과정 목록이 전부 사라진 것은 course record만 local runtime filesystem에 저장하던 설계 때문이었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `render`, `courses`, `storage`, `r2`, `persistence`
+- Related Files: `final_edu/courses.py`, `final_edu/app.py`, `final_edu/storage.py`, `tests/test_course_repository.py`
+- Trigger Commands: Render Blueprint sync, redeploy 뒤 과정 목록 확인, `GET /courses`, `POST /courses`
+- Must Read When: course repository selection, Render persistence, object-storage key prefix 변경
+- Symptom:
+  - Render에서 새 과정을 저장해도 Blueprint sync 또는 redeploy 뒤에는 과정 목록이 비어 보였음
+  - 같은 배포에서 curriculum PDF / job payload / result는 남아 있는데 course list만 사라져 사용자가 저장 실패로 오해할 수 있었음
+- Root Cause:
+  - `CourseRecord` JSON은 `runtime_dir/courses/*.json` local filesystem에만 저장하고 있었음
+  - Render 기본 filesystem은 ephemeral이라 deploy/sync 때 local runtime 디렉터리가 사라졌음
+  - 반면 R2는 업로드/prepare/result 용 object storage로만 쓰고 있어 course metadata는 persistence 범위 밖에 있었음
+- Resolution:
+  - course repository를 factory로 분리하고, `storage_mode == "r2"`이면 `ObjectStorageCourseRepository`를 사용하도록 변경했음
+  - course record는 `course-records/{course_id}.json` prefix 아래 object storage에 저장하고, local 모드만 기존 `runtime_dir/courses/*.json`를 유지했음
+  - app startup에서 repository 선택을 `create_course_repository(settings, storage)`로 통일했고, object-backed save/get/list/delete와 app 재기동 persistence 회귀 테스트를 추가했음
+- Prevention Rule:
+  - Render처럼 ephemeral filesystem 위에서 재배포가 잦은 환경에서는 user-facing metadata를 local runtime dir에만 저장하지 말 것
+  - 이미 object storage를 쓰는 배포에서는 course/job/result처럼 서로 연결된 사용자 상태를 같은 persistence tier로 맞출 것
+  - object storage에 새 metadata prefix를 도입할 때는 binary asset prefix(`courses/{id}/curriculum/...`)와 분리해 list/delete 범위를 단순하게 유지할 것

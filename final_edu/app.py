@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from final_edu.analysis import analyze_voc_assets
 from final_edu.config import get_settings
 from final_edu.courses import (
-    LocalCourseRepository,
+    create_course_repository,
     create_course_record,
     preview_course_pdf,
     section_to_dict,
@@ -123,7 +123,7 @@ async def _app_lifespan(_app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     storage = create_object_storage(settings)
-    course_repository = LocalCourseRepository(settings)
+    course_repository = create_course_repository(settings, storage)
     app = FastAPI(
         title=settings.app_name,
         description="강의 자료 기반 커리큘럼 커버리지 분석 MVP",

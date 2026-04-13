@@ -45,6 +45,17 @@ def _build_xlsx_bytes(sheets: dict[str, list[list[object]]]) -> bytes:
     return buffer.getvalue()
 
 
+def _local_runtime_env(runtime_dir: str) -> dict[str, str]:
+    return {
+        "FINAL_EDU_RUNTIME_DIR": runtime_dir,
+        "R2_ENDPOINT_URL": "",
+        "R2_ACCESS_KEY_ID": "",
+        "R2_SECRET_ACCESS_KEY": "",
+        "R2_BUCKET": "",
+        "R2_REGION": "auto",
+    }
+
+
 class Page1RestoreTests(unittest.TestCase):
     def test_index_restore_payload_keeps_explicit_lane_mode_and_separate_voc_assets(self) -> None:
         with tempfile.TemporaryDirectory() as runtime_dir:
@@ -130,7 +141,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -251,7 +262,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -350,7 +361,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -394,7 +405,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -477,7 +488,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -553,7 +564,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -681,7 +692,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -765,7 +776,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()
@@ -832,7 +843,7 @@ class Page1RestoreTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+                _local_runtime_env(runtime_dir),
                 clear=False,
             ):
                 get_settings.cache_clear()

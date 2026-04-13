@@ -158,6 +158,87 @@ class LocalCourseRepository:
         return records
 
 
+class ObjectStorageCourseRepository:
+    def __init__(
+        self,
+        storage: ObjectStorage,
+        prefix: str = "course-records/",
+        fallback_root: Path | None = None,
+    ) -> None:
+        normalized_prefix = str(prefix or "").strip().lstrip("/")
+        self.storage = storage
+        self.prefix = normalized_prefix if normalized_prefix.endswith("/") else f"{normalized_prefix}/"
+        self.fallback_root = fallback_root
+
+    def save(self, record: CourseRecord) -> None:
+        self.storage.put_json(self._record_key(record.id), record.to_dict())
+
+    def get(self, course_id: str) -> CourseRecord | None:
+        key = self._record_key(course_id)
+        if not self._has_key(key):
+            return self._get_from_fallback(course_id)
+        return CourseRecord.from_dict(self.storage.get_json(key))
+
+    def delete(self, course_id: str) -> CourseRecord | None:
+        key = self._record_key(course_id)
+        record = self.get(course_id)
+        if record is None:
+            return None
+        if self._has_key(key):
+            self.storage.delete_key(key)
+        fallback_path = self._fallback_path(course_id)
+        if fallback_path is not None:
+            fallback_path.unlink(missing_ok=True)
+        return record
+
+    def list_all(self) -> list[CourseRecord]:
+        records_by_id: dict[str, CourseRecord] = {}
+        for key in self.storage.list_keys(self.prefix):
+            normalized_key = str(key or "").strip().lstrip("/")
+            if not normalized_key.startswith(self.prefix) or not normalized_key.endswith(".json"):
+                continue
+            record = CourseRecord.from_dict(self.storage.get_json(normalized_key))
+            records_by_id[record.id] = record
+        for record in self._list_fallback_records():
+            records_by_id.setdefault(record.id, record)
+        records = list(records_by_id.values())
+        records.sort(key=lambda item: item.updated_at, reverse=True)
+        return records
+
+    def _record_key(self, course_id: str) -> str:
+        normalized_id = str(course_id or "").strip()
+        return f"{self.prefix}{normalized_id}.json"
+
+    def _has_key(self, key: str) -> bool:
+        normalized_key = str(key or "").strip().lstrip("/")
+        return normalized_key in self.storage.list_keys(normalized_key)
+
+    def _fallback_path(self, course_id: str) -> Path | None:
+        if self.fallback_root is None:
+            return None
+        return self.fallback_root / f"{str(course_id or '').strip()}.json"
+
+    def _get_from_fallback(self, course_id: str) -> CourseRecord | None:
+        fallback_path = self._fallback_path(course_id)
+        if fallback_path is None or not fallback_path.exists():
+            return None
+        return CourseRecord.from_dict(json.loads(fallback_path.read_text(encoding="utf-8")))
+
+    def _list_fallback_records(self) -> list[CourseRecord]:
+        if self.fallback_root is None or not self.fallback_root.exists():
+            return []
+        return [
+            CourseRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            for path in self.fallback_root.glob("*.json")
+        ]
+
+
+def create_course_repository(settings: Settings, storage: ObjectStorage) -> LocalCourseRepository | ObjectStorageCourseRepository:
+    if settings.storage_mode == "r2":
+        return ObjectStorageCourseRepository(storage, fallback_root=settings.runtime_dir / "courses")
+    return LocalCourseRepository(settings)
+
+
 def preview_course_pdf(path: Path, max_sections: int, settings: Settings) -> CurriculumPreviewResult:
     try:
         page_records, warnings = _extract_pdf_pages(path)
