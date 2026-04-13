@@ -1009,10 +1009,12 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - `source_mode_stats`에 `mapped_tokens`를 추가해 source 존재와 coverage 성립 여부를 분리
   - 도넛/bar/radar는 mapped-only share만 표시하고, `미분류` slice는 제거
   - source는 있지만 mapped coverage가 0인 mode는 toggle을 유지한 채 coverage empty state를 렌더
+  - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여, mapped-only `100%`가 전체 텍스트 100%처럼 읽히지 않게 설명한다
   - word cloud는 raw tokens를 유지해 비커리큘럼 표현과 주변 발화는 별도로 관찰하게 함
 - Prevention Rule:
   - 커리큘럼 비교 차트와 raw 텍스트 관찰 도구를 같은 분모로 섞지 말 것
   - coverage chart를 설계할 때는 `source 존재`, `분석 가능한 텍스트 존재`, `커리큘럼에 실제 매칭된 텍스트 존재`를 각각 분리해 다룰 것
+  - mapped-only 차트가 `100%`를 그려도 `mapped_tokens / total_tokens`가 충분히 낮으면 보조 설명을 함께 보여 과장 해석을 막을 것
   - source는 있지만 mapped coverage가 0인 회귀 케이스를 반드시 테스트에 포함할 것
 
 ### DBG-035 `active` `Deep Learning and Boltzmann` 관련 키워드가 material PDF에 있어도 page-level single-label assignment 때문에 0%로 사라짐
@@ -1061,12 +1063,14 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - YouTube extraction 이 metadata cache 의 human title 을 source label 로 재사용하도록 변경
   - `결정 트리` section alias 를 `entropy / information gain / 지니 / 가지치기 / root node / leaf node`까지 확장
   - speech assignment 에 `strict transcript anchor gate + exact title rescue`를 추가해, section-specific anchor 가 확인된 chunk만 coverage 후보로 인정하도록 변경
-  - title rescue 는 semantic title similarity 가 아니라 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 있을 때만 bounded bonus 를 주도록 제한
+  - section `title + description`에서 generic fragment anchor 를 추출해 `Chapter 2/3/4/6`처럼 description 에만 의미어가 있는 chapter형 코스도 rescue anchor 를 가질 수 있게 정리
+  - title rescue 는 semantic title similarity 가 아니라 exact/normalized fragment match 와 bounded chapter-index rescue 에만 적용하고, transcript 에 최소 plausibility 가 있을 때만 bounded bonus 를 주도록 제한
   - speech anchor matching 을 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절 오탐을 제거
   - `tests.test_page2_dashboard`에 decision-tree alias 회귀, decision-boundary non-match, intro chunk rejection, token-boundary 오탐 방지, exact-title SVM rescue 회귀를 추가
 - Prevention Rule:
   - chapter형 YouTube playlist 를 speech coverage 로 해석할 때는 transcript만 보지 말고 metadata title 도 explainability 보조 근거로 유지할 것
-  - title prior 는 exact chapter anchor match 에만 적용하고, transcript anchor 없이 semantic similarity만으로 강제 배정하지 말 것
+  - section speech anchor 는 course-specific hardcode 를 기본값으로 두지 말고 `title + description`에서 generic fragment 를 먼저 뽑은 뒤 glossary 를 보강용으로만 더할 것
+  - title prior 는 exact/normalized fragment match 와 bounded chapter-index rescue 에만 적용하고, transcript anchor 없이 semantic similarity만으로 강제 배정하지 말 것
   - speech anchor 는 substring 검색으로 구현하지 말고 token/boundary 기준으로 계산할 것
   - `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum 인접 주제가 `결정 트리`로 빨려 들어가지 않는 회귀 테스트를 유지할 것
 

@@ -138,6 +138,18 @@
     margin: 0;
   }
 
+  .coverage-note {
+    margin: -8px 0 20px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    border: 1px solid #e2e8f0;
+  }
+
   /* Segmented Control */
   .segmented-control {
     display: inline-flex;
@@ -590,6 +602,7 @@
           <label for="st_voc" data-source-mode-label="speech">강의(발화)</label>
         </div>
       </div>
+      <p class="coverage-note" id="coverageNote" hidden></p>
 
       <div id="donutPanelContent">
         <div class="donut-wrapper">
@@ -701,6 +714,7 @@
 
   const donutChart = echarts.init(document.getElementById('donutChart'));
   const donutLegend = document.getElementById('donutLegend');
+  const coverageNote = document.getElementById('coverageNote');
   const wordcloudChart = echarts.init(document.getElementById('wordcloudChart'));
   const avgBarChart = echarts.init(document.getElementById('avgBarChart'));
   const multiBarChart = echarts.init(document.getElementById('multiBarChart'));
@@ -904,6 +918,37 @@
 
   function modeHasMappedCoverage(mode) {
     return sourceModeStat(mode).mapped_tokens > 0;
+  }
+
+  function sourceModeCoverageSubject(mode) {
+    if (mode === "material") {
+      return "강의자료 텍스트";
+    }
+    if (mode === "speech") {
+      return "발화";
+    }
+    return "강의자료·발화 텍스트";
+  }
+
+  function coverageNoteMessage(mode) {
+    const stat = sourceModeStat(mode);
+    if (stat.total_tokens < 1 || stat.mapped_tokens < 1) {
+      return "";
+    }
+    const mappedRatio = stat.mapped_tokens / stat.total_tokens;
+    if (mappedRatio >= 0.4) {
+      return "";
+    }
+    return `커리큘럼과 직접 연결된 ${sourceModeCoverageSubject(mode)} ${(mappedRatio * 100).toFixed(1)}%만 비중 계산에 사용되었습니다.`;
+  }
+
+  function renderCoverageNote() {
+    if (!coverageNote) {
+      return;
+    }
+    const message = modeHasMappedCoverage(currentMode) ? coverageNoteMessage(currentMode) : "";
+    coverageNote.hidden = !message;
+    coverageNote.textContent = message;
   }
 
   function getActiveData() {
@@ -1199,6 +1244,7 @@
       ? '전체 주요 수업 키워드'
       : `${navInstructors[currentIndex]} 주요 수업 키워드`;
     document.getElementById('instructorIcon').style.filter = currentIndex === 0 ? "grayscale(100%)" : "none";
+    renderCoverageNote();
     if (!modeIsAvailable(currentMode)) {
       toggleCoverageEmptyState(true, coverageModeMessage());
       return;

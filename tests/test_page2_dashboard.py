@@ -16,6 +16,7 @@ from final_edu.analysis import (
     _restrict_scored_sections_to_candidates,
     _resolve_speech_title_rescue,
     _score_speech_title_sections,
+    _section_speech_anchor_terms,
     _speech_anchor_counts,
     _speech_transcript_anchor_counts_by_section,
     _speech_transcript_candidate_section_ids,
@@ -64,6 +65,47 @@ def _sample_material_ml_sections() -> list[CurriculumSection]:
             title="랜덤 포레스트 / 오토인코더",
             description="random forest autoencoder",
             target_weight=50,
+        ),
+    ]
+
+
+def _sample_chaptered_ml_sections() -> list[CurriculumSection]:
+    return [
+        CurriculumSection(
+            id="chapter-1-motivations-and-basics",
+            title="Chapter 1: Motivations and Basics",
+            description="확률·통계 기초 · 총 4강",
+            target_weight=10,
+        ),
+        CurriculumSection(
+            id="chapter-2-rule-based-decision-tree",
+            title="Chapter 2: Rule Based & Decision Tree",
+            description="규칙 기반 / 의사결정트리 · 총 5강",
+            target_weight=20,
+        ),
+        CurriculumSection(
+            id="chapter-3-optimal-classification-naive-bayes",
+            title="Chapter 3: Optimal Classification & Naive Bayes",
+            description="나이브 베이즈 · 총 4강",
+            target_weight=20,
+        ),
+        CurriculumSection(
+            id="chapter-4-logistic-regression",
+            title="Chapter 4: Logistic Regression",
+            description="로지스틱 회귀 · 총 8강",
+            target_weight=20,
+        ),
+        CurriculumSection(
+            id="chapter-5-support-vector-machine-svm",
+            title="Chapter 5: Support Vector Machine SVM",
+            description="Support Vector Machine SVM · 총 9강",
+            target_weight=15,
+        ),
+        CurriculumSection(
+            id="chapter-6-overfitting-regularization-model-selection",
+            title="Chapter 6: Overfitting, Regularization & Model Selection",
+            description="모델 선택 / 정규화 · 총 7강",
+            target_weight=15,
         ),
     ]
 
@@ -521,6 +563,39 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertIn("지니", assignment_text)
         self.assertIn("가지치기", assignment_text)
 
+    def test_generic_speech_anchor_terms_include_title_and_description_fragments(self) -> None:
+        chapter_two = _sample_chaptered_ml_sections()[1]
+
+        anchors = _section_speech_anchor_terms(chapter_two)
+
+        self.assertIn("rule based", anchors)
+        self.assertIn("decision tree", anchors)
+        self.assertIn("decision trees", anchors)
+        self.assertIn("규칙 기반", anchors)
+        self.assertIn("의사결정트리", anchors)
+
+    def test_generic_speech_title_scoring_matches_chaptered_playlist_titles(self) -> None:
+        sections = _sample_chaptered_ml_sections()
+        expected_matches = {
+            "인공지능 및 기계학습 개론1 [2-3] Introduction to Decision Trees": "chapter-2-rule-based-decision-tree",
+            "인공지능 및 기계학습 개론1 [3-3] Naive Bayes Classifier": "chapter-3-optimal-classification-naive-bayes",
+            "인공지능 및 기계학습 개론1 [4-2] Introduction to Logistic Regression": "chapter-4-logistic-regression",
+            "인공지능 및 기계학습 개론1 [6-2] Regularization": "chapter-6-overfitting-regularization-model-selection",
+        }
+
+        for source_label, expected_section_id in expected_matches.items():
+            with self.subTest(source_label=source_label):
+                title_scored = _score_speech_title_sections(
+                    sections=sections,
+                    source_label=source_label,
+                )
+
+                self.assertTrue(title_scored)
+                self.assertEqual(
+                    sorted(title_scored, key=lambda item: item[1], reverse=True)[0][0].id,
+                    expected_section_id,
+                )
+
     def test_speech_title_prior_rescues_near_tie_decision_tree_chunk(self) -> None:
         decision_tree = CurriculumSection(id="decision-tree", title="결정 트리", description="Decision Trees topic.")
         deep_learning = CurriculumSection(
@@ -581,10 +656,10 @@ class Page2DashboardTests(unittest.TestCase):
                 (regression, 0.2924),
                 (decision_tree, 0.2461),
             ],
-            title_scored=[
-                (decision_tree, 0.72),
-                (regression, 0.18),
-            ],
+            title_scored=_score_speech_title_sections(
+                sections=[decision_tree, regression],
+                source_label=chunk.source_label,
+            ),
             transcript_anchor_counts={},
             min_score=0.23,
             min_margin=0.025,
@@ -767,12 +842,14 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('id="section-donut"', response.text)
         self.assertIn('id="donutLegend"', response.text)
+        self.assertIn('id="coverageNote"', response.text)
         self.assertIn('data-source-mode-label="material"', response.text)
         self.assertIn('id="donutEmptyState"', response.text)
         self.assertIn("mode_unmapped_series", response.text)
         self.assertIn("mapped_tokens", response.text)
         self.assertIn("average_keywords_by_mode", response.text)
         self.assertIn("강사별 커리큘럼 구성 비중", response.text)
+        self.assertIn("직접 연결된", response.text)
         self.assertIn("전체 주요 수업 키워드", response.text)
         self.assertIn("Final Edu Dashboard", response.text)
         self.assertIn("VOC Analysis", response.text)

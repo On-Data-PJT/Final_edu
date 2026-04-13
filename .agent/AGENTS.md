@@ -241,6 +241,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - `Page 2`: `sidebar + 4 panel` 대시보드 결과 페이지
     - 첫 패널의 `combined | material | speech` toggle 이 Page 2 전체 dataset source 를 제어
     - `available_source_modes`에 없는 mode 는 disabled 로 렌더하고, `source_mode_stats` 기준 empty state 를 보여준다
+    - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 100%처럼 읽히지 않게 한다
     - 결과 렌더는 저장된 course 와 실제 업로드/YouTube 분석 결과만 사용
   - `GET /review`: 강사별 실제 VOC 결과 페이지
   - `GET /solution`: 기존 인사이트 2섹션 + 별도 `VOC 기반 인사이트` 패널 페이지
@@ -253,6 +254,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
   - lexical fallback 은 `kiwipiepy` 기반 tokenization + section title 사용자 사전을 사용한다
+  - speech section assignment 는 section `title + description`에서 generic fragment anchor 를 만들고, 제목 rescue 는 exact/normalized fragment match 와 bounded chapter index 만 보조 신호로 쓴다
   - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
   - 솔루션 인사이트와 VOC 분석은 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
   - 현재 기본 insight model 은 `gpt-5.4-mini`

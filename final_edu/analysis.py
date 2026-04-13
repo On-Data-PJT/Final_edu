@@ -115,8 +115,69 @@ VOC_SUGGESTION_MAP = {
 VOC_WEEK_RE = re.compile(r"(\d+\s*(?:주차|주|차시))")
 YOUTUBE_GENERIC_LABEL_RE = re.compile(r"^youtube\s+[0-9a-z_-]{11}$", re.IGNORECASE)
 YOUTUBE_TITLE_CHAPTER_RE = re.compile(r"\[[^\]]+\]\s*(.+)$")
+SPEECH_FRAGMENT_SPLIT_RE = re.compile(
+    r"\s*(?::|/|&|·|\||,|\(|\)|(?:\s+-\s+)|(?:\s+및\s+)|(?:\s+and\s+))\s*",
+    re.IGNORECASE,
+)
+SPEECH_SECTION_CHAPTER_INDEX_RE = re.compile(r"\bchapter\s*(\d+)\b", re.IGNORECASE)
+SPEECH_SOURCE_CHAPTER_INDEX_RE = re.compile(r"\[(\d+)(?:\s*[-–]\s*\d+)?\]")
+SPEECH_CHAPTER_PREFIX_RE = re.compile(
+    r"^\s*(?:chapter|part|lesson|lecture)\s*\d+\s*[:\-]?\s*",
+    re.IGNORECASE,
+)
+SPEECH_TOTAL_LECTURES_RE = re.compile(r"총\s*\d+\s*강", re.IGNORECASE)
+SPEECH_ACRONYM_SUFFIX_RE = re.compile(r"^(?P<lemma>.+?)\s+(?P<acronym>[A-Z]{2,8})$")
+SPEECH_TITLE_INDEX_ONLY_SCORE = 0.25
 SPEECH_TITLE_PRIOR_BONUS_MAX = 0.06
 SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA = 0.03
+SPEECH_STRUCTURAL_TOKENS = {
+    "chapter",
+    "part",
+    "lesson",
+    "lecture",
+    "lectures",
+    "course",
+    "courses",
+    "week",
+    "weeks",
+    "class",
+    "classes",
+    "session",
+    "sessions",
+    "introduction",
+    "intro",
+    "overview",
+    "총",
+    "강",
+}
+SPEECH_LOW_SIGNAL_TOKENS = {
+    "motivation",
+    "motivations",
+    "basic",
+    "basics",
+    "overview",
+    "intro",
+    "introduction",
+    "summary",
+    "wrap",
+    "up",
+}
+SPEECH_SINGULAR_TOKEN_MAP = {
+    "trees": "tree",
+    "nodes": "node",
+    "machines": "machine",
+    "networks": "network",
+    "models": "model",
+    "classifiers": "classifier",
+}
+SPEECH_PLURALIZABLE_LAST_TOKENS = {
+    "tree",
+    "node",
+    "machine",
+    "network",
+    "model",
+    "classifier",
+}
 SECTION_ALIAS_GLOSSARY = {
     "인공지능-및-기계학습-개요": [
         "인공지능",
@@ -359,6 +420,90 @@ def _split_section_title_anchor_terms(title: str) -> list[str]:
     return _dedupe_terms([term for term in terms if len(normalize_text(term)) >= 4])
 
 
+def _clean_speech_fragment(text: str) -> str:
+    cleaned = normalize_text(text)
+    if not cleaned:
+        return ""
+    cleaned = SPEECH_TOTAL_LECTURES_RE.sub(" ", cleaned)
+    cleaned = SPEECH_CHAPTER_PREFIX_RE.sub("", cleaned)
+    cleaned = normalize_text(cleaned.strip(" -–:/|,·()"))
+    return cleaned
+
+
+def _normalize_speech_fragment_token(token: str) -> str:
+    lowered = normalize_text(token).lower()
+    if not lowered or lowered.isdigit():
+        return ""
+    lowered = SPEECH_SINGULAR_TOKEN_MAP.get(lowered, lowered)
+    if lowered in SPEECH_STRUCTURAL_TOKENS:
+        return ""
+    return lowered
+
+
+def _speech_fragment_key(text: str) -> str:
+    tokens = [
+        normalized
+        for token in tokenize(_clean_speech_fragment(text))
+        if (normalized := _normalize_speech_fragment_token(token))
+    ]
+    if not tokens or all(token in SPEECH_LOW_SIGNAL_TOKENS for token in tokens):
+        return ""
+    return " ".join(tokens)
+
+
+def _speech_fragment_terms(text: str) -> list[str]:
+    cleaned = _clean_speech_fragment(text)
+    if not cleaned:
+        return []
+
+    candidates = [cleaned]
+    candidates.extend(part for part in SPEECH_FRAGMENT_SPLIT_RE.split(cleaned) if part)
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = _speech_fragment_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        terms.append(key)
+
+        acronym_match = SPEECH_ACRONYM_SUFFIX_RE.match(candidate)
+        if acronym_match:
+            lemma_key = _speech_fragment_key(acronym_match.group("lemma"))
+            acronym_key = _speech_fragment_key(acronym_match.group("acronym"))
+            for variant in (lemma_key, acronym_key):
+                if variant and variant not in seen:
+                    seen.add(variant)
+                    terms.append(variant)
+
+        tokens = key.split()
+        if len(tokens) >= 2 and tokens[-1] in SPEECH_PLURALIZABLE_LAST_TOKENS:
+            plural_key = " ".join([*tokens[:-1], f"{tokens[-1]}s"])
+            if plural_key not in seen:
+                seen.add(plural_key)
+                terms.append(plural_key)
+
+    return terms
+
+
+def _section_chapter_index(section: CurriculumSection) -> int | None:
+    match = SPEECH_SECTION_CHAPTER_INDEX_RE.search(normalize_text(section.title))
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _source_title_chapter_index(source_label: str) -> int | None:
+    normalized = normalize_text(str(source_label or ""))
+    if not normalized:
+        return None
+    match = SPEECH_SOURCE_CHAPTER_INDEX_RE.search(normalized)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _section_speech_anchor_terms(section: CurriculumSection) -> list[str]:
     keys = {
         str(section.id or "").strip().lower(),
@@ -366,7 +511,9 @@ def _section_speech_anchor_terms(section: CurriculumSection) -> list[str]:
         slugify(section.description),
         slugify(f"{section.title} {section.description}"),
     }
-    anchors = _split_section_title_anchor_terms(section.title)
+    anchors: list[str] = []
+    anchors.extend(_speech_fragment_terms(section.title))
+    anchors.extend(_speech_fragment_terms(section.description))
     for key, terms in SPEECH_STRICT_ANCHOR_GLOSSARY.items():
         if key in keys:
             anchors.extend(terms)
@@ -445,12 +592,22 @@ def _score_speech_title_sections(
     title_text = _speech_title_text(source_label)
     if not title_text:
         return []
+    title_keys = set(_speech_fragment_terms(title_text))
+    source_chapter_index = _source_title_chapter_index(source_label)
 
     scored: list[tuple[CurriculumSection, float]] = []
     for section in sections:
-        exact_matches = _speech_anchor_counts(text=title_text, anchors=_section_speech_anchor_terms(section))
-        if exact_matches:
-            scored.append((section, float(sum(exact_matches.values()))))
+        anchors = _section_speech_anchor_terms(section)
+        exact_matches = _speech_anchor_counts(text=title_text, anchors=anchors)
+        score = float(sum(exact_matches.values()))
+        anchor_keys = set(anchors)
+        fragment_matches = title_keys & anchor_keys
+        if fragment_matches:
+            score = max(score, 1.0 + (0.1 * len(fragment_matches)))
+        if source_chapter_index is not None and _section_chapter_index(section) == source_chapter_index:
+            score += SPEECH_TITLE_INDEX_ONLY_SCORE
+        if score > 0:
+            scored.append((section, score))
     return scored
 
 
@@ -475,22 +632,46 @@ def _resolve_speech_title_rescue(
     )
 
     title_ranked = _rank_scored_sections(title_scored)
-    title_best_section = title_ranked[0][0]
+    title_best_section, title_best_score = title_ranked[0]
     transcript_score_map = {section.id: score for section, score in transcript_scored}
     title_section_transcript_score = float(transcript_score_map.get(title_best_section.id, 0.0))
     transcript_delta = transcript_best_score - title_section_transcript_score
     title_section_anchor_counts = transcript_anchor_counts.get(title_best_section.id, {})
+    title_is_exact_match = title_best_score >= 1.0
+    transcript_is_plausible = title_section_transcript_score >= max(0.0, min_score - 0.03)
+    transcript_is_strongly_plausible = title_section_transcript_score >= min_score
 
     rescue_section_id = None
     if title_section_anchor_counts and (
-        transcript_is_ambiguous or title_section_transcript_score >= max(0.0, min_score - 0.05)
+        transcript_is_ambiguous
+        or transcript_is_plausible
+        or (
+            title_is_exact_match
+            and title_section_transcript_score >= max(0.0, min_score - 0.05)
+        )
     ):
         rescue_section_id = title_best_section.id
-    elif transcript_is_ambiguous and transcript_delta <= SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA:
+    elif title_is_exact_match and (
+        transcript_is_ambiguous
+        or (
+            transcript_is_plausible
+            and transcript_delta <= SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA
+        )
+    ):
+        rescue_section_id = title_best_section.id
+    elif (
+        0.0 < title_best_score < 1.0
+        and transcript_is_ambiguous
+        and transcript_is_strongly_plausible
+    ):
         rescue_section_id = title_best_section.id
 
     warning = None
-    if rescue_section_id is None and transcript_delta > SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA:
+    if (
+        rescue_section_id is None
+        and title_is_exact_match
+        and transcript_delta > SPEECH_TITLE_PRIOR_MAX_TRANSCRIPT_DELTA
+    ):
         warning = (
             f"{chunk.source_label}: 영상 제목은 '{title_best_section.title}'에 가깝지만 "
             "발화 transcript는 다른 주제로 읽혔습니다."
@@ -523,8 +704,9 @@ def _speech_title_text(source_label: str) -> str:
     return normalized
 
 
-def _speech_title_prior_bonus(title_margin: float) -> float:
-    return min(SPEECH_TITLE_PRIOR_BONUS_MAX, 0.03 + max(0.0, title_margin))
+def _speech_title_prior_bonus(title_signal_score: float) -> float:
+    bounded_signal = max(0.0, min(title_signal_score, 2.0))
+    return min(SPEECH_TITLE_PRIOR_BONUS_MAX, 0.02 + (bounded_signal * 0.02))
 
 
 def _apply_speech_title_prior(
@@ -546,7 +728,11 @@ def _apply_speech_title_prior(
         min_margin=min_margin,
     )
     if rescue_section_id is not None:
-        bonus = _speech_title_prior_bonus(0.03)
+        rescue_score = next(
+            (score for section, score in title_scored if section.id == rescue_section_id),
+            1.0,
+        )
+        bonus = _speech_title_prior_bonus(rescue_score)
         adjusted_scored = [
             (section, score + bonus if section.id == rescue_section_id else score)
             for section, score in transcript_scored

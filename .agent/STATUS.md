@@ -48,8 +48,9 @@ Last Updated: 2026-04-13
   - `전체 평균` word cloud 는 `average_keywords_by_mode`를 사용해 실제 강사 keyword list만 집계하고, 공개 `keywords_by_mode`에는 더 이상 `__off_curriculum` pseudo-key를 넣지 않는다.
   - 강사가 1명뿐인 결과에서는 `전체 평균` word cloud 와 해당 강사 word cloud 가 같은 term/value set 을 사용한다.
   - source 는 있었지만 mapped coverage 가 0인 mode 는 toggle 을 유지한 채 차트 대신 empty state 를 보여준다.
-  - speech 분류는 transcript 를 1차 근거로 쓰되, section-specific strict anchor 가 확인된 chunk만 coverage 후보로 인정한다.
-  - YouTube chapter title 은 exact anchor match 일 때만 rescue 후보가 되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
+  - speech 분류는 transcript 를 1차 근거로 쓰되, section `title + description`에서 뽑은 generic fragment anchor 와 strict glossary anchor 를 함께 사용해 coverage 후보를 만든다.
+  - YouTube chapter title 은 semantic nearest-neighbor 가 아니라 exact/normalized fragment match 와 bounded chapter-index rescue 로만 보조되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
+  - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 한다.
   - 영상 제목과 transcript 주제가 크게 어긋나면 non-blocking warning 을 남겨 explainability 를 보강한다.
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
@@ -82,10 +83,10 @@ Last Updated: 2026-04-13
   - curriculum-first keyword ranking 을 유지한다.
   - material 파일 chunking 은 PDF/슬라이드 경계를 넘겨 합치지 않고, overlap 없이 page/slide 단위로 처리한다.
   - 커버리지 share 는 raw total token 이 아니라 mapped token 만을 분모로 계산한다.
-  - speech section assignment 는 expanded alias search text 와 별도 strict speech anchor 를 함께 사용한다.
+  - speech section assignment 는 section `title + description` 기반 generic fragment anchor 와 strict speech anchor glossary 를 함께 사용한다.
   - speech anchor matching 은 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절이 `지니` anchor 로 오탐되지 않게 한다.
   - YouTube source label 은 cache 된 human title 을 우선 사용한다.
-  - speech title prior 는 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 없거나 off-curriculum topic 이면 nearest-neighbor 로 강제 배정하지 않는다.
+  - speech title prior 는 exact/normalized fragment match 와 bounded chapter-index rescue 만 사용하고, transcript score 가 최소 plausibility 를 넘지 못하면 강제 배정하지 않는다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
   - VOC spreadsheet 는 `BQ 평점 문항 점수 집계`와 `자유의견 row text 분석`을 함께 지원한다.
@@ -131,6 +132,8 @@ Last Updated: 2026-04-13
 - `결정 트리` section alias 를 `entropy`, `information gain`, `지니`, `가지치기`, `root/leaf node`까지 확장해 decision-tree 발화가 `Deep Learning`/`Other`로 밀리던 회귀를 줄였다.
 - speech coverage 에 strict anchor gate 를 추가해 `Decision Boundary`, `Rule-Based`, `Regularization` 같은 off-curriculum/인접 주제가 nearest-neighbor 로 `결정 트리`에 빨려 들어가지 않도록 조정했다.
 - speech anchor matching 을 token sequence 기준으로 바꿔 `지니고` 같은 일반 어절이 `지니`로 오탐되던 회귀를 막고, exact title match + 단일 transcript anchor 가 있는 SVM/Decision Tree chapter 는 rescue 되도록 보강했다.
+- chapter형 커리큘럼에서도 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하지 않도록, speech anchor 를 section `title + description`에서 generic fragment 로 추출하고 title rescue 를 exact fragment / bounded chapter index 로 일반화했다.
+- Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제로는 `mapped_tokens`만 작게 잡힌 결과가 mapped-only normalization 때문에 `100%`처럼 보일 때 해석 근거를 함께 보여주도록 했다.
 - Page 2 결과 payload 에 `mode_unmapped_series`를 추가하고, 도넛 차트가 보이는 slice 들만 다시 100으로 정규화하지 않도록 수정했다.
 - Page 2 `source_mode_stats`에 `mapped_tokens`를 추가하고, 커버리지 도넛/bar/radar를 mapped-only share 기준으로 재정의했다.
 - Page 2 상단 도넛에서 `미분류` slice 를 제거하고, source는 있으나 mapped coverage가 0인 mode는 empty state 로 처리하도록 정리했다.
@@ -285,6 +288,9 @@ Last Updated: 2026-04-13
 - web/worker startup 에서 `Kiwi` readiness 를 먼저 검증해, 분석 제출 후 무한 대기처럼 보이던 환경 의존 오류를 startup 단계에서 명확한 에러로 드러내도록 바꿨다.
 - 공식 실행 경로는 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, module-level `app` 객체 추가는 기본 계약으로 채택하지 않았다.
 - `tests.test_voc_analysis`에 configured `Kiwi` model path 사용과 startup failure 메시지 회귀를 추가했다.
+- chapter형 커리큘럼 speech 분류에서 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하던 문제를 줄이기 위해, section `title + description` 기반 generic fragment anchor 와 exact/normalized fragment + bounded chapter-index title rescue 를 도입했다.
+- Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제 `mapped_tokens` 비율이 낮을 때 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 보조 설명을 노출하도록 정리했다.
+- `tests.test_page2_dashboard`에 chaptered playlist title rescue 회귀와 coverage note shell 회귀를 추가했다.
 
 ### 2026-04-11
 
