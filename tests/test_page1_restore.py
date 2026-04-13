@@ -125,16 +125,28 @@ class Page1RestoreTests(unittest.TestCase):
         self.assertIn("오강사", job_response.text)
         self.assertIn("이강사", job_response.text)
         self.assertIn("박강사", job_response.text)
+        self.assertIn('id="comparisonLegend"', job_response.text)
+        self.assertIn("transformer", job_response.text)
+        self.assertIn("교차검증", job_response.text)
 
         self.assertEqual(review_response.status_code, 200)
         self.assertIn("오강사_VOC.csv", review_response.text)
         self.assertIn("실습 체크포인트 추가", review_response.text)
+        self.assertIn("질문 응답이 세심함", review_response.text)
+        self.assertIn("지표 해석이 쉬움", review_response.text)
+        self.assertIn("배포 시나리오가 인상적임", review_response.text)
+        self.assertIn("배포 운영 장애 사례 카드 추가", review_response.text)
         self.assertIn(f'href="/jobs/{DEMO_JOB_ID}"', review_response.text)
 
         self.assertEqual(solution_response.status_code, 200)
         self.assertIn("VOC 기반 인사이트", solution_response.text)
         self.assertIn("현재 커리큘럼과 최신 교육 시장 트렌드 비교", solution_response.text)
         self.assertIn("강사별 표준커리큘럼 준수도", solution_response.text)
+        self.assertIn("9건", solution_response.text)
+        self.assertIn("7건", solution_response.text)
+        self.assertIn("5건", solution_response.text)
+        self.assertIn("배포 운영 사례 카드 추가", solution_response.text)
+        self.assertNotIn(">HIGH<", solution_response.text)
         self.assertIn(f'href="/jobs/{DEMO_JOB_ID}"', solution_response.text)
 
     def test_delete_demo_seeded_course_is_rejected(self) -> None:

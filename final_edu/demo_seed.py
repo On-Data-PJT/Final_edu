@@ -215,19 +215,112 @@ def _build_demo_result(sections: list[CurriculumSection]) -> dict:
     }
     keywords_by_mode = {
         "combined": {
-            "오강사": _keyword_list(("python", 18), ("pandas", 15), ("sql", 13), ("신경망", 11), ("프로젝트", 10)),
-            "이강사": _keyword_list(("회귀", 16), ("분류", 15), ("검증", 13), ("fastapi", 10), ("지표", 9)),
-            "박강사": _keyword_list(("딥러닝", 18), ("cnn", 13), ("임베딩", 12), ("docker", 10), ("배포", 9)),
+            "오강사": _keyword_list(
+                ("python", 20),
+                ("pandas", 18),
+                ("sql", 16),
+                ("전처리", 14),
+                ("시각화", 13),
+                ("seaborn", 11),
+                ("notebook", 10),
+                ("데이터클리닝", 9),
+                ("실습", 8),
+                ("프로젝트", 8),
+            ),
+            "이강사": _keyword_list(
+                ("회귀", 18),
+                ("분류", 17),
+                ("검증", 15),
+                ("교차검증", 13),
+                ("confusion matrix", 12),
+                ("roc-auc", 11),
+                ("feature engineering", 10),
+                ("지표", 10),
+                ("fastapi", 9),
+                ("모델선정", 8),
+            ),
+            "박강사": _keyword_list(
+                ("딥러닝", 21),
+                ("cnn", 16),
+                ("임베딩", 15),
+                ("transformer", 14),
+                ("docker", 12),
+                ("배포", 11),
+                ("서빙", 10),
+                ("모니터링", 10),
+                ("mlops", 9),
+                ("inference", 8),
+            ),
         },
         "material": {
-            "오강사": _keyword_list(("python", 19), ("pandas", 16), ("sql", 14), ("eda", 10)),
-            "이강사": _keyword_list(("회귀", 16), ("분류", 15), ("검증", 13), ("지표", 10)),
-            "박강사": _keyword_list(("딥러닝", 18), ("cnn", 14), ("프로젝트", 12), ("배포", 9)),
+            "오강사": _keyword_list(
+                ("python", 20),
+                ("pandas", 18),
+                ("sql", 16),
+                ("전처리", 15),
+                ("데이터프레임", 12),
+                ("시각화", 11),
+                ("seaborn", 10),
+                ("notebook", 9),
+                ("변수", 8),
+            ),
+            "이강사": _keyword_list(
+                ("회귀", 17),
+                ("분류", 16),
+                ("검증", 14),
+                ("지표", 13),
+                ("confusion matrix", 12),
+                ("roc-auc", 11),
+                ("feature engineering", 10),
+                ("모델선정", 9),
+                ("baseline", 8),
+            ),
+            "박강사": _keyword_list(
+                ("딥러닝", 19),
+                ("cnn", 16),
+                ("임베딩", 14),
+                ("transformer", 13),
+                ("docker", 11),
+                ("배포", 10),
+                ("서빙", 9),
+                ("mlops", 9),
+                ("monitoring", 8),
+            ),
         },
         "speech": {
-            "오강사": _keyword_list(("프로젝트", 15), ("실습", 14), ("신경망", 12), ("피드백", 9)),
-            "이강사": _keyword_list(("검증", 13), ("fastapi", 12), ("오류해결", 10), ("실전", 9)),
-            "박강사": _keyword_list(("임베딩", 14), ("docker", 13), ("운영", 11), ("배포", 10)),
+            "오강사": _keyword_list(
+                ("실습", 16),
+                ("질문응답", 14),
+                ("예제풀이", 13),
+                ("파이썬", 12),
+                ("판다스", 11),
+                ("시각화", 10),
+                ("프로젝트", 10),
+                ("notebook", 9),
+                ("데이터정리", 8),
+            ),
+            "이강사": _keyword_list(
+                ("검증", 15),
+                ("기준선", 13),
+                ("오차분석", 12),
+                ("confusion matrix", 11),
+                ("roc-auc", 10),
+                ("feature engineering", 10),
+                ("fastapi", 9),
+                ("실전", 9),
+                ("재현성", 8),
+            ),
+            "박강사": _keyword_list(
+                ("임베딩", 16),
+                ("추론속도", 13),
+                ("배포", 12),
+                ("운영", 11),
+                ("모니터링", 11),
+                ("docker", 10),
+                ("transformer", 10),
+                ("서빙", 9),
+                ("api", 8),
+            ),
         },
     }
     average_keywords_by_mode = {
@@ -417,6 +510,7 @@ def _rose_entries(sections: list[CurriculumSection], shares: list[float]) -> lis
         {
             "section_id": section.id,
             "section_title": section.title,
+            "name": section.title,
             "value": round(share, 1),
         }
         for section, share in zip(sections, shares, strict=True)
@@ -467,6 +561,73 @@ def _section_coverages(
 
 
 def _demo_voc_analysis(name: str, index: int) -> dict:
+    profiles = {
+        "오강사": {
+            "scores": (4.6, 4.8, 4.7),
+            "positive": ["설명이 친절함", "실습 예제가 풍부함", "질문 응답이 세심함"],
+            "negative": ["강의 속도가 조금 빠름", "중간 점검 문제가 더 필요함"],
+            "repeated_complaints": [
+                {"pattern": "실습 속도 조절 요청", "count": 4, "week": "3주차"},
+                {"pattern": "중간 체크포인트 부족", "count": 3, "week": "4주차"},
+            ],
+            "next_suggestions": [
+                {
+                    "priority": "high",
+                    "label": "실습 체크포인트 추가",
+                    "body": "핵심 실습 파트마다 중간 확인 문제와 예상 출력 예시를 함께 넣어 이해도를 점검하세요.",
+                },
+                {
+                    "priority": "medium",
+                    "label": "속도 조절용 복습 슬라이드 보강",
+                    "body": "주차 말미에 빠르게 정리할 수 있는 한 장짜리 복습 슬라이드를 추가해 속도 부담을 줄여 보세요.",
+                },
+            ],
+        },
+        "이강사": {
+            "scores": (4.4, 4.6, 4.3),
+            "positive": ["지표 해석이 쉬움", "모델 비교가 체계적임", "검증 흐름이 명확함"],
+            "negative": ["전처리 연결 설명이 짧음", "실습 전환이 조금 빠름"],
+            "repeated_complaints": [
+                {"pattern": "전처리에서 모델링으로 넘어가는 연결 보강 요청", "count": 5, "week": "2주차"},
+                {"pattern": "지표 선택 기준 복습 요청", "count": 4, "week": "5주차"},
+            ],
+            "next_suggestions": [
+                {
+                    "priority": "high",
+                    "label": "전처리-모델링 연결 브리지 슬라이드 추가",
+                    "body": "EDA 결과가 어떤 기준으로 feature engineering과 모델 선택으로 이어지는지 한 흐름으로 다시 묶어 주세요.",
+                },
+                {
+                    "priority": "medium",
+                    "label": "검증 지표 선택 가이드 배포",
+                    "body": "회귀와 분류에서 어떤 지표를 우선 써야 하는지 한눈에 볼 수 있는 가이드를 함께 제공하세요.",
+                },
+            ],
+        },
+        "박강사": {
+            "scores": (4.3, 4.4, 4.5),
+            "positive": ["심화 개념 설명이 밀도 높음", "배포 시나리오가 인상적임", "최신 사례가 풍부함"],
+            "negative": ["배포 단원 난이도가 높음", "운영 장애 예시가 더 필요함"],
+            "repeated_complaints": [
+                {"pattern": "딥러닝 심화 파트 속도 조절 요청", "count": 6, "week": "4주차"},
+                {"pattern": "배포 운영 사례 보강 요청", "count": 4, "week": "6주차"},
+            ],
+            "next_suggestions": [
+                {
+                    "priority": "high",
+                    "label": "배포 운영 장애 사례 카드 추가",
+                    "body": "모델 서빙 이후 발생할 수 있는 오류 패턴과 모니터링 포인트를 짧은 사례 카드로 정리해 보세요.",
+                },
+                {
+                    "priority": "medium",
+                    "label": "딥러닝 심화 예제 난이도 이중화",
+                    "body": "기본 예제와 심화 예제를 분리해 초반 이탈 없이 심화 파트까지 따라오게 만드는 구성이 필요합니다.",
+                },
+            ],
+        },
+    }
+    profile = profiles.get(name, profiles["오강사"])
+    bq1, bq2, bq3 = profile["scores"]
     return {
         "file_name": f"{name}_VOC.csv",
         "analyzed_at": "2026-04-12",
@@ -476,37 +637,33 @@ def _demo_voc_analysis(name: str, index: int) -> dict:
                 "group": "강의 운영",
                 "question_id": "BQ1",
                 "label": "교육 신청 및 안내 절차가 수월하였다",
-                "average": round(4.2 + (index * 0.1), 1),
+                "average": bq1,
                 "response_count": 18 + index * 3,
                 "scale_max": 5,
             },
             {
-                "group": "강의 운영",
+                "group": "강사 설명",
                 "question_id": "BQ2",
                 "label": "강사의 설명이 이해하기 쉬웠다",
-                "average": round(4.3 + (index * 0.1), 1),
+                "average": bq2,
+                "response_count": 18 + index * 3,
+                "scale_max": 5,
+            },
+            {
+                "group": "실습 구성",
+                "question_id": "BQ3",
+                "label": "실습 예제가 이해에 도움이 되었다",
+                "average": bq3,
                 "response_count": 18 + index * 3,
                 "scale_max": 5,
             },
         ],
         "sentiment": {
-            "positive": [f"{name} 강사님의 설명이 친절함", "실습 예제가 풍부함"],
-            "negative": ["강의 속도가 조금 빠름"],
+            "positive": list(profile["positive"]),
+            "negative": list(profile["negative"]),
         },
-        "repeated_complaints": [
-            {
-                "pattern": "실습 속도 조절 요청",
-                "count": 3 + index,
-                "week": "3주차",
-            }
-        ],
-        "next_suggestions": [
-            {
-                "priority": "high",
-                "label": "실습 체크포인트 추가",
-                "body": f"{name} 강사님의 실습 파트마다 중간 확인 문제를 넣어 이해도를 점검해 보세요.",
-            }
-        ],
+        "repeated_complaints": list(profile["repeated_complaints"]),
+        "next_suggestions": list(profile["next_suggestions"]),
     }
 
 
@@ -529,22 +686,45 @@ def _demo_voc_summary() -> dict:
                 "response_count": 66,
                 "scale_max": 5,
             },
+            {
+                "group": "실습 구성",
+                "question_id": "BQ3",
+                "label": "실습 예제가 이해에 도움이 되었다",
+                "average": 4.4,
+                "response_count": 66,
+                "scale_max": 5,
+            },
         ],
-        "positive": ["실습 중심 커리큘럼", "설명이 친절함", "프로젝트 예제가 좋음"],
-        "negative": ["강의 속도 조절 필요", "배포 단원 사례 추가 필요"],
+        "positive": ["실습 중심 커리큘럼", "설명이 친절함", "프로젝트 예제가 좋음", "모델 비교가 체계적임"],
+        "negative": ["강의 속도 조절 필요", "배포 단원 사례 추가 필요", "검증 지표 복습 자료 요청"],
         "repeated_complaints": [
             {
                 "pattern": "딥러닝 실습 속도가 빠르다는 피드백",
                 "count": 9,
                 "week": "4주차",
-            }
+            },
+            {
+                "pattern": "배포 운영 사례를 더 보고 싶다는 요청",
+                "count": 7,
+                "week": "6주차",
+            },
+            {
+                "pattern": "검증 지표 해석 복습 자료 요청",
+                "count": 5,
+                "week": "5주차",
+            },
         ],
         "next_suggestions": [
             {
                 "priority": "high",
                 "label": "딥러닝 실습 체크포인트 보강",
                 "body": "중간 저장본과 예제 코드를 함께 제공해 심사위원이 결과 흐름을 쉽게 따라갈 수 있게 합니다.",
-            }
+            },
+            {
+                "priority": "medium",
+                "label": "배포 운영 사례 카드 추가",
+                "body": "배포/모니터링 단계에서 실제로 어떤 장애와 체크리스트가 나오는지 요약 카드로 묶어 이해도를 높입니다.",
+            },
         ],
     }
 
@@ -563,7 +743,7 @@ def _average_keyword_list(keyword_map: dict[str, list[dict]]) -> list[dict]:
             totals[text] = totals.get(text, 0.0) + float(item.get("value") or 0.0)
     return [
         {"text": text, "value": round(value, 1)}
-        for text, value in sorted(totals.items(), key=lambda item: (-item[1], item[0]))[:12]
+        for text, value in sorted(totals.items(), key=lambda item: (-item[1], item[0]))[:20]
     ]
 
 

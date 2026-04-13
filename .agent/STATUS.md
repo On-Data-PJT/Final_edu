@@ -56,8 +56,10 @@ Last Updated: 2026-04-13
   - source 는 있었지만 mapped coverage 가 0인 mode 는 toggle 을 유지한 채 차트 대신 empty state 를 보여준다.
   - speech 분류는 transcript 를 1차 근거로 쓰되, section `title + description`에서 뽑은 generic fragment anchor 와 strict glossary anchor 를 함께 사용해 coverage 후보를 만든다.
   - YouTube chapter title 은 semantic nearest-neighbor 가 아니라 exact/normalized fragment match 와 bounded chapter-index rescue 로만 보조되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
-  - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 한다.
-  - speech coverage note 는 도넛 의미를 바꾸지 않고, `전체 발화 중 ...만 비중 계산에 사용되었습니다`처럼 제외된 발화가 있다는 사실만 상단에서 설명한다.
+- `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 한다.
+- speech coverage note 는 도넛 의미를 바꾸지 않고, `전체 발화 중 ...만 비중 계산에 사용되었습니다`처럼 제외된 발화가 있다는 사실만 상단에서 설명한다.
+- `강사 평균 커리큘럼 구성 비중` hover 는 `목표 / 평균 / 강사별 비중`을 함께 보여주는 compact breakdown card 여야 한다.
+- `강사별 커리큘럼 구성 비교`의 범례는 차트 내부 legend 대신 제목 바로 아래 HTML legend row 로 배치한다.
   - 영상 제목과 transcript 주제가 크게 어긋나면 non-blocking warning 을 남겨 explainability 를 보강한다.
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
@@ -67,7 +69,8 @@ Last Updated: 2026-04-13
   - `GET /solution`은 기존 `분석 결과 기반 인사이트`, `최신 업계 동향 분석` 2섹션을 유지한다.
   - solution gap/benchmark 비교는 강사 평균 actual share 가 아니라 과정의 `target_weight`를 기준으로 계산한다.
   - `강사별 갭 현황` 카피는 `강사별 표준커리큘럼 준수도` 기준 문구로 정리되어 있다.
-  - 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`의 전체 문항 평균 점수와 자유의견 요약을 함께 렌더한다.
+- 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`의 전체 문항 평균 점수와 자유의견 요약을 함께 렌더한다.
+- `VOC 기반 인사이트`의 반복 피드백은 `N건` count row 로 누적해서 보여주고, 다음 개선 액션은 `HIGH/MEDIUM/LOW` badge 없이 action row 로 보여준다.
   - legacy `/jiye` 실험 페이지와 `/jobs/{job_id}/solutions` 별도 solutions 페이지는 제거되고, 메인 결과 흐름은 `/jobs/{job_id}` → `/review` → `/solution`만 유지한다.
 
 ## Backend Contract
@@ -259,11 +262,12 @@ Last Updated: 2026-04-13
 
 - 현재 작업 브랜치는 `main`이다.
 - 현재 구현은 `dev` UI 유지 + `lexical` 백엔드 이식 + 실제 VOC 분석 연결 상태를 기준으로 한다.
+- 현재 작업 트리에는 demo seeded 결과 화면 polish와 seeded VOC/keyword 확장 관련 미커밋 변경이 남아 있다.
 - `.codex/config.toml`은 로컬 Codex 실행 설정으로 취급하며 저장소 커밋 대상이 아니다.
 
 ## Consulted DEBUG IDs
 
-- none matched (docs-only README rewrite)
+- `DBG-031`, `DBG-033`, `DBG-040`, `DBG-054`
 
 ## Recent Updates
 
@@ -287,7 +291,7 @@ Last Updated: 2026-04-13
 - Page 2 toggle 은 실제 데이터가 없는 `material`/`speech` mode 를 disabled 처리하고, 차트 대신 empty state 를 보여주도록 보강했다.
 - material PDF/PPTX/text chunking 을 page/slide boundary preserving 경로로 분리해, 여러 주차가 한 chunk 로 합쳐져 첫 section 으로 쏠리던 회귀를 줄였다.
 - Page 2 결과 payload 에 `mode_unmapped_series`를 추가해 `미분류` 비중을 별도로 전달하도록 정리했다.
-- Page 2 첫 도넛/legend/tooltip 은 visible slice 재정규화 대신 raw share 를 그대로 보여주고, 남는 비중은 `미분류` slice 로 표시하도록 바꿨다.
+- Page 2 첫 도넛/legend/tooltip 은 mapped-only 구성비를 유지하고, 제외된 발화/자료 비율은 상단 coverage note 로만 설명하도록 다시 정리했다.
 - Page 2 coverage share 분모를 raw total token 에서 mapped token 으로 바꿔, `그럼/다음/그리고` 같은 주변 발화가 미분류 비중으로 차트를 잠식하지 않도록 수정했다.
 - `source_mode_stats`에 `mapped_tokens`를 추가하고, source는 있지만 mapped coverage가 0인 mode는 toggle 을 유지한 채 coverage empty state 로 분기하도록 보강했다.
 - word cloud 는 raw token 기준을 유지해 비커리큘럼 표현을 별도로 관찰할 수 있게 했다.
@@ -338,6 +342,10 @@ Last Updated: 2026-04-13
 - Page 1 강의 목록 버튼에는 `준비된 샘플로 결과 보기(데모)` 말풍선을 붙이고, demo course는 목록 최상단 `데모` badge + 삭제 불가 상태로 노출되도록 보강했다.
 - demo course를 선택하면 오강사/이강사/박강사 3명 lane draft가 자동 복원되고, `넘어가기`는 prepare/confirm queue 대신 seeded `/jobs/{demo_job_id}`로 즉시 이동하도록 fast-path를 추가했다.
 - `tests.test_page1_restore`에 demo course pinning/restore, review/solution seeded render, demo delete rejection 회귀를 추가했다.
+- Page 2 instructor 도넛은 `section_title -> name -> section lookup` 순서로 라벨을 복원하고, seeded `rose_series`도 `name` 필드를 함께 내려 blank legend 회귀를 막도록 정리했다.
+- Page 2 비교 패널은 평균 stacked bar hover 를 `목표 / 평균 / 강사별 비중` breakdown card 로 보강했고, 하단 비교 차트 범례를 제목 아래 HTML legend row 로 옮겨 차트와 겹치지 않게 했다.
+- demo seeded keyword pool 은 mode별·강사별 8~10개 수준으로 확장하고 `average_keywords_by_mode` 컷을 늘려 전체/개별 word cloud 가 더 풍부하게 보이도록 보강했다.
+- demo seeded review VOC 는 오강사/이강사/박강사별로 서로 다른 긍정/부정 키워드, 반복 불만, 개선 포인트를 갖게 재작성했고, solution `VOC 기반 인사이트`는 count row 3건 + badge-less action row 형태로 정리했다.
 
 ### 2026-04-11
 

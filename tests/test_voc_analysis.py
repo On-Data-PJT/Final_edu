@@ -478,6 +478,7 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertIn("강의 속도", solution_response.text)
         self.assertIn("실제 VOC 결과", solution_response.text)
         self.assertIn("현재 커리큘럼과 최신 교육 시장 트렌드 비교", solution_response.text)
+        self.assertNotIn('<span class="voc-count">HIGH</span>', solution_response.text)
         self.assertIn('href="/jobs/job123"', solution_response.text)
         self.assertIn('href="/review?job_id=job123"', solution_response.text)
         self.assertIn('href="/solution?job_id=job123"', solution_response.text)

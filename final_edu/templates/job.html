@@ -366,6 +366,37 @@
     margin: 32px 0;
   }
 
+  .comparison-subtitle {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 800;
+    color: #1e293b;
+  }
+
+  .comparison-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin: 0 0 18px;
+    padding: 0 2px;
+  }
+
+  .comparison-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+  }
+
+  .comparison-legend__dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
   /* Checkboxes */
   .checkbox-group {
     display: flex;
@@ -670,10 +701,11 @@
         <h2 class="panel-title">강사 커리큘럼 구성 비교</h2>
       </div>
       <div id="comparisonPanelContent">
-        <h3 style="margin-bottom: 16px;">강사 평균 커리큘럼 구성 비중</h3>
+        <h3 class="comparison-subtitle">강사 평균 커리큘럼 구성 비중</h3>
         <div class="chart-container-bar" id="avgBarChart"></div>
         <div class="panel-divider"></div>
-        <h3 style="margin-bottom: 16px;">강사별 커리큘럼 구성 비교</h3>
+        <h3 class="comparison-subtitle">강사별 커리큘럼 구성 비교</h3>
+        <div class="comparison-legend" id="comparisonLegend" data-testid="comparison-legend"></div>
         <div class="chart-container-bars-multi" id="multiBarChart"></div>
       </div>
       <div class="chart-empty-state" id="comparisonEmptyState" hidden></div>
@@ -717,6 +749,7 @@
   const topics = rawData.sections.map(s => s.title);
   const instructors = rawData.instructors.map(i => i.name);
   const navInstructors = ["전체 평균", ...instructors];
+  const sectionById = Object.fromEntries(rawData.sections.map((section) => [section.id, section]));
 
   const topicColors = ["#2E303B", "#CD483F", "#888C67", "#E89B8D", "#92C393", "#EDB6C3", "#B3D3C5", "#F2E7E7"];
   const instColors = ['#94a3b8', '#059669', '#d97706', '#4338ca', '#7c3aed', '#db2777'];
@@ -741,6 +774,7 @@
 
   const donutChart = echarts.init(document.getElementById('donutChart'));
   const donutLegend = document.getElementById('donutLegend');
+  const comparisonLegend = document.getElementById('comparisonLegend');
   const coverageNote = document.getElementById('coverageNote');
   const wordcloudChart = echarts.init(document.getElementById('wordcloudChart'));
   const avgBarChart = echarts.init(document.getElementById('avgBarChart'));
@@ -939,6 +973,9 @@
     });
     if (visible) {
       donutLegend.innerHTML = '';
+      if (comparisonLegend) {
+        comparisonLegend.innerHTML = '';
+      }
       [donutChart, avgBarChart, multiBarChart, radarChart].forEach((chart) => chart.clear());
     }
   }
@@ -993,7 +1030,7 @@
     if (currentIndex === 0) {
       pieData = (rawData.mode_series[currentMode]?.average || []).map((item, index) => ({
         value: Number(item.share || 0) * 100,
-        name: item.section_title,
+        name: item.section_title || item.name || sectionById[item.section_id]?.title || "",
         section_id: item.section_id,
         itemStyle: { color: topicColors[index % topicColors.length] }
       }));
@@ -1001,13 +1038,89 @@
       const instName = navInstructors[currentIndex];
       pieData = (rawData.rose_series_by_mode[currentMode]?.[instName] || []).map((item, index) => ({
         value: Number(item.value || 0),
-        name: item.name,
+        name: item.section_title || item.name || sectionById[item.section_id]?.title || "",
         section_id: item.section_id,
         itemStyle: { color: topicColors[index % topicColors.length] }
       }));
     }
 
     return pieData;
+  }
+
+  function topicValueForInstructor(name, topicIdx) {
+    const section = rawData.sections[topicIdx];
+    if (!section) {
+      return 0;
+    }
+    const instData = rawData.rose_series_by_mode[currentMode]?.[name] || [];
+    return Number(instData.find((item) => item.section_id === section.id)?.value || 0);
+  }
+
+  function averageTopicValue(topicIdx) {
+    return Number(((rawData.mode_series[currentMode]?.average?.[topicIdx]?.share || 0) * 100).toFixed(1));
+  }
+
+  function buildTopicBreakdownTooltip(topicName, options = {}) {
+    const { includeAverage = false, includeTarget = false } = options;
+    const topicIdx = topics.indexOf(topicName);
+    if (topicIdx < 0) {
+      return "";
+    }
+
+    const benchmark = Number(rawData.sections[topicIdx]?.target_weight || 0);
+    const averageValue = averageTopicValue(topicIdx);
+    const instructorValues = instructors.map((name) => ({
+      name,
+      value: topicValueForInstructor(name, topicIdx),
+    }));
+
+    let res = `<div style="padding: 8px;">`;
+    res += `<div style="font-weight: 900; color: #1e293b; margin-bottom: 12px; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px;">[ ${topicName} ] 커리큘럼 비중</div>`;
+
+    if (includeTarget) {
+      res += `<div style="display: flex; justify-content: space-between; gap: 24px; margin-bottom: 8px;">
+        <span style="font-size: 13px; color: #64748b; font-weight: 700;">목표</span>
+        <span style="font-family: Pretendard; font-size: 13px; font-weight: 800; color: #1e293b;">${benchmark.toFixed(1)}%</span>
+      </div>`;
+    }
+
+    if (includeAverage) {
+      res += `<div style="display: flex; justify-content: space-between; gap: 24px; margin-bottom: 10px;">
+        <span style="font-size: 13px; color: #166534; font-weight: 800;">평균</span>
+        <span style="font-family: Pretendard; font-size: 13px; font-weight: 800; color: #166534;">${averageValue.toFixed(1)}%</span>
+      </div>`;
+    }
+
+    instructorValues.forEach((item) => {
+      res += `<div style="display: flex; justify-content: space-between; gap: 24px; margin-bottom: 6px;">
+        <span style="font-size: 13px; color: #64748b; font-weight: 700;">${item.name}</span>
+        <span style="font-family: Pretendard; font-size: 13px; font-weight: 800; color: #1e293b;">${item.value.toFixed(1)}%</span>
+      </div>`;
+    });
+    res += `</div>`;
+    return res;
+  }
+
+  function renderComparisonLegend() {
+    if (!comparisonLegend) {
+      return;
+    }
+    comparisonLegend.innerHTML = "";
+    rawData.sections.forEach((section, index) => {
+      const item = document.createElement("span");
+      item.className = "comparison-legend__item";
+
+      const dot = document.createElement("span");
+      dot.className = "comparison-legend__dot";
+      dot.style.backgroundColor = topicColors[index % topicColors.length];
+
+      const label = document.createElement("span");
+      label.textContent = section.title;
+
+      item.appendChild(dot);
+      item.appendChild(label);
+      comparisonLegend.appendChild(item);
+    });
   }
 
   function formatDonutPercent(value) {
@@ -1138,10 +1251,17 @@
   }
 
   function renderBarCharts() {
-    const avgData = rawData.mode_series[currentMode].average.map(a => (a.share * 100).toFixed(1));
+    const avgData = rawData.mode_series[currentMode].average.map((item) => Number((item.share * 100).toFixed(1)));
+    renderComparisonLegend();
 
     avgBarChart.setOption({
-      tooltip: { trigger: 'item', formatter: "<strong>{a}</strong>: {c}%" },
+      tooltip: {
+        trigger: 'item',
+        formatter: (params) => buildTopicBreakdownTooltip(params.seriesName, {
+          includeAverage: true,
+          includeTarget: true,
+        }),
+      },
       grid: { left: '80', right: '4%', bottom: '0', top: '10' },
       xAxis: { type: 'value', max: 100, show: false },
       yAxis: { type: 'category', data: ['평균'], axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontWeight: 700, color: '#475569' } },
@@ -1155,30 +1275,9 @@
     multiBarChart.setOption({
       tooltip: {
         trigger: 'item',
-        formatter: (params) => {
-          const topicName = params.seriesName;
-          const topicIdx = topics.indexOf(topicName);
-          const currentData = instructors.map(name => {
-            const instData = rawData.rose_series_by_mode[currentMode][name];
-            return instData.find(d => d.section_id === rawData.sections[topicIdx].id)?.value || 0;
-          });
-
-          let res = `<div style="padding: 8px;">`;
-          res += `<div style="font-weight: 900; color: #1e293b; margin-bottom: 12px; border-bottom: 2px solid #f1f5f9; padding-bottom: 4px;">[ ${topicName} ] 강사별 비중</div>`;
-
-          instructors.forEach((inst, idx) => {
-            const val = currentData[idx].toFixed(1);
-            res += `<div style="display: flex; justify-content: space-between; gap: 24px; margin-bottom: 6px;">
-                          <span style="font-size: 13px; color: #64748b; font-weight: 700;">${inst}</span>
-                          <span style="font-family: Pretendard; font-size: 13px; font-weight: 800; color: #1e293b;">${val}%</span>
-                        </div>`;
-          });
-          res += `</div>`;
-          return res;
-        }
+        formatter: (params) => buildTopicBreakdownTooltip(params.seriesName)
       },
-      legend: { top: 0, left: 10, icon: 'circle', textStyle: { color: '#64748b', fontWeight: 600 } },
-      grid: { left: '85', right: '4%', bottom: '20', top: '40' },
+      grid: { left: '85', right: '4%', bottom: '20', top: '12' },
       xAxis: { type: 'value', max: 100, show: false },
       yAxis: { type: 'category', data: instructors, axisLine: { show: true, lineStyle: { color: '#e2e8f0' } }, axisTick: { show: false }, axisLabel: { fontWeight: 700, color: '#475569' } },
       series: topics.map((top, i) => ({
@@ -1187,7 +1286,7 @@
         emphasis: { focus: 'series' },
         data: instructors.map(name => {
           const instData = rawData.rose_series_by_mode[currentMode][name];
-          return instData.find(d => d.section_id === rawData.sections[i].id)?.value.toFixed(1) || 0;
+          return Number((instData.find(d => d.section_id === rawData.sections[i].id)?.value || 0).toFixed(1));
         })
       }))
     });

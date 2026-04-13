@@ -1512,3 +1512,32 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 심사용 demo 데이터를 유지할 때는 `_demo_context`와 실제 storage/job seed를 서로 다른 하드코딩 소스로 두지 말고, 하나의 shared builder를 source of truth로 사용할 것
   - demo course는 일반 사용 데이터와 구분되는 locked metadata를 가져야 하며, course list pinning / delete guard / direct result fast-path를 한 세트로 유지할 것
   - Render startup 시 idempotent seed가 필요한 기능은 env flag로 명시적으로 켜고, 누락 복구만 수행하도록 만들어 기존 사용자 데이터를 건드리지 않게 할 것
+
+### DBG-055 `active` seeded Page 2/VOC demo는 payload 필드 드리프트와 빈약한 seeded copy 때문에 legend 공란, 차트 겹침, demo 신뢰도 저하가 같이 발생할 수 있음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page2`, `demo`, `legend`, `tooltip`, `wordcloud`, `voc`
+- Related Files: `final_edu/templates/job.html`, `final_edu/templates/solution.html`, `final_edu/demo_seed.py`, `tests/test_page1_restore.py`, `tests/test_page2_dashboard.py`
+- Trigger Commands: `/jobs/{demo_job_id}`, `/review?job_id=...`, `/solution?job_id=...`, 심사용 seeded demo 결과 확인
+- Must Read When: seeded result payload 필드, Page 2 comparison legend/tooltip, demo keyword/VOC 콘텐츠를 바꿀 때
+- Symptom:
+  - 강사별 도넛 범례에서 색상과 퍼센트만 보이고 대단원 라벨이 비어 보였음
+  - `강사별 커리큘럼 구성 비교`의 범례가 차트 내부 legend 로 렌더돼 하단 stacked bar 영역과 시각적으로 부딪혔음
+  - seeded demo word cloud term 수가 적고, review/solution의 VOC 카드도 강사별 차이가 거의 없어 심사용 데모가 빈약하게 보였음
+  - solution `VOC 기반 인사이트`에서는 `HIGH/MEDIUM/LOW` 배지가 count row와 섞여 보여 count 기반 반복 피드백보다 우선 보였음
+- Root Cause:
+  - `job.html`의 instructor donut renderer가 `item.name`만 읽었는데, seeded `rose_series_by_mode` 항목은 `section_title`만 가지고 있었음
+  - multi-bar 비교 패널은 ECharts 내장 legend 를 그대로 써 dense panel layout 과 겹쳤음
+  - demo seeded keyword/VOC payload는 최소 shell 수준만 채워져 있어 전체 word cloud, 강사별 감성/불만/개선 포인트가 너무 얇고 유사했음
+  - solution 템플릿은 `next_suggestions.priority`를 그대로 badge 로 렌더해 count-row pattern 과 다른 시각 계층을 만들었음
+- Resolution:
+  - donut renderer는 `section_title -> name -> section lookup` fallback 을 쓰게 하고, seeded `rose_series`에도 `name` 필드를 함께 넣었음
+  - `강사 평균 커리큘럼 구성 비중` hover 는 `목표 / 평균 / 강사별 비중` breakdown card 로 보강했고, `강사별 커리큘럼 구성 비교`의 범례는 제목 아래 HTML legend row 로 이동했음
+  - demo seeded keyword pool 을 mode별·강사별 8~10개 수준으로 확장하고 `average_keywords_by_mode` cutoff 를 늘려 전체/개별 word cloud 가 더 풍부하게 보이도록 했음
+  - demo seeded review VOC 는 강사별로 다른 긍정/부정 키워드, 반복 불만, 개선 포인트를 가지게 재작성했고, solution `VOC 기반 인사이트`는 count row 3건 + badge-less action row 로 정리했음
+- Prevention Rule:
+  - result payload 변형을 추가할 때는 chart renderer가 `name`과 `section_title` 둘 다 안전하게 처리하도록 유지하고, seeded/demo payload도 같은 필드 계약을 따라야 함
+  - dense stacked-bar panel 에서는 ECharts 내장 legend 보다 HTML legend row 를 우선 검토해 차트 영역과 겹치지 않게 할 것
+  - 심사용 demo seed는 최소 shell 이 아니라 실제 카드/word cloud/tooltip이 충분히 풍부해 보일 만큼 keyword/VOC copy 를 채워 둘 것
+  - solution VOC 영역에서 `repeated_complaints`와 `next_suggestions`를 동시에 보여줄 때는 priority badge 가 count row hierarchy 를 압도하지 않도록 count row와 action row를 분리해 렌더할 것

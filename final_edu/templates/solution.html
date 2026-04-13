@@ -502,6 +502,26 @@
         color: #3f6212;
     }
 
+    .voc-row-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .voc-row--action {
+        gap: 0;
+    }
+
+    .voc-kicker {
+        display: inline-flex;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #166534;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
     .voc-row-title {
         font-size: 13px;
         font-weight: 700;
@@ -683,16 +703,16 @@
                 {% for item in solution_payload.voc_summary.repeated_complaints %}
                 <div class="voc-row">
                     <span class="voc-count">{{ item.count }}건</span>
-                    <div>
+                    <div class="voc-row-content">
                         <div class="voc-row-title">{{ item.pattern }}</div>
                         <div class="voc-row-body">{% if item.week %}집중 구간: {{ item.week }}{% else %}반복적으로 등장한 VOC 패턴입니다.{% endif %}</div>
                     </div>
                 </div>
                 {% endfor %}
                 {% for item in solution_payload.voc_summary.next_suggestions %}
-                <div class="voc-row">
-                    <span class="voc-count">{{ item.priority|upper }}</span>
-                    <div>
+                <div class="voc-row voc-row--action">
+                    <div class="voc-row-content">
+                        <div class="voc-kicker">개선안</div>
                         <div class="voc-row-title">{{ item.label }}</div>
                         <div class="voc-row-body">{{ item.body }}</div>
                     </div>

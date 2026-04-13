@@ -233,6 +233,8 @@ Last Updated: 2026-04-13
 - 평균 구성 비중과 강사별 stacked bar를 **하나의 카드 안**에서 연속 배치한다.
 - 중간 divider 로만 구분하고 패널 수를 늘리지 않는다.
 - 두 차트 모두 Panel 1의 `view mode`를 그대로 따라야 한다.
+- `강사 평균 커리큘럼 구성 비중` hover 는 단일 퍼센트만이 아니라 `목표 / 평균 / 강사별 비중`을 함께 보여주는 compact breakdown card 여야 한다.
+- `강사별 커리큘럼 구성 비교`의 범례는 ECharts 내부 legend 대신 제목 바로 아래의 HTML legend row 로 배치해 차트 영역과 겹치지 않게 유지한다.
 
 ### Panel 4. Goal Comparison
 
@@ -292,6 +294,7 @@ Last Updated: 2026-04-13
   - external trend status card
 - 기존 두 영역은 유지하고, 하단에 별도 `VOC 기반 인사이트` 패널을 추가한다.
 - `VOC 기반 인사이트` 패널은 전체 문항 평균 점수와 자유의견 요약을 함께 담아야 한다.
+- `VOC 기반 인사이트`의 반복 피드백은 `N건` count row 로 여러 건 보여주고, 다음 개선 액션은 `HIGH/MEDIUM/LOW` 배지 없이 별도 action row 로 보여준다.
 
 ### Insight Cards
 
