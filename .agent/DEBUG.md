@@ -248,6 +248,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/static/app.js`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `.agent/Components.md`
   Trigger Commands: `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`, Page 1 분석 시작
   Must Read When: Page 1 confirm handoff, queued phase labeling, job waiting UX 변경
+- `DBG-051` `active` Lane: `Lead / Integration`
+  Tags: `speech`, `youtube`, `livestream`, `chunking`, `coverage-note`
+  Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+  Trigger Commands: Page 2 `speech` toggle, long livestream YouTube 분석, `0%` 대단원 과다 조사
+  Must Read When: speech chunk budget, transcript preprocessing, speech coverage note wording, anchor gate 완화/강화 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1395,3 +1400,29 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - queued 상태에는 worker 가 아직 시작하지 않은 실제 작업 phase 를 placeholder 로 넣지 말 것
   - Page 1 기본 submit/confirm 흐름은 terminal state 전까지 origin page overlay 에 머물게 하고, 중간 상태 페이지로 즉시 redirect 하지 말 것
   - fallback/debug status page 는 primary happy-path UX 와 시각적으로 구분해 사용자가 “새 메인 페이지”로 오해하지 않게 할 것
+
+### DBG-051 `active` chapter 없는 long livestream YouTube speech 는 큰 혼합 chunk 와 nonverbal cue 때문에 실제 다주제 강의도 2~3개 대단원만 남고 나머지가 `0%`처럼 보일 수 있었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `speech`, `youtube`, `livestream`, `chunking`, `unmapped`, `coverage-note`
+- Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `tests/test_page2_dashboard.py`
+- Trigger Commands: Page 2 `speech` toggle, long livestream YouTube 분석, `0%` 대단원 과다 조사
+- Must Read When: speech chunk budget, transcript preprocessing, speech coverage note wording, anchor gate 완화/강화 변경
+- Symptom:
+  - chapter 가 없는 긴 라이브 영상에서 실제로는 여러 시대/단원을 다루는데도 speech 도넛에는 2~3개 대단원만 비중이 있고 나머지는 `0%`처럼 보였음
+  - 상단 note 에는 `전체 발화 중 일부만 비중 계산에 사용`됐다고 나오지만, 차트만 보면 “나머지 단원을 아예 다루지 않았다”는 인상을 주기 쉬웠음
+- Root Cause:
+  - speech chunking 이 material 과 비슷한 큰 budget/floor 를 공유해, 라이브 복습형 자막 여러 구간이 하나의 혼합 chunk 로 묶였음
+  - `[음악]` 같은 nonverbal-only cue 도 speech coverage 입력에 남아 low-signal chunk 를 늘렸음
+  - strict anchor gate 는 유지됐지만, 큰 혼합 chunk 는 winner-take-all 또는 unmapped 로 떨어져 실제로 언급된 다른 대단원까지 같이 사라졌음
+- Resolution:
+  - speech transcript 에서 `[음악]`, `[박수]` 같은 nonverbal-only line 을 coverage 입력 전에 제거했음
+  - speech 전용 subchunk budget 을 `24 tokens`, `overlap 0`으로 낮춰 long livestream 도 더 촘촘히 자르도록 바꿨음
+  - single anchor hit 는 section title exact fragment 와 맞을 때만 후보로 살리고, “유일하게 한 번 보인 anchor”만으로 gate 를 열지는 않게 유지했음
+  - Page 2 speech coverage note 는 도넛 의미를 바꾸지 않고, `전체 발화 중 ...만` 반영됐다는 사실만 더 명시적으로 설명하도록 카피를 정리했음
+- Prevention Rule:
+  - chapter 없는 long livestream speech 는 material 과 같은 chunk budget/floor 를 재사용하지 말 것
+  - nonverbal-only transcript cue 는 coverage chunking 전에 제거할 것
+  - mapped-only 차트 의미를 유지할 때는 raw-share 를 범례/툴팁에 섞지 말고, 제외된 발화 비율은 상단 note 에서만 설명할 것
+  - speech candidate gate 를 완화할 때도 `single populated section` 같은 broad shortcut 은 넣지 말고, exact title fragment 같은 좁은 근거만 허용할 것

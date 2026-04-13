@@ -24,6 +24,7 @@ from final_edu.models import (
     EvidenceSnippet,
     InstructorSubmission,
     InstructorSummary,
+    RawTextSegment,
     SectionCoverage,
 )
 from final_edu.storage import ObjectStorage
@@ -221,6 +222,17 @@ SPEECH_PLURALIZABLE_LAST_TOKENS = {
     "model",
     "classifier",
 }
+SPEECH_SUBCHUNK_MAX_TOKENS = 24
+SPEECH_NONVERBAL_MARKER_RE = re.compile(
+    r"\[(?:음악|박수|웃음|환호|노래|효과음|music|applause|laughter|cheers?)\]",
+    re.IGNORECASE,
+)
+SPEECH_NONVERBAL_ONLY_RE = re.compile(
+    r"^(?:\[(?:음악|박수|웃음|환호|노래|효과음|music|applause|laughter|cheers?)\]\s*)+$",
+    re.IGNORECASE,
+)
+SPEECH_LLM_ADJUDICATION_MAX_CANDIDATES = 3
+SPEECH_LLM_ADJUDICATION_MIN_TOKENS = 18
 SECTION_ALIAS_GLOSSARY = {
     "인공지능-및-기계학습-개요": [
         "인공지능",
@@ -386,6 +398,11 @@ class InsightCardSchema(BaseModel):
 
 class InsightBundleSchema(BaseModel):
     cards: list[InsightCardSchema] = Field(min_length=5, max_length=5)
+
+
+class SpeechChunkDecisionSchema(BaseModel):
+    section_id: str = ""
+    confidence: str = ""
 
 
 def _analysis_no_text_error(warnings: list[str]) -> str:
@@ -639,6 +656,35 @@ def _section_speech_anchor_terms(section: CurriculumSection) -> list[str]:
     return _dedupe_terms(anchors)
 
 
+def _normalize_speech_segment_text(text: str) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+    if SPEECH_NONVERBAL_ONLY_RE.fullmatch(normalized):
+        return ""
+    stripped = normalize_text(SPEECH_NONVERBAL_MARKER_RE.sub(" ", normalized))
+    return stripped
+
+
+def _prepare_speech_segments(segments: list[RawTextSegment]) -> list[RawTextSegment]:
+    prepared: list[RawTextSegment] = []
+    for segment in segments:
+        text = _normalize_speech_segment_text(segment.text)
+        if not text:
+            continue
+        prepared.append(
+            RawTextSegment(
+                source_id=segment.source_id,
+                instructor_name=segment.instructor_name,
+                source_label=segment.source_label,
+                source_type=segment.source_type,
+                locator=segment.locator,
+                text=text,
+            )
+        )
+    return prepared
+
+
 def _anchor_token_sequence(text: str) -> list[str]:
     normalized_text = normalize_text(text)
     if not normalized_text:
@@ -723,11 +769,19 @@ def _speech_transcript_anchor_counts_by_section(
 def _speech_transcript_candidate_section_ids(
     *,
     transcript_anchor_counts: dict[str, dict[str, int]],
+    sections: list[CurriculumSection],
 ) -> set[str]:
     candidate_ids: set[str] = set()
+    sections_by_id = {section.id: section for section in sections}
     for section_id, counts in transcript_anchor_counts.items():
         if len(counts) >= 2 or max(counts.values(), default=0) >= 2:
             candidate_ids.add(section_id)
+            continue
+        section = sections_by_id.get(section_id)
+        if section is not None:
+            title_anchor_terms = set(_speech_fragment_terms(section.title))
+            if any(anchor in title_anchor_terms and count >= 1 for anchor, count in counts.items()):
+                candidate_ids.add(section_id)
     return candidate_ids
 
 
@@ -885,6 +939,143 @@ def _apply_speech_title_prior(
             for section, score in transcript_scored
         ]
     return adjusted_scored, warning
+
+
+def _single_speech_candidate_rescue(
+    *,
+    sections: list[CurriculumSection],
+    transcript_scored: list[tuple[CurriculumSection, float]],
+    candidate_ids: set[str],
+    transcript_anchor_counts: dict[str, dict[str, int]],
+    min_score: float,
+) -> str | None:
+    if len(candidate_ids) != 1:
+        return None
+    candidate_id = next(iter(candidate_ids))
+    section = next((item for item in sections if item.id == candidate_id), None)
+    if section is None:
+        return None
+    title_anchor_terms = set(_speech_fragment_terms(section.title))
+    counts = transcript_anchor_counts.get(candidate_id, {})
+    if not any(anchor in title_anchor_terms and count >= 1 for anchor, count in counts.items()):
+        return None
+    transcript_score_map = {item.id: score for item, score in transcript_scored}
+    if float(transcript_score_map.get(candidate_id, 0.0)) < max(0.0, min_score - 0.04):
+        return None
+    return candidate_id
+
+
+def _adjudicate_ambiguous_speech_chunk(
+    *,
+    chunk,
+    sections: list[CurriculumSection],
+    candidate_ids: set[str],
+    settings: Settings,
+) -> str | None:
+    if (
+        not settings.openai_api_key
+        or OpenAI is None
+        or len(candidate_ids) < 2
+        or len(candidate_ids) > SPEECH_LLM_ADJUDICATION_MAX_CANDIDATES
+        or count_tokens(chunk.text) < SPEECH_LLM_ADJUDICATION_MIN_TOKENS
+    ):
+        return None
+
+    candidate_sections = [
+        {
+            "section_id": section.id,
+            "title": section.title,
+            "description": section.description,
+        }
+        for section in sections
+        if section.id in candidate_ids
+    ]
+    if len(candidate_sections) < 2:
+        return None
+
+    try:
+        client = OpenAI(api_key=settings.openai_api_key)
+        parsed = client.responses.parse(
+            model=settings.openai_insight_model,
+            instructions=(
+                "You are adjudicating an ambiguous lecture transcript chunk against a small set of curriculum sections. "
+                "Use only the transcript text and the candidate section titles/descriptions. "
+                "If one section is clearly the best grounded match, return its exact section_id with confidence 'high'. "
+                "If the match is weak or ambiguous, return an empty section_id with confidence 'low'. "
+                "Return JSON only."
+            ),
+            input=json.dumps(
+                {
+                    "source_label": chunk.source_label,
+                    "locator": chunk.locator,
+                    "transcript_text": chunk.text,
+                    "candidates": candidate_sections,
+                },
+                ensure_ascii=False,
+            ),
+            text_format=SpeechChunkDecisionSchema,
+            max_output_tokens=120,
+            temperature=0,
+        )
+        section_id = str(parsed.output_parsed.section_id or "").strip()
+        confidence = str(parsed.output_parsed.confidence or "").strip().lower()
+        if confidence != "high" or section_id not in candidate_ids:
+            return None
+        return section_id
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _rescue_speech_assignment(
+    *,
+    chunk,
+    sections: list[CurriculumSection],
+    transcript_scored: list[tuple[CurriculumSection, float]],
+    scored: list[tuple[CurriculumSection, float]],
+    candidate_ids: set[str],
+    transcript_anchor_counts: dict[str, dict[str, int]],
+    settings: Settings,
+    min_score: float,
+    min_margin: float,
+) -> ChunkAssignment:
+    assignment = _best_assignment(chunk, scored, min_score=min_score, min_margin=min_margin)
+    if not assignment.is_unmapped:
+        return assignment
+
+    rescued_section_id = _single_speech_candidate_rescue(
+        sections=sections,
+        transcript_scored=transcript_scored,
+        candidate_ids=candidate_ids,
+        transcript_anchor_counts=transcript_anchor_counts,
+        min_score=min_score,
+    )
+    rationale = "직접 발화 anchor 근거로 보정되었습니다."
+    if rescued_section_id is None:
+        rescued_section_id = _adjudicate_ambiguous_speech_chunk(
+            chunk=chunk,
+            sections=sections,
+            candidate_ids=candidate_ids,
+            settings=settings,
+        )
+        rationale = "애매한 발화를 추가 판정으로 배정했습니다."
+    if rescued_section_id is None:
+        return assignment
+
+    ranked = _rank_scored_sections(transcript_scored)
+    score_map = {section.id: score for section, score in transcript_scored}
+    rescued_section = next(section for section in sections if section.id == rescued_section_id)
+    runner_up_score = next(
+        (score for section, score in ranked if section.id != rescued_section_id),
+        0.0,
+    )
+    return ChunkAssignment(
+        chunk=chunk,
+        section_id=rescued_section.id,
+        section_title=rescued_section.title,
+        score=max(float(score_map.get(rescued_section_id, 0.0)), min_score),
+        runner_up_score=runner_up_score,
+        rationale_short=rationale,
+    )
 
 
 def analyze_submissions(
@@ -1954,7 +2145,7 @@ def _stream_segments_into_aggregates(
             continue
         dedupe_seen.add(dedupe_key)
 
-        assignment, title_warning = _assign_chunk_lexical(chunk, sections, lexical_index)
+        assignment, title_warning = _assign_chunk_lexical(chunk, sections, lexical_index, settings)
         keyword_counts = _keyword_counter_for_text(chunk.text)
         off_curriculum_counts = Counter(
             {
@@ -1997,7 +2188,7 @@ def _modes_for_source_type(source_type: str) -> list[str]:
     return ["combined"]
 
 
-def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> tuple[ChunkAssignment, str | None]:
+def _assign_chunk_lexical(chunk, sections, lexical_index: dict, settings: Settings) -> tuple[ChunkAssignment, str | None]:
     section_counters = lexical_index["section_counters"]
     section_titles = lexical_index["section_titles"]
     chunk_counter = Counter(tokenize(chunk.text))
@@ -2028,6 +2219,7 @@ def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> tuple[ChunkAs
         )
         candidate_ids = _speech_transcript_candidate_section_ids(
             transcript_anchor_counts=transcript_anchor_counts,
+            sections=sections,
         )
         title_scored = _score_speech_title_sections(
             sections=sections,
@@ -2052,10 +2244,24 @@ def _assign_chunk_lexical(chunk, sections, lexical_index: dict) -> tuple[ChunkAs
             )
             if rescue_section_id:
                 candidate_ids.add(rescue_section_id)
-        scored = _restrict_scored_sections_to_candidates(
-            scored=scored,
-            candidate_ids=candidate_ids,
-        )
+            scored = _restrict_scored_sections_to_candidates(
+                scored=scored,
+                candidate_ids=candidate_ids,
+            )
+            return (
+                _rescue_speech_assignment(
+                    chunk=chunk,
+                    sections=sections,
+                    transcript_scored=transcript_scored,
+                    scored=scored,
+                    candidate_ids=candidate_ids,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    settings=settings,
+                    min_score=0.07,
+                    min_margin=0.01,
+                ),
+                title_warning,
+            )
 
     return _best_assignment(chunk, scored, min_score=0.07, min_margin=0.01), title_warning
 
@@ -2485,6 +2691,15 @@ def _build_chunks_for_source_segments(segments, settings: Settings):
             segments,
             target_tokens=settings.chunk_target_tokens,
         )
+    if source_type in SPEECH_SOURCE_TYPES:
+        prepared_segments = _prepare_speech_segments(list(segments))
+        if not prepared_segments:
+            return []
+        return build_chunks(
+            prepared_segments,
+            target_tokens=max(18, min(settings.chunk_target_tokens, SPEECH_SUBCHUNK_MAX_TOKENS)),
+            overlap_segments=0,
+        )
     return build_chunks(
         segments,
         target_tokens=settings.chunk_target_tokens,
@@ -2499,14 +2714,14 @@ def _assign_chunks(chunks, sections, settings: Settings):
             return assignments, "openai-embeddings", assignment_warnings
         except Exception as exc:  # noqa: BLE001
             warning = f"OpenAI 임베딩 호출에 실패해 lexical similarity로 fallback 했습니다. ({exc})"
-            assignments, assignment_warnings = _assign_with_lexical(chunks, sections)
+            assignments, assignment_warnings = _assign_with_lexical(chunks, sections, settings)
             return assignments, "lexical-fallback", [warning, *assignment_warnings]
 
-    assignments, assignment_warnings = _assign_with_lexical(chunks, sections)
+    assignments, assignment_warnings = _assign_with_lexical(chunks, sections, settings)
     return assignments, "lexical", assignment_warnings
 
 
-def _assign_with_lexical(chunks, sections):
+def _assign_with_lexical(chunks, sections, settings: Settings):
     section_assignment_texts = _build_section_assignment_texts(sections)
     section_counters = {
         section.id: Counter(tokenize(section_assignment_texts[section.id])) for section in sections
@@ -2553,6 +2768,7 @@ def _assign_with_lexical(chunks, sections):
             )
             candidate_ids = _speech_transcript_candidate_section_ids(
                 transcript_anchor_counts=transcript_anchor_counts,
+                sections=sections,
             )
             title_scored = speech_title_scores.get(chunk.source_label) or []
             if title_scored:
@@ -2578,6 +2794,25 @@ def _assign_with_lexical(chunks, sections):
                 scored=scored,
                 candidate_ids=candidate_ids,
             )
+            assignments.append(
+                _rescue_speech_assignment(
+                    chunk=chunk,
+                    sections=sections,
+                    transcript_scored=transcript_scored,
+                    scored=scored,
+                    candidate_ids=candidate_ids,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    settings=settings,
+                    min_score=0.07,
+                    min_margin=0.01,
+                )
+            )
+            if title_warning:
+                warning_key = (chunk.source_label, title_warning)
+                if warning_key not in warning_keys:
+                    warning_keys.add(warning_key)
+                    warnings.append(title_warning)
+            continue
         assignments.append(_best_assignment(chunk, scored, min_score=0.07, min_margin=0.01))
         if title_warning:
             warning_key = (chunk.source_label, title_warning)
@@ -2632,6 +2867,7 @@ def _assign_with_openai(chunks, sections, settings: Settings):
             )
             candidate_ids = _speech_transcript_candidate_section_ids(
                 transcript_anchor_counts=transcript_anchor_counts,
+                sections=sections,
             )
             title_scored = speech_title_scores.get(chunk.source_label) or []
             if title_scored:
@@ -2657,6 +2893,25 @@ def _assign_with_openai(chunks, sections, settings: Settings):
                 scored=scored,
                 candidate_ids=candidate_ids,
             )
+            assignments.append(
+                _rescue_speech_assignment(
+                    chunk=chunk,
+                    sections=sections,
+                    transcript_scored=transcript_scored,
+                    scored=scored,
+                    candidate_ids=candidate_ids,
+                    transcript_anchor_counts=transcript_anchor_counts,
+                    settings=settings,
+                    min_score=0.23,
+                    min_margin=0.025,
+                )
+            )
+            if title_warning:
+                warning_key = (chunk.source_label, title_warning)
+                if warning_key not in warning_keys:
+                    warning_keys.add(warning_key)
+                    warnings.append(title_warning)
+            continue
         assignments.append(_best_assignment(chunk, scored, min_score=0.23, min_margin=0.025))
         if title_warning:
             warning_key = (chunk.source_label, title_warning)

@@ -966,7 +966,7 @@
     if (mappedRatio >= 0.4) {
       return "";
     }
-    return `커리큘럼과 직접 연결된 ${sourceModeCoverageSubject(mode)} ${(mappedRatio * 100).toFixed(1)}%만 비중 계산에 사용되었습니다.`;
+    return `전체 ${sourceModeCoverageSubject(mode)} 중 커리큘럼과 직접 연결된 ${(mappedRatio * 100).toFixed(1)}%만 비중 계산에 사용되었습니다.`;
   }
 
   function renderCoverageNote() {

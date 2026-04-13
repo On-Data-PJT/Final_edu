@@ -337,7 +337,7 @@ class VocAnalysisTests(unittest.TestCase):
             settings = replace(get_settings(), openai_api_key="test-key")
             _generate_solution_content(
                 {
-                    "topics": ["한국사 개론", "조선사"],
+                    "topics": ["광합성", "세포 호흡"],
                     "target": [50.0, 50.0],
                     "instructors": [{"name": "윤막강", "rawValues": [45.0, 55.0], "totalGapScore": 10.0, "chartRows": []}],
                 },
@@ -349,13 +349,15 @@ class VocAnalysisTests(unittest.TestCase):
         user_prompt = messages[1]["content"]
         self.assertIn("topics의 섹션명을 보고 과목 도메인", system_prompt)
         self.assertIn("특정 연도(예: 2024, 2025)를 언급하지 말고", system_prompt)
-        self.assertIn("한국사능력검정시험", user_prompt)
+        self.assertIn("직접 관련된 교육기관·자격시험·정책 또는 학습 제도", user_prompt)
+        self.assertIn("다른 과목의 기관이나 시험을 끌어오지 마세요", user_prompt)
         self.assertNotIn("2024-2025년 IT 교육 시장 동향", user_prompt)
+        self.assertNotIn("한국사능력검정시험", user_prompt)
 
     def test_fallback_solution_content_removes_it_specific_trend_copy(self) -> None:
         content = _fallback_solution_content(
             {
-                "topics": ["한국사 개론", "조선사"],
+                "topics": ["광합성", "세포 호흡"],
                 "target": [60.0, 40.0],
                 "instructors": [
                     {
@@ -364,7 +366,7 @@ class VocAnalysisTests(unittest.TestCase):
                         "totalGapScore": 15.0,
                         "chartRows": [
                             {
-                                "section": "한국사 개론",
+                                "section": "광합성",
                                 "actualShare": 45.0,
                                 "benchmarkShare": 60.0,
                                 "gapScore": 15.0,

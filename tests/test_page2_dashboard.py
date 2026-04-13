@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from final_edu.analysis import analyze_submissions
 from final_edu.analysis import (
     _apply_speech_title_prior,
+    _build_chunks_for_source_segments,
     _build_keyword_payloads_by_mode,
     _build_section_assignment_texts,
     _material_candidate_section_ids,
@@ -114,6 +115,15 @@ def _sample_chaptered_ml_sections() -> list[CurriculumSection]:
     ]
 
 
+def _sample_biology_sections() -> list[CurriculumSection]:
+    return [
+        CurriculumSection(id="photosynthesis", title="광합성", description="광합성의 명반응과 암반응", target_weight=25),
+        CurriculumSection(id="cell-respiration", title="세포 호흡", description="세포 호흡과 ATP 생성", target_weight=25),
+        CurriculumSection(id="genetics", title="유전", description="유전 법칙과 유전자 발현", target_weight=25),
+        CurriculumSection(id="evolution", title="진화", description="진화와 자연선택", target_weight=25),
+    ]
+
+
 def _fake_extract_file_asset(upload: UploadedAsset, instructor_name: str):
     source_id = f"{instructor_name}-material"
     return (
@@ -157,6 +167,46 @@ def _fake_extract_youtube_asset(url: str, instructor_name: str, settings=None, s
                 locator="00:00",
                 text="딥러닝 신경망 모델 학습 발화 신경망 딥러닝 실습",
             )
+        ],
+        [],
+    )
+
+
+def _fake_extract_biology_youtube_asset(url: str, instructor_name: str, settings=None, storage=None):
+    source_id = f"{instructor_name}-biology-speech"
+    segments = [
+        ("00:00", "[음악]"),
+        ("15:37", "광합성의 명반응에서 빛에너지가 전자 전달계로 넘어가는 과정을 먼저 정리하겠습니다."),
+        ("16:02", "광합성의 암반응과 캘빈 회로에서 포도당이 합성되는 흐름을 이어서 보겠습니다."),
+        ("16:31", "광합성은 엽록체와 엽록소의 역할까지 함께 묶어서 복습합니다."),
+        ("18:02", "세포 호흡의 해당 과정과 피루브산 생성 단계를 같이 기억해 두세요."),
+        ("18:36", "세포 호흡은 미토콘드리아에서 ATP가 합성되는 경로가 핵심입니다."),
+        ("19:08", "세포 호흡의 전자 전달계와 산화적 인산화도 시험 포인트로 같이 정리합니다."),
+        ("20:11", "유전의 분리 법칙과 우열 관계는 반드시 문제 풀이 순서로 잡아야 합니다."),
+        ("20:44", "유전 단원에서는 독립의 법칙과 유전자형 표현형 구분도 같이 연결해서 봅니다."),
+        ("21:18", "유전 확률 계산과 가계도 해석까지 한 번에 비교해 보겠습니다."),
+        ("22:47", "진화의 자연선택과 적응 과정을 문제에서 자주 묻습니다."),
+        ("23:15", "진화 단원에서는 종분화와 공통 조상 개념을 함께 묶어서 암기하세요."),
+        ("23:49", "진화의 증거와 생물 다양성 변화까지 연결해서 보겠습니다."),
+    ]
+    return (
+        SourceAsset(
+            id=source_id,
+            instructor_name=instructor_name,
+            asset_type="youtube",
+            label="생명과학 라이브 특강",
+            origin=url,
+        ),
+        [
+            RawTextSegment(
+                source_id=source_id,
+                instructor_name=instructor_name,
+                source_label="생명과학 라이브 특강",
+                source_type="youtube",
+                locator=locator,
+                text=text,
+            )
+            for locator, text in segments
         ],
         [],
     )
@@ -979,6 +1029,7 @@ class Page2DashboardTests(unittest.TestCase):
                 chunk=chunk,
                 sections=[decision_tree, svm],
             ),
+            sections=[decision_tree, svm],
         )
 
         self.assertEqual(candidate_ids, set())
@@ -1002,9 +1053,35 @@ class Page2DashboardTests(unittest.TestCase):
                 chunk=chunk,
                 sections=[decision_tree],
             ),
+            sections=[decision_tree],
         )
 
         self.assertEqual(candidate_ids, {"decision-tree"})
+
+    def test_speech_candidate_gate_accepts_single_exact_title_hit(self) -> None:
+        photosynthesis = CurriculumSection(id="photosynthesis", title="광합성", description="광합성의 단계")
+        respiration = CurriculumSection(id="cell-respiration", title="세포 호흡", description="세포 호흡의 단계")
+        chunk = ExtractedChunk(
+            id="chunk-bio-1",
+            source_id="video-bio-1",
+            instructor_name="강사 A",
+            source_label="생명과학 라이브",
+            source_type="youtube",
+            locator="15:37",
+            text="광합성의 명반응과 엽록체 역할을 먼저 정리하겠습니다.",
+            token_count=12,
+            fingerprint="chunk-bio-1",
+        )
+
+        candidate_ids = _speech_transcript_candidate_section_ids(
+            transcript_anchor_counts=_speech_transcript_anchor_counts_by_section(
+                chunk=chunk,
+                sections=[photosynthesis, respiration],
+            ),
+            sections=[photosynthesis, respiration],
+        )
+
+        self.assertEqual(candidate_ids, {"photosynthesis"})
 
     def test_speech_candidate_gate_zeroes_scores_without_anchor_evidence(self) -> None:
         decision_tree = CurriculumSection(id="decision-tree", title="결정 트리", description="Decision Trees topic.")
@@ -1068,6 +1145,67 @@ class Page2DashboardTests(unittest.TestCase):
 
         self.assertEqual(rescue_section_id, "support-vector-machine")
         self.assertIsNone(warning)
+
+    def test_speech_chunk_builder_drops_music_cues_and_uses_smaller_budget(self) -> None:
+        segments = [
+            RawTextSegment(
+                source_id="youtube-1",
+                instructor_name="강사 A",
+                source_label="생명과학 라이브",
+                source_type="youtube",
+                locator=f"{index:02d}:00",
+                text="[음악]" if index % 9 == 0 else "광합성 세포 호흡 유전 진화 흐름을 계속 정리합니다.",
+            )
+            for index in range(80)
+        ]
+        settings = replace(
+            get_settings(),
+            openai_api_key=None,
+            chunk_target_tokens=550,
+            chunk_overlap_segments=1,
+        )
+
+        chunks = _build_chunks_for_source_segments(segments, settings)
+
+        self.assertGreaterEqual(len(chunks), 3)
+        self.assertTrue(all("[음악]" not in chunk.text for chunk in chunks))
+
+    def test_biology_speech_analysis_maps_multiple_sections(self) -> None:
+        submissions = [
+            InstructorSubmission(
+                name="생명 강사",
+                youtube_urls=["https://www.youtube.com/watch?v=tf97j0aG7YE"],
+            )
+        ]
+        settings = replace(
+            get_settings(),
+            openai_api_key=None,
+            chunk_target_tokens=550,
+            chunk_overlap_segments=1,
+            max_evidence_per_section=1,
+        )
+
+        with patch(
+            "final_edu.analysis.extract_youtube_asset",
+            side_effect=_fake_extract_biology_youtube_asset,
+        ):
+            result = analyze_submissions(
+                course_id="biology-course-1",
+                course_name="생명과학 특강",
+                sections=_sample_biology_sections(),
+                submissions=submissions,
+                settings=settings,
+                analysis_mode="lexical",
+            ).to_dict()
+
+        speech_rose = {
+            item["section_id"]: item["value"]
+            for item in result["rose_series_by_mode"]["speech"]["생명 강사"]
+        }
+        self.assertGreater(speech_rose["photosynthesis"], 0.0)
+        self.assertGreater(speech_rose["cell-respiration"], 0.0)
+        self.assertGreater(speech_rose["genetics"], 0.0)
+        self.assertGreater(speech_rose["evolution"], 0.0)
 
     def test_job_detail_renders_real_dashboard_shell_without_demo_seed_data(self) -> None:
         result = _build_result_payload()

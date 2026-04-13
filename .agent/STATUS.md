@@ -54,6 +54,7 @@ Last Updated: 2026-04-13
   - speech 분류는 transcript 를 1차 근거로 쓰되, section `title + description`에서 뽑은 generic fragment anchor 와 strict glossary anchor 를 함께 사용해 coverage 후보를 만든다.
   - YouTube chapter title 은 semantic nearest-neighbor 가 아니라 exact/normalized fragment match 와 bounded chapter-index rescue 로만 보조되고, title만 비슷한 off-curriculum 영상은 coverage 에 넣지 않는다.
   - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 한다.
+  - speech coverage note 는 도넛 의미를 바꾸지 않고, `전체 발화 중 ...만 비중 계산에 사용되었습니다`처럼 제외된 발화가 있다는 사실만 상단에서 설명한다.
   - 영상 제목과 transcript 주제가 크게 어긋나면 non-blocking warning 을 남겨 explainability 를 보강한다.
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
@@ -98,6 +99,9 @@ Last Updated: 2026-04-13
   - speech anchor matching 은 substring 이 아니라 token/boundary 기준으로 계산해 `지니고` 같은 일반 어절이 `지니` anchor 로 오탐되지 않게 한다.
   - YouTube source label 은 cache 된 human title 을 우선 사용한다.
   - speech title prior 는 exact/normalized fragment match 와 bounded chapter-index rescue 만 사용하고, transcript score 가 최소 plausibility 를 넘지 못하면 강제 배정하지 않는다.
+  - speech transcript 는 `[음악]` 같은 nonverbal-only line 을 coverage 입력에서 제거하고, speech 전용 subchunk 는 `24 tokens` 상한과 `overlap 0`으로 더 촘촘히 쪼갠다.
+  - speech candidate gate 는 단일 anchor hit라도 section title의 exact fragment 와 일치하면 후보로 살릴 수 있지만, “해당 section만 anchor가 한 번 보였다”는 이유만으로는 후보를 열지 않는다.
+  - speech near-tie/unmapped chunk 는 strict candidate gate 를 통과한 소수 후보에 한해 추가 소형 LLM adjudication 으로만 보정한다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
   - VOC OpenAI text analysis 호출은 `temperature=0`으로 고정해 같은 입력에서 요약 drift 를 줄인다.
@@ -177,6 +181,10 @@ Last Updated: 2026-04-13
 - 커리큘럼 preview 에 `강의 구성 로드맵` 기반 local parser 를 추가해 `Chapter ... 총 N강` 형식의 PDF는 OpenAI 변동과 무관하게 `lecture_count` 기준의 고정 비중을 사용하도록 정리했다.
 - `render.yaml`을 현재 ScraperAPI/STT/probe/distributed throttle env 계약과 맞췄다.
 - `yt-dlp` metadata 해석은 더 이상 ScraperAPI proxy 를 타지 않고, metadata-only `process=False` 경로와 단일 영상 fallback 을 사용한다.
+- speech lane 은 `[음악]` 같은 비언어 자막을 coverage 계산에서 제거하고, smaller no-overlap subchunk + exact-title single-anchor rescue 를 추가해 long livestream 에서 특정 2~3개 대단원으로만 붕괴하는 현상을 줄였다.
+- Page 2 speech coverage note 는 도넛/범례 의미는 그대로 둔 채, `전체 발화 중 ...만` 반영됐다는 사실만 더 명시적으로 안내하도록 카피를 정리했다.
+- solution `trendAnalysis` prompt 는 더 이상 한국사/수학/과학 예시를 박아두지 않고, 도메인과 직접 관련된 기관·시험·정책만 언급하라는 중립 규칙으로 정리했다.
+- speech 회귀 테스트 fixture 는 한국사 강의 대신 생명과학 다단원 라이브 예제로 바꿔, 일반 anchor/chunking 로직이 특정 과목 하드코딩 없이 동작하는지만 검증하도록 정리했다.
 
 ## Verification
 
@@ -185,9 +193,12 @@ Last Updated: 2026-04-13
   - `node --check final_edu/static/app.js`
 - 테스트
   - `source ~/.zshrc; UV_CACHE_DIR=/tmp/uv-cache uv run python -m unittest tests.test_page1_restore tests.test_page2_dashboard tests.test_voc_analysis`
+  - `.venv/bin/python -m unittest tests.test_page2_dashboard`
 - 검증 내용
 - `course_restore_drafts_json`가 dropdown lane shell 과 explicit `mode` restore 를 유지하는지
 - mixed lane restore 에서 `files`와 `voc_files`가 동시에 separate download URL 로 유지되는지
+- speech chunk builder 가 nonverbal cue 를 제거하고 smaller no-overlap budget 으로 분할되는지
+- history-style livestream synthetic input 에서 speech coverage 가 한 섹션 독식 대신 여러 대단원에 분산되는지
 - legacy draft payload 가 reset metadata 와 빈 restore block 으로 직렬화되는지
 - `/analyze/prepare` multipart 가 `files`와 `voc_files`를 분리 저장하고 `page1_submission_version`을 payload에 남기는지
 - material semantic subchunk 가 worksheet question block 을 제거하는지
