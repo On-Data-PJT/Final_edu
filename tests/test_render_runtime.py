@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,10 +13,25 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from final_edu.app import create_app
+from final_edu.analysis import (
+    _assign_with_lexical,
+    _assign_with_openai,
+    _build_lexical_index,
+    _init_mode_aggregates,
+    _stream_segments_into_aggregates,
+)
+from final_edu.app import _phase_label, create_app
 from final_edu.config import get_settings
-from final_edu.jobs import create_job_record
-from final_edu.models import AnalysisJobPayload, AnalysisJobRecord, CurriculumSection, JobInstructorInput
+from final_edu.jobs import create_job_record, run_analysis_job
+from final_edu.models import (
+    AnalysisJobPayload,
+    AnalysisJobRecord,
+    CurriculumSection,
+    ExtractedChunk,
+    InstructorSubmission,
+    JobInstructorInput,
+    RawTextSegment,
+)
 from final_edu import worker as worker_module
 
 
@@ -29,7 +45,11 @@ class RenderRuntimeTests(unittest.TestCase):
             os.environ,
             {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
             clear=False,
-        ), patch("final_edu.app.ensure_kiwi_ready", side_effect=AssertionError("web startup should not preload kiwi")):
+        ), patch(
+            "final_edu.app.ensure_kiwi_ready",
+            side_effect=AssertionError("web startup should not preload kiwi"),
+            create=True,
+        ):
             get_settings.cache_clear()
             with TestClient(create_app()) as client:
                 response = client.get("/health")
@@ -68,6 +88,234 @@ class RenderRuntimeTests(unittest.TestCase):
         fake_redis.from_url.assert_called_once_with("redis://localhost:6379/0")
         fake_worker_class.assert_called_once()
         fake_worker_instance.work.assert_called_once()
+
+    def test_phase_label_includes_embedding(self) -> None:
+        self.assertEqual(_phase_label("embedding"), "임베딩 계산 중")
+
+    def test_assign_with_lexical_emits_chunk_progress(self) -> None:
+        sections = [
+            CurriculumSection(id="alpha", title="Alpha", description="alpha topic", target_weight=50.0),
+            CurriculumSection(id="beta", title="Beta", description="beta topic", target_weight=50.0),
+        ]
+        chunks = [
+            ExtractedChunk(
+                id="chunk-1",
+                source_id="source-1",
+                instructor_name="강사 1",
+                source_label="Manual 1",
+                source_type="manual",
+                locator="1",
+                text="alpha alpha fundamentals",
+                token_count=3,
+                fingerprint="alpha",
+            ),
+            ExtractedChunk(
+                id="chunk-2",
+                source_id="source-2",
+                instructor_name="강사 1",
+                source_label="Manual 2",
+                source_type="manual",
+                locator="2",
+                text="beta beta practice",
+                token_count=3,
+                fingerprint="beta",
+            ),
+        ]
+        snapshots: list[tuple[str, int, int]] = []
+
+        assignments, warnings = _assign_with_lexical(
+            chunks,
+            sections,
+            SimpleNamespace(),
+            progress_callback=lambda **snapshot: snapshots.append(
+                (snapshot.get("phase"), snapshot.get("progress_current"), snapshot.get("progress_total"))
+            ),
+        )
+
+        self.assertEqual(len(assignments), 2)
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [snapshot for snapshot in snapshots if snapshot[0] == "assigning"],
+            [("assigning", 0, 2), ("assigning", 1, 2), ("assigning", 2, 2)],
+        )
+
+    def test_assign_with_openai_emits_embedding_then_assignment_progress(self) -> None:
+        class FakeEmbeddings:
+            @staticmethod
+            def create(*, model, input):  # noqa: ANN001
+                data = []
+                for text in input:
+                    normalized = str(text).lower()
+                    if "alpha" in normalized:
+                        embedding = [1.0, 0.0]
+                    elif "beta" in normalized:
+                        embedding = [0.0, 1.0]
+                    else:
+                        embedding = [0.5, 0.5]
+                    data.append(SimpleNamespace(embedding=embedding))
+                return SimpleNamespace(data=data)
+
+        fake_client = SimpleNamespace(embeddings=FakeEmbeddings())
+        sections = [
+            CurriculumSection(id="alpha", title="Alpha", description="alpha topic", target_weight=50.0),
+            CurriculumSection(id="beta", title="Beta", description="beta topic", target_weight=50.0),
+        ]
+        chunks = [
+            ExtractedChunk(
+                id="chunk-1",
+                source_id="source-1",
+                instructor_name="강사 1",
+                source_label="Manual 1",
+                source_type="manual",
+                locator="1",
+                text="alpha alpha fundamentals",
+                token_count=3,
+                fingerprint="alpha",
+            ),
+            ExtractedChunk(
+                id="chunk-2",
+                source_id="source-2",
+                instructor_name="강사 1",
+                source_label="Manual 2",
+                source_type="manual",
+                locator="2",
+                text="beta beta practice",
+                token_count=3,
+                fingerprint="beta",
+            ),
+        ]
+        snapshots: list[tuple[str, int, int]] = []
+
+        with patch("final_edu.analysis.OpenAI", return_value=fake_client):
+            assignments, warnings = _assign_with_openai(
+                chunks,
+                sections,
+                SimpleNamespace(openai_api_key="test-key", openai_embedding_model="test-embedding"),
+                progress_callback=lambda **snapshot: snapshots.append(
+                    (snapshot.get("phase"), snapshot.get("progress_current"), snapshot.get("progress_total"))
+                ),
+            )
+
+        self.assertEqual(len(assignments), 2)
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            [snapshot for snapshot in snapshots if snapshot[0] == "embedding"],
+            [("embedding", 0, 2), ("embedding", 1, 2), ("embedding", 2, 2)],
+        )
+        self.assertEqual(
+            [snapshot for snapshot in snapshots if snapshot[0] == "assigning"],
+            [("assigning", 0, 2), ("assigning", 1, 2), ("assigning", 2, 2)],
+        )
+
+    def test_streaming_assignment_progress_moves_per_chunk(self) -> None:
+        sections = [
+            CurriculumSection(id="photosynthesis", title="광합성", description="엽록체와 광반응", target_weight=50.0),
+            CurriculumSection(id="respiration", title="세포 호흡", description="ATP 생성", target_weight=50.0),
+        ]
+        submissions = [InstructorSubmission(name="강사 1")]
+        segments = [
+            RawTextSegment(
+                source_id="youtube-1",
+                instructor_name="강사 1",
+                source_label="생명과학 라이브",
+                source_type="youtube",
+                locator="00:00",
+                text="광합성은 엽록체에서 일어납니다.",
+            ),
+            RawTextSegment(
+                source_id="youtube-1",
+                instructor_name="강사 1",
+                source_label="생명과학 라이브",
+                source_type="youtube",
+                locator="00:20",
+                text="세포 호흡은 ATP를 생성합니다.",
+            ),
+        ]
+        snapshots: list[tuple[str, int, int]] = []
+        progress_state = {"current": 0, "total": 0}
+        removed_duplicates, warnings = _stream_segments_into_aggregates(
+            segments=segments,
+            instructor_name="강사 1",
+            settings=SimpleNamespace(chunk_target_tokens=24, openai_api_key=None),
+            sections=sections,
+            lexical_index=_build_lexical_index(sections),
+            dedupe_seen=set(),
+            mode_aggregates=_init_mode_aggregates(sections, submissions),
+            evidence_map=defaultdict(lambda: defaultdict(list)),
+            keyword_counters_by_mode={mode: defaultdict(Counter) for mode in ("combined", "material", "speech")},
+            off_curriculum_counters_by_mode={mode: defaultdict(Counter) for mode in ("combined", "material", "speech")},
+            keyword_documents_by_mode={mode: [] for mode in ("combined", "material", "speech")},
+            off_curriculum_keyword_documents_by_mode={mode: [] for mode in ("combined", "material", "speech")},
+            curriculum_tokens={"광합성", "세포", "호흡"},
+            max_evidence=2,
+            progress_callback=lambda **snapshot: snapshots.append(
+                (snapshot.get("phase"), snapshot.get("progress_current"), snapshot.get("progress_total"))
+            ),
+            progress_state=progress_state,
+            progress_context={"expanded_video_count": 1, "processed_video_count": 1, "caption_success_count": 1, "caption_failure_count": 0},
+        )
+
+        self.assertEqual(removed_duplicates, 0)
+        self.assertEqual(warnings, [])
+        self.assertTrue(any(snapshot[0] == "assigning" and snapshot[1] == 0 for snapshot in snapshots))
+        self.assertTrue(any(snapshot[0] == "assigning" and snapshot[1] == snapshot[2] for snapshot in snapshots))
+
+    def test_run_analysis_job_persists_small_progress_increments(self) -> None:
+        payload = AnalysisJobPayload(
+            job_id="job-small-progress",
+            course_id="course-1",
+            course_name="진행률 테스트",
+            course_sections=[CurriculumSection(id="section-1", title="대주제", description="설명", target_weight=100.0)],
+            curriculum_text="대주제 | 설명",
+            instructors=[JobInstructorInput(name="강사 1", youtube_urls=["https://www.youtube.com/watch?v=test"])],
+            submitted_at=_iso_from_ts(datetime.now(UTC).timestamp()),
+        )
+        initial_record = create_job_record(payload, "jobs/job-small-progress/payload.json", 1, SimpleNamespace())
+        saved_records: list[AnalysisJobRecord] = []
+
+        class FakeRepository:
+            def __init__(self, record: AnalysisJobRecord) -> None:
+                self.record = record
+
+            def get(self, job_id: str) -> AnalysisJobRecord | None:
+                return self.record if job_id == self.record.id else None
+
+            def save(self, record: AnalysisJobRecord) -> None:
+                self.record = record
+                saved_records.append(record)
+
+        fake_repository = FakeRepository(initial_record)
+        fake_storage = SimpleNamespace(
+            get_json=lambda _key: payload.to_dict(),
+            put_json=lambda _key, _value: None,
+        )
+        fake_services = SimpleNamespace(
+            repository=fake_repository,
+            storage=fake_storage,
+            settings=SimpleNamespace(),
+        )
+
+        def fake_execute_analysis(_payload, _storage, _settings, *, progress_callback=None):
+            if progress_callback is not None:
+                progress_callback(phase="embedding", progress_current=1, progress_total=3)
+                progress_callback(phase="embedding", progress_current=2, progress_total=3)
+                progress_callback(phase="embedding", progress_current=3, progress_total=3)
+            return {"scorer_mode": "lexical", "duration_ms": 10, "warnings": []}
+
+        with patch("final_edu.jobs.create_job_services", return_value=fake_services), patch(
+            "final_edu.jobs._execute_analysis",
+            side_effect=fake_execute_analysis,
+        ):
+            run_analysis_job(payload.job_id)
+
+        embedding_progresses = [
+            (record.phase, record.progress_current, record.progress_total)
+            for record in saved_records
+            if record.phase == "embedding"
+        ]
+        self.assertIn(("embedding", 1, 3), embedding_progresses)
+        self.assertIn(("embedding", 2, 3), embedding_progresses)
+        self.assertIn(("embedding", 3, 3), embedding_progresses)
 
     def test_job_status_marks_stalled_queued_job(self) -> None:
         now_ts = datetime.now(UTC).timestamp()

@@ -12,6 +12,7 @@ Last Updated: 2026-04-13
   - Worker: `uv run python -m final_edu.worker`
 - 선택적 실행 환경 변수:
   - `FINAL_EDU_KIWI_MODEL_PATH`: Windows/비ASCII 경로에서 `Kiwi` 기본 모델 로딩이 실패할 때 ASCII-only 경로를 지정하는 override
+  - `FINAL_EDU_DEMO_SEEDING_ENABLED`: Render 심사용 demo course/job/result를 startup 시 자동 시드하고, Page 1에서 pre-seeded 결과 fast-path를 켠다
 - 현재 입력 포맷:
   - 과정 등록: `커리큘럼 PDF`
   - 강의 자료: `PDF`, `PPTX`, `TXT/MD`
@@ -38,6 +39,8 @@ Last Updated: 2026-04-13
   - VOC chip 은 일반 파일 chip 과 구분되는 `VOC` 배지로 표시된다.
   - analyze submit 과 prepare confirm 대기 중에는 blocking loading overlay 를 띄워 현재 처리 중임을 보여준다.
   - queue 기반 confirm 이후에는 Page 1 loading overlay 가 `queued/running/stalled` 상태를 계속 보여주고, terminal state 이후에만 `/jobs/{job_id}`로 이동한다.
+  - `FINAL_EDU_DEMO_SEEDING_ENABLED=true`인 배포에서는 우측 상단 강의 목록 버튼에 `준비된 샘플로 결과 보기(데모)` 말풍선이 붙고, locked demo course가 목록 최상단에 고정된다.
+  - demo course를 선택하면 오강사/이강사/박강사 3명 lane에 자료 1개, YouTube URL 1개, VOC 1개가 자동 복원되고, `넘어가기`는 queue를 새로 태우지 않고 pre-seeded completed result(`/jobs/{job_id}`)로 즉시 이동한다.
   - 분석 제출은 `과정 선택 + 유효 lane 1개 이상`일 때만 활성화된다.
   - 현재 선택된 과정을 삭제하면 선택 상태, persisted/local draft, pending prepare 상태를 비우고 composer 를 즉시 초기 empty state 로 리셋한다.
 - `Page 2`
@@ -85,6 +88,8 @@ Last Updated: 2026-04-13
   - `local` 모드: `runtime_dir/courses/*.json`
   - `r2` 모드: `course-records/{course_id}.json`
 - 따라서 Render처럼 `storage_mode == "r2"`인 배포에서는 Blueprint sync / redeploy 이후에도 과정 목록이 object storage에 남는다.
+- demo seeding 이 켜진 배포는 startup 시 object storage/job repository에 demo course, curriculum PDF, 강사별 자료/VOC asset, completed job payload/result를 idempotent 하게 보장한다.
+- demo seeded course는 `is_demo_seeded`, `demo_ready_job_id`, `demo_ready_job_url`, `is_locked` 메타데이터와 함께 직렬화되고, 일반 과정 삭제 흐름에서 제외된다.
 - lexical 분석 계약:
   - `kiwipiepy` 기반 tokenization 을 사용한다.
   - 공식 웹 실행은 factory entrypoint(`uv run python -m final_edu --reload`) 기준이며, module-level `final_edu.app:app` 객체 존재를 전제로 하지 않는다.
@@ -127,6 +132,12 @@ Last Updated: 2026-04-13
 
 ## What Changed This Round
 
+- `README.md`를 심사위원용 문서로 전면 재작성했다.
+  - 공모전 AI 리포트의 문제정의, 기대효과, AI 활용 전략을 현재 저장소 구현과 정렬했다.
+  - 프로젝트를 `강사 품질 점수`가 아니라 `표준 커리큘럼 대비 강사별 커버리지 편차 분석기`로 명확히 재정의했다.
+  - 문제정의, 핵심 기능, 심사위원용 데모 흐름, 내부 로직, AI/agent 협업, 검증, 한계, 실행 부록 순으로 문서를 재구성했다.
+  - 현재 실제 구현된 라우트, 입력 포맷, prepare-confirm-enqueue 흐름, mapped-only share, lexical/OpenAI fallback, VOC 분석 계약만 README에 반영했다.
+  - Mermaid workflow 2종과 judge-facing 표를 추가해 제품 설명과 기술 설명을 한 문서에서 함께 이해할 수 있게 정리했다.
 - `dev`의 디자인/레이아웃/라우트를 유지한 채 `lexical` 백엔드를 이식했다.
 - ScraperAPI, distributed throttle, cooldown, selective STT, playlist probe threshold, Kiwi tokenization 을 `dev` 브랜치에 반영했다.
 - Page 1 VOC 업로드를 실제 분석 파이프라인에 연결했다.
@@ -252,38 +263,7 @@ Last Updated: 2026-04-13
 
 ## Consulted DEBUG IDs
 
-- `DBG-005`
-- `DBG-012`
-- `DBG-014`
-- `DBG-015`
-- `DBG-016`
-- `DBG-017`
-- `DBG-020`
-- `DBG-021`
-- `DBG-023`
-- `DBG-024`
-- `DBG-027`
-- `DBG-028`
-- `DBG-029`
-- `DBG-030`
-- `DBG-031`
-- `DBG-032`
-- `DBG-033`
-- `DBG-035`
-- `DBG-036`
-- `DBG-037`
-- `DBG-026`
-- `DBG-047`
-- `DBG-048`
-- `DBG-049`
-- `DBG-050`
-- `DBG-038`
-- `DBG-043`
-- `DBG-006`
-- `DBG-044`
-- `DBG-039`
-- `DBG-040`
-- `DBG-041`
+- none matched (docs-only README rewrite)
 
 ## Recent Updates
 
@@ -348,6 +328,14 @@ Last Updated: 2026-04-13
 - Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제 `mapped_tokens` 비율이 낮을 때 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 보조 설명을 노출하도록 정리했다.
 - `yeon_copy`의 wordcloud filtering 강화 의도는 최신 `dev` 계약 위로 선별 이식했고, 전역 tokenizer 회귀나 storage-wide TF-IDF 대신 wordcloud 전용 tokenizer + current-run TF-IDF 로 재구성했다.
 - `tests.test_page2_dashboard`에 chaptered playlist title rescue 회귀와 coverage note shell 회귀를 추가했다.
+- 분석 진행 overlay가 `0 / N`에 오래 멈춰 보이던 문제를 줄이기 위해, OpenAI 경로는 `embedding`과 `assigning` 단계로 분리하고 lexical/openai/streaming 경로 모두 실제 chunk 또는 embedding batch 단위 progress snapshot을 내리도록 수정했다.
+- `run_analysis_job()`의 progress persistence는 `progress_total <= 20`일 때 모든 증가분을 저장하도록 완화해, 작은 batch 단계도 Render overlay에서 실제로 움직이게 보강했다.
+- `tests.test_render_runtime`에 `embedding` phase label, openai/lexical assignment progress, streaming chunk progress, small-total progress persistence 회귀를 추가했다.
+- `final_edu/demo_seed.py`를 추가해 `_demo_context`와 Render 심사용 seeded course/job/result가 같은 AI·데이터 부트캠프 demo bundle을 공유하도록 정리했다.
+- `FINAL_EDU_DEMO_SEEDING_ENABLED=true`인 startup은 demo course, curriculum PDF, 강사별 자료/VOC asset, completed job payload/result를 object storage와 job repository에 idempotent 하게 시드한다.
+- Page 1 강의 목록 버튼에는 `준비된 샘플로 결과 보기(데모)` 말풍선을 붙이고, demo course는 목록 최상단 `데모` badge + 삭제 불가 상태로 노출되도록 보강했다.
+- demo course를 선택하면 오강사/이강사/박강사 3명 lane draft가 자동 복원되고, `넘어가기`는 prepare/confirm queue 대신 seeded `/jobs/{demo_job_id}`로 즉시 이동하도록 fast-path를 추가했다.
+- `tests.test_page1_restore`에 demo course pinning/restore, review/solution seeded render, demo delete rejection 회귀를 추가했다.
 
 ### 2026-04-11
 

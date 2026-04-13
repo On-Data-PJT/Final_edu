@@ -413,10 +413,12 @@ def run_analysis_job(job_id: str) -> None:
         progress_current = int(snapshot.get("progress_current", current_record.progress_current or 0))
         progress_total = int(snapshot.get("progress_total", current_record.progress_total or 0))
         signature = (phase, progress_current, progress_total)
+        progress_changed = signature != last_progress_signature
         should_persist = (
             signature[0] != last_progress_signature[0]
             or progress_current in {0, progress_total}
-            or (progress_total > 0 and progress_current % 5 == 0)
+            or (0 < progress_total <= 20 and progress_changed)
+            or (progress_total > 20 and progress_current % 5 == 0)
         )
         if not should_persist:
             return

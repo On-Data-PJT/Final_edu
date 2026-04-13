@@ -14,6 +14,7 @@ from openpyxl import Workbook
 
 from final_edu.app import create_app
 from final_edu.config import get_settings
+from final_edu.demo_seed import DEMO_COURSE_ID, DEMO_HINT_TEXT, DEMO_JOB_ID
 from final_edu.models import (
     AnalysisJobPayload,
     AnalysisJobRecord,
@@ -57,6 +58,104 @@ def _local_runtime_env(runtime_dir: str) -> dict[str, str]:
 
 
 class Page1RestoreTests(unittest.TestCase):
+    def test_demo_seeded_course_is_restored_and_pinned_first_for_judging(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {
+                **_local_runtime_env(runtime_dir),
+                "FINAL_EDU_DEMO_SEEDING_ENABLED": "true",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with TestClient(create_app()) as client:
+                response = client.get("/")
+                courses_response = client.get("/courses")
+            get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(courses_response.status_code, 200)
+        self.assertIn(DEMO_HINT_TEXT, response.text)
+        self.assertIn('data-testid="page1-demo-course-hint"', response.text)
+        self.assertNotIn(f'data-course-delete="{DEMO_COURSE_ID}"', response.text)
+        self.assertIn("데모</span>", response.text)
+
+        courses = _extract_script_payload(response.text, "page1-courses-data")
+        self.assertTrue(courses)
+        self.assertEqual(courses[0]["id"], DEMO_COURSE_ID)
+        self.assertTrue(courses[0]["is_demo_seeded"])
+        self.assertTrue(courses[0]["is_locked"])
+        self.assertEqual(courses[0]["demo_ready_job_id"], DEMO_JOB_ID)
+        self.assertEqual(courses[0]["demo_ready_job_url"], f"/jobs/{DEMO_JOB_ID}")
+
+        drafts = _extract_script_payload(response.text, "page1-course-drafts-data")
+        self.assertIn(DEMO_COURSE_ID, drafts)
+        self.assertEqual(drafts[DEMO_COURSE_ID]["job_id"], DEMO_JOB_ID)
+        self.assertEqual(len(drafts[DEMO_COURSE_ID]["blocks"]), 3)
+        self.assertEqual([block["instructor_name"] for block in drafts[DEMO_COURSE_ID]["blocks"]], ["오강사", "이강사", "박강사"])
+        for index, block in enumerate(drafts[DEMO_COURSE_ID]["blocks"], start=1):
+            self.assertEqual(block["mode"], "files")
+            self.assertEqual(len(block["files"]), 1)
+            self.assertEqual(len(block["voc_files"]), 1)
+            self.assertEqual(len(block["youtube_urls"]), 1)
+            self.assertTrue(block["files"][0]["download_url"].endswith(f"/jobs/{DEMO_JOB_ID}/assets/{index}/1"))
+            self.assertTrue(block["voc_files"][0]["download_url"].endswith(f"/jobs/{DEMO_JOB_ID}/voc-assets/{index}/1"))
+
+        courses_payload = courses_response.json()["courses"]
+        self.assertEqual(courses_payload[0]["id"], DEMO_COURSE_ID)
+
+    def test_demo_seeded_pages_render_review_and_solution_without_queueing(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {
+                **_local_runtime_env(runtime_dir),
+                "FINAL_EDU_DEMO_SEEDING_ENABLED": "true",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with TestClient(create_app()) as client:
+                job_response = client.get(f"/jobs/{DEMO_JOB_ID}")
+                review_response = client.get(f"/review?job_id={DEMO_JOB_ID}")
+                solution_response = client.get(f"/solution?job_id={DEMO_JOB_ID}")
+            get_settings.cache_clear()
+
+        self.assertEqual(job_response.status_code, 200)
+        self.assertIn("AI 데이터 분석 실무 집중과정", job_response.text)
+        self.assertIn("오강사", job_response.text)
+        self.assertIn("이강사", job_response.text)
+        self.assertIn("박강사", job_response.text)
+
+        self.assertEqual(review_response.status_code, 200)
+        self.assertIn("오강사_VOC.csv", review_response.text)
+        self.assertIn("실습 체크포인트 추가", review_response.text)
+        self.assertIn(f'href="/jobs/{DEMO_JOB_ID}"', review_response.text)
+
+        self.assertEqual(solution_response.status_code, 200)
+        self.assertIn("VOC 기반 인사이트", solution_response.text)
+        self.assertIn("현재 커리큘럼과 최신 교육 시장 트렌드 비교", solution_response.text)
+        self.assertIn("강사별 표준커리큘럼 준수도", solution_response.text)
+        self.assertIn(f'href="/jobs/{DEMO_JOB_ID}"', solution_response.text)
+
+    def test_delete_demo_seeded_course_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {
+                **_local_runtime_env(runtime_dir),
+                "FINAL_EDU_DEMO_SEEDING_ENABLED": "true",
+            },
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with TestClient(create_app()) as client:
+                response = client.delete(f"/courses/{DEMO_COURSE_ID}")
+                course_response = client.get(f"/courses/{DEMO_COURSE_ID}")
+            get_settings.cache_clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("심사용 데모 과정은 삭제할 수 없습니다", response.json()["detail"])
+        self.assertEqual(course_response.status_code, 200)
+
     def test_index_restore_payload_keeps_explicit_lane_mode_and_separate_voc_assets(self) -> None:
         with tempfile.TemporaryDirectory() as runtime_dir:
             runtime_root = Path(runtime_dir)

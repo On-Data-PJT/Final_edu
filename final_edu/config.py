@@ -69,6 +69,7 @@ class Settings:
     r2_secret_access_key: str | None
     r2_bucket: str | None
     r2_region: str
+    demo_seeding_enabled: bool
 
     @property
     def queue_mode(self) -> str:
@@ -217,4 +218,10 @@ def get_settings() -> Settings:
         r2_secret_access_key=os.getenv("R2_SECRET_ACCESS_KEY"),
         r2_bucket=os.getenv("R2_BUCKET"),
         r2_region=os.getenv("R2_REGION", "auto"),
+        demo_seeding_enabled=os.getenv("FINAL_EDU_DEMO_SEEDING_ENABLED", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        },
     )

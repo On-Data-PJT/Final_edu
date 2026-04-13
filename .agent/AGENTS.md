@@ -190,6 +190,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - module-level `final_edu.app:app` 객체 존재를 공식 실행 계약으로 가정하지 않는다.
 - 선택적 환경 변수:
   - `FINAL_EDU_KIWI_MODEL_PATH`: Windows/비ASCII 경로 환경에서 기본 `Kiwi` 모델 로딩이 실패할 때 ASCII-only 모델 경로를 지정한다.
+  - `FINAL_EDU_DEMO_SEEDING_ENABLED`: Render 심사용 데모 course/job/result를 startup 시 object storage + job repository에 idempotent 하게 시드하고, Page 1에 locked demo course fast-path를 노출한다.
 - 핵심 엔드포인트:
   - `GET /`
   - `GET /demo`
@@ -224,9 +225,12 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
     - 파일 업로드는 현재 보이는 `files` 또는 `voc` surface에서만 받고, YouTube surface는 파일 drop/click 업로드를 받지 않는다
     - VOC는 `PDF/CSV/TXT/XLSX/XLS`를 지원하되, 스프레드시트는 응답이 담긴 단일 clear sheet 또는 `BQ 평점 + 자유의견`이 함께 있는 survey matrix sheet를 허용하고 구조가 모호하면 prepare 단계에서 거부한다
     - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다
+    - `FINAL_EDU_DEMO_SEEDING_ENABLED=true`인 환경에서는 심사용 demo course가 강의 목록 최상단에 고정되고, 선택 시 3명 강사의 자료/YouTube/VOC draft가 자동 복원된다
+    - demo course는 삭제 불가 locked course이며, `넘어가기`는 새 prepare/confirm queue를 돌리지 않고 pre-seeded completed job(`/jobs/{demo_job_id}`)으로 즉시 이동한다
   - 과정 삭제 계약:
     - `DELETE /courses/{course_id}`는 과정 등록, 커리큘럼 PDF object, 해당 과정의 completed/failed job metadata + `jobs/{job_id}/...` object prefix, matching `analysis-preparations/*.json`을 함께 hard delete 한다
     - `queued` 또는 `running` job 이 하나라도 있으면 삭제는 `409`로 거부되고 아무것도 지우지 않는다
+    - demo seeded course는 심사용 기준선을 보존하기 위해 항상 `409`로 거부되고 삭제되지 않는다
     - stale prepare confirm 은 과정 존재 여부를 다시 검사하고, 이미 삭제된 과정이면 confirm 을 차단한다
     - persisted draft auto-restore 는 `page1_submission_version >= 2`인 payload만 허용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행

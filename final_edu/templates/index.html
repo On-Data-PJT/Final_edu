@@ -11,14 +11,22 @@
     </svg>
   </span>
 </button>
-<button type="button" class="icon-button page1-header-icon" data-open-course-list data-testid="open-course-list"
-  aria-controls="course-list-panel" aria-expanded="false" aria-label="과정 목록">
-  <span class="icon-button-mark" aria-hidden="true">
-    <svg viewBox="0 0 24 24" role="img" focusable="false">
-      <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
-    </svg>
-  </span>
-</button>
+<div class="page1-header-anchor">
+  <button type="button" class="icon-button page1-header-icon" data-open-course-list data-testid="open-course-list"
+    aria-controls="course-list-panel" aria-expanded="false" aria-label="과정 목록">
+    <span class="icon-button-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" role="img" focusable="false">
+        <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
+      </svg>
+    </span>
+  </button>
+  {% if demo_hint_enabled %}
+  <div id="page1-demo-course-hint" class="page1-demo-course-hint" data-testid="page1-demo-course-hint" role="note"
+    aria-live="polite">
+    {{ demo_hint_text }}
+  </div>
+  {% endif %}
+</div>
 {% endblock %}
 
 {% block content %}
@@ -264,16 +272,21 @@
         <button type="button" class="course-list-select" data-course-select="{{ course.id }}" aria-label="{{ course.name }} 선택">
           <div class="course-list-item-head">
             <strong>{{ course.name }}</strong>
+            {% if course.is_demo_seeded %}
+            <span class="course-list-badge">데모</span>
+            {% endif %}
           </div>
           <span>등록 강사 {{ course.instructor_names | length }}명</span>
           <small>대주제 {{ course.section_count }}개</small>
         </button>
+        {% if not course.is_locked %}
         <button type="button" class="course-list-delete-button" data-course-delete="{{ course.id }}"
           data-course-name="{{ course.name }}" aria-label="{{ course.name }} 삭제" title="{{ course.name }} 삭제">
           <svg viewBox="0 0 24 24" role="img" focusable="false">
             <path d="m7 7 10 10M17 7 7 17" />
           </svg>
         </button>
+        {% endif %}
       </article>
       {% else %}
       <div class="empty-state">

@@ -1214,17 +1214,18 @@ def analyze_submissions(
             )
         raise ValueError(_analysis_no_text_error(warnings))
 
-    _emit_progress(
-        progress_callback,
-        phase="assigning",
-        progress_current=0,
-        progress_total=len(deduped_chunks),
-        expanded_video_count=total_youtube_videos,
-        processed_video_count=processed_youtube_videos,
-        caption_success_count=caption_success_count,
-        caption_failure_count=caption_failure_count,
+    assignments, scorer_mode, scorer_warnings = _assign_chunks(
+        deduped_chunks,
+        normalized_sections,
+        settings,
+        progress_callback=progress_callback,
+        progress_context=_build_progress_context(
+            expanded_video_count=total_youtube_videos,
+            processed_video_count=processed_youtube_videos,
+            caption_success_count=caption_success_count,
+            caption_failure_count=caption_failure_count,
+        ),
     )
-    assignments, scorer_mode, scorer_warnings = _assign_chunks(deduped_chunks, normalized_sections, settings)
     warnings.extend(scorer_warnings)
     summaries = _build_instructor_summaries(
         sections=normalized_sections,
@@ -1364,6 +1365,7 @@ def _analyze_submissions_lexical_streaming(
     removed_duplicates = 0
     mode_aggregates = _init_mode_aggregates(sections, submissions)
     evidence_map: dict[str, dict[str, list[ChunkAssignment]]] = defaultdict(lambda: defaultdict(list))
+    assigning_progress_state = {"current": 0, "total": 0}
 
     _emit_progress(
         progress_callback,
@@ -1399,6 +1401,14 @@ def _analyze_submissions_lexical_streaming(
                 off_curriculum_keyword_documents_by_mode=off_curriculum_keyword_documents_by_mode,
                 curriculum_tokens=curriculum_tokens,
                 max_evidence=settings.max_evidence_per_section,
+                progress_callback=progress_callback,
+                progress_state=assigning_progress_state,
+                progress_context=_build_progress_context(
+                    expanded_video_count=total_youtube_videos,
+                    processed_video_count=processed_youtube_videos,
+                    caption_success_count=caption_success_count,
+                    caption_failure_count=caption_failure_count,
+                ),
             )
             removed_duplicates += removed_count
             warnings.extend(assignment_warnings)
@@ -1432,6 +1442,14 @@ def _analyze_submissions_lexical_streaming(
                     off_curriculum_keyword_documents_by_mode=off_curriculum_keyword_documents_by_mode,
                     curriculum_tokens=curriculum_tokens,
                     max_evidence=settings.max_evidence_per_section,
+                    progress_callback=progress_callback,
+                    progress_state=assigning_progress_state,
+                    progress_context=_build_progress_context(
+                        expanded_video_count=total_youtube_videos,
+                        processed_video_count=processed_youtube_videos,
+                        caption_success_count=caption_success_count,
+                        caption_failure_count=caption_failure_count,
+                    ),
                 )
                 removed_duplicates += removed_count
                 warnings.extend(assignment_warnings)
@@ -1467,17 +1485,6 @@ def _analyze_submissions_lexical_streaming(
                 voc_summary=voc_summary or {},
             )
         raise ValueError(_analysis_no_text_error(warnings))
-
-    _emit_progress(
-        progress_callback,
-        phase="assigning",
-        progress_current=1,
-        progress_total=1,
-        expanded_video_count=total_youtube_videos,
-        processed_video_count=processed_youtube_videos,
-        caption_success_count=caption_success_count,
-        caption_failure_count=caption_failure_count,
-    )
 
     summaries = _build_summaries_from_aggregates(
         sections=sections,
@@ -2092,6 +2099,39 @@ def _emit_progress(progress_callback, **payload) -> None:
         progress_callback(**payload)
 
 
+def _build_progress_context(
+    *,
+    expanded_video_count: int,
+    processed_video_count: int,
+    caption_success_count: int,
+    caption_failure_count: int,
+) -> dict[str, int]:
+    return {
+        "expanded_video_count": int(expanded_video_count),
+        "processed_video_count": int(processed_video_count),
+        "caption_success_count": int(caption_success_count),
+        "caption_failure_count": int(caption_failure_count),
+    }
+
+
+def _emit_phase_progress(
+    progress_callback,
+    *,
+    phase: str,
+    progress_current: int,
+    progress_total: int,
+    progress_context: dict[str, int] | None = None,
+) -> None:
+    payload = {
+        "phase": phase,
+        "progress_current": int(progress_current),
+        "progress_total": max(1, int(progress_total)),
+    }
+    if progress_context:
+        payload.update(progress_context)
+    _emit_progress(progress_callback, **payload)
+
+
 def _build_lexical_index(sections: list[CurriculumSection]) -> dict:
     section_assignment_texts = _build_section_assignment_texts(sections)
     return {
@@ -2133,15 +2173,36 @@ def _stream_segments_into_aggregates(
     off_curriculum_keyword_documents_by_mode: dict[str, list[set[str]]],
     curriculum_tokens: set[str],
     max_evidence: int,
+    progress_callback=None,
+    progress_state: dict[str, int] | None = None,
+    progress_context: dict[str, int] | None = None,
 ) -> tuple[int, list[str]]:
     removed_duplicates = 0
     warnings: list[str] = []
     warning_keys: set[tuple[str, str]] = set()
     chunks = _build_chunks_for_source_segments(segments, settings)
+    if progress_state is not None and chunks:
+        progress_state["total"] = int(progress_state.get("total", 0)) + len(chunks)
+        _emit_phase_progress(
+            progress_callback,
+            phase="assigning",
+            progress_current=int(progress_state.get("current", 0)),
+            progress_total=int(progress_state.get("total", 0)),
+            progress_context=progress_context,
+        )
     for chunk in chunks:
         dedupe_key = (chunk.instructor_name, chunk.fingerprint)
         if dedupe_key in dedupe_seen:
             removed_duplicates += 1
+            if progress_state is not None:
+                progress_state["current"] = int(progress_state.get("current", 0)) + 1
+                _emit_phase_progress(
+                    progress_callback,
+                    phase="assigning",
+                    progress_current=int(progress_state.get("current", 0)),
+                    progress_total=int(progress_state.get("total", 0)),
+                    progress_context=progress_context,
+                )
             continue
         dedupe_seen.add(dedupe_key)
 
@@ -2177,6 +2238,15 @@ def _stream_segments_into_aggregates(
             if warning_key not in warning_keys:
                 warning_keys.add(warning_key)
                 warnings.append(title_warning)
+        if progress_state is not None:
+            progress_state["current"] = int(progress_state.get("current", 0)) + 1
+            _emit_phase_progress(
+                progress_callback,
+                phase="assigning",
+                progress_current=int(progress_state.get("current", 0)),
+                progress_total=int(progress_state.get("total", 0)),
+                progress_context=progress_context,
+            )
     return removed_duplicates, warnings
 
 
@@ -2707,21 +2777,53 @@ def _build_chunks_for_source_segments(segments, settings: Settings):
     )
 
 
-def _assign_chunks(chunks, sections, settings: Settings):
+def _assign_chunks(
+    chunks,
+    sections,
+    settings: Settings,
+    *,
+    progress_callback=None,
+    progress_context: dict[str, int] | None = None,
+):
     if settings.openai_api_key and OpenAI is not None:
         try:
-            assignments, assignment_warnings = _assign_with_openai(chunks, sections, settings)
+            assignments, assignment_warnings = _assign_with_openai(
+                chunks,
+                sections,
+                settings,
+                progress_callback=progress_callback,
+                progress_context=progress_context,
+            )
             return assignments, "openai-embeddings", assignment_warnings
         except Exception as exc:  # noqa: BLE001
             warning = f"OpenAI 임베딩 호출에 실패해 lexical similarity로 fallback 했습니다. ({exc})"
-            assignments, assignment_warnings = _assign_with_lexical(chunks, sections, settings)
+            assignments, assignment_warnings = _assign_with_lexical(
+                chunks,
+                sections,
+                settings,
+                progress_callback=progress_callback,
+                progress_context=progress_context,
+            )
             return assignments, "lexical-fallback", [warning, *assignment_warnings]
 
-    assignments, assignment_warnings = _assign_with_lexical(chunks, sections, settings)
+    assignments, assignment_warnings = _assign_with_lexical(
+        chunks,
+        sections,
+        settings,
+        progress_callback=progress_callback,
+        progress_context=progress_context,
+    )
     return assignments, "lexical", assignment_warnings
 
 
-def _assign_with_lexical(chunks, sections, settings: Settings):
+def _assign_with_lexical(
+    chunks,
+    sections,
+    settings: Settings,
+    *,
+    progress_callback=None,
+    progress_context: dict[str, int] | None = None,
+):
     section_assignment_texts = _build_section_assignment_texts(sections)
     section_counters = {
         section.id: Counter(tokenize(section_assignment_texts[section.id])) for section in sections
@@ -2739,7 +2841,14 @@ def _assign_with_lexical(chunks, sections, settings: Settings):
         if chunk.source_type in SPEECH_SOURCE_TYPES and _speech_title_text(chunk.source_label)
     }
 
-    for chunk in chunks:
+    _emit_phase_progress(
+        progress_callback,
+        phase="assigning",
+        progress_current=0,
+        progress_total=len(chunks),
+        progress_context=progress_context,
+    )
+    for index, chunk in enumerate(chunks, start=1):
         chunk_counter = Counter(tokenize(chunk.text))
         chunk_tokens = set(chunk_counter)
         scored = _score_sections_lexical(
@@ -2812,6 +2921,13 @@ def _assign_with_lexical(chunks, sections, settings: Settings):
                 if warning_key not in warning_keys:
                     warning_keys.add(warning_key)
                     warnings.append(title_warning)
+            _emit_phase_progress(
+                progress_callback,
+                phase="assigning",
+                progress_current=index,
+                progress_total=len(chunks),
+                progress_context=progress_context,
+            )
             continue
         assignments.append(_best_assignment(chunk, scored, min_score=0.07, min_margin=0.01))
         if title_warning:
@@ -2819,17 +2935,58 @@ def _assign_with_lexical(chunks, sections, settings: Settings):
             if warning_key not in warning_keys:
                 warning_keys.add(warning_key)
                 warnings.append(title_warning)
+        _emit_phase_progress(
+            progress_callback,
+            phase="assigning",
+            progress_current=index,
+            progress_total=len(chunks),
+            progress_context=progress_context,
+        )
 
     return assignments, warnings
 
 
-def _assign_with_openai(chunks, sections, settings: Settings):
+def _assign_with_openai(
+    chunks,
+    sections,
+    settings: Settings,
+    *,
+    progress_callback=None,
+    progress_context: dict[str, int] | None = None,
+):
     client = OpenAI(api_key=settings.openai_api_key)
     section_assignment_texts = _build_section_assignment_texts(sections)
     section_inputs = [section_assignment_texts[section.id] for section in sections]
     chunk_inputs = [chunk.text for chunk in chunks]
-    section_vectors = _embed_texts(client, section_inputs, settings.openai_embedding_model)
-    chunk_vectors = _embed_texts(client, chunk_inputs, settings.openai_embedding_model)
+    section_batches = _build_embedding_batches(section_inputs)
+    chunk_batches = _build_embedding_batches(chunk_inputs)
+    embedding_progress_state = {
+        "current": 0,
+        "total": len(section_batches) + len(chunk_batches),
+    }
+    _emit_phase_progress(
+        progress_callback,
+        phase="embedding",
+        progress_current=0,
+        progress_total=int(embedding_progress_state["total"]),
+        progress_context=progress_context,
+    )
+    section_vectors = _embed_batches(
+        client,
+        section_batches,
+        settings.openai_embedding_model,
+        progress_callback=progress_callback,
+        progress_state=embedding_progress_state,
+        progress_context=progress_context,
+    )
+    chunk_vectors = _embed_batches(
+        client,
+        chunk_batches,
+        settings.openai_embedding_model,
+        progress_callback=progress_callback,
+        progress_state=embedding_progress_state,
+        progress_context=progress_context,
+    )
     assignments = []
     warnings: list[str] = []
     warning_keys: set[tuple[str, str]] = set()
@@ -2842,7 +2999,14 @@ def _assign_with_openai(chunks, sections, settings: Settings):
         if chunk.source_type in SPEECH_SOURCE_TYPES and _speech_title_text(chunk.source_label)
     }
 
-    for chunk, chunk_vector in zip(chunks, chunk_vectors, strict=True):
+    _emit_phase_progress(
+        progress_callback,
+        phase="assigning",
+        progress_current=0,
+        progress_total=len(chunks),
+        progress_context=progress_context,
+    )
+    for index, (chunk, chunk_vector) in enumerate(zip(chunks, chunk_vectors, strict=True), start=1):
         scored = _score_sections_openai(
             sections=sections,
             text_vector=chunk_vector,
@@ -2911,6 +3075,13 @@ def _assign_with_openai(chunks, sections, settings: Settings):
                 if warning_key not in warning_keys:
                     warning_keys.add(warning_key)
                     warnings.append(title_warning)
+            _emit_phase_progress(
+                progress_callback,
+                phase="assigning",
+                progress_current=index,
+                progress_total=len(chunks),
+                progress_context=progress_context,
+            )
             continue
         assignments.append(_best_assignment(chunk, scored, min_score=0.23, min_margin=0.025))
         if title_warning:
@@ -2918,6 +3089,13 @@ def _assign_with_openai(chunks, sections, settings: Settings):
             if warning_key not in warning_keys:
                 warning_keys.add(warning_key)
                 warnings.append(title_warning)
+        _emit_phase_progress(
+            progress_callback,
+            phase="assigning",
+            progress_current=index,
+            progress_total=len(chunks),
+            progress_context=progress_context,
+        )
 
     return assignments, warnings
 
@@ -2953,7 +3131,7 @@ def _score_sections_openai(
     return scored
 
 
-def _embed_texts(client, texts: list[str], model: str):  # noqa: ANN001
+def _build_embedding_batches(texts: list[str]) -> list[list[str]]:
     if not texts:
         return []
     batches: list[list[str]] = []
@@ -2969,12 +3147,52 @@ def _embed_texts(client, texts: list[str], model: str):  # noqa: ANN001
         current_batch_tokens += estimated_tokens
     if current_batch:
         batches.append(current_batch)
+    return batches
 
+
+def _embed_batches(
+    client,  # noqa: ANN001
+    batches: list[list[str]],
+    model: str,
+    *,
+    progress_callback=None,
+    progress_state: dict[str, int] | None = None,
+    progress_context: dict[str, int] | None = None,
+):
     vectors: list[list[float]] = []
     for batch in batches:
         response = client.embeddings.create(model=model, input=batch)
         vectors.extend(item.embedding for item in response.data)
+        if progress_state is not None:
+            progress_state["current"] = int(progress_state.get("current", 0)) + 1
+            _emit_phase_progress(
+                progress_callback,
+                phase="embedding",
+                progress_current=int(progress_state.get("current", 0)),
+                progress_total=int(progress_state.get("total", 0)),
+                progress_context=progress_context,
+            )
     return vectors
+
+
+def _embed_texts(
+    client,
+    texts: list[str],
+    model: str,
+    *,
+    progress_callback=None,
+    progress_state: dict[str, int] | None = None,
+    progress_context: dict[str, int] | None = None,
+):  # noqa: ANN001
+    batches = _build_embedding_batches(texts)
+    return _embed_batches(
+        client,
+        batches,
+        model,
+        progress_callback=progress_callback,
+        progress_state=progress_state,
+        progress_context=progress_context,
+    )
 
 
 def _vector_cosine(left: list[float], right: list[float]) -> float:

@@ -51,6 +51,7 @@
   const SELECTORS = {
     page1CoursesData: "#page1-courses-data",
     page1CourseDraftsData: "#page1-course-drafts-data",
+    page1DemoCourseHint: "#page1-demo-course-hint, [data-testid='page1-demo-course-hint']",
     courseModal: "#course-modal, [data-testid='course-modal']",
     courseListPanel: "#course-list-panel, [data-testid='course-list-panel']",
     courseDeleteModal: "#course-delete-modal, [data-testid='course-delete-modal']",
@@ -208,6 +209,7 @@
       courseDeleteName: findFirst($(SELECTORS.courseDeleteModal), ["[data-role='course-delete-name']"]),
       courseDeleteFeedback: findFirst($(SELECTORS.courseDeleteModal), ["[data-role='course-delete-feedback']"]),
       courseDeleteConfirmButton: findFirst($(SELECTORS.courseDeleteModal), ["[data-confirm-course-delete]"]),
+      demoCourseHint: $(SELECTORS.page1DemoCourseHint),
     };
 
     state.page1.selectedCourseId = valueOf(refs.selectedCourseId);
@@ -217,6 +219,9 @@
     bindDialog(refs.courseListPanel, SELECTORS.openCourseList, SELECTORS.closeDialogs);
     bindPrepareModal(refs);
     bindCourseDeleteModal(refs);
+    qsa(joinSelectors(SELECTORS.openCourseList)).forEach((button) => {
+      button.addEventListener("click", () => dismissDemoCourseHint(refs));
+    });
 
     if (refs.courseFileInput) {
       refs.courseFileInput.addEventListener("change", () => {
@@ -391,6 +396,7 @@
           return;
         }
         closeSurface(refs.courseListPanel);
+        dismissDemoCourseHint(refs);
         await selectCourse(course, refs);
       });
     }
@@ -713,16 +719,19 @@
         <button type="button" class="course-list-select" data-course-select="${escapeHtml(course.id)}" aria-label="${escapeHtml(course.name)} 선택">
           <div class="course-list-item-head">
             <strong>${escapeHtml(course.name)}</strong>
+            ${course.isDemoSeeded ? '<span class="course-list-badge">데모</span>' : ""}
           </div>
           <span>등록 강사 ${Array.isArray(course.instructor_names) ? course.instructor_names.length : 0}명</span>
           <small>대주제 ${course.sections.length}개</small>
         </button>
+        ${course.isLocked ? "" : `
         <button type="button" class="course-list-delete-button" data-course-delete="${escapeHtml(course.id)}"
           data-course-name="${escapeHtml(course.name)}" aria-label="${escapeHtml(course.name)} 삭제" title="${escapeHtml(course.name)} 삭제">
           <svg viewBox="0 0 24 24" role="img" focusable="false">
             <path d="m7 7 10 10M17 7 7 17" />
           </svg>
         </button>
+        `}
       `;
       target.appendChild(card);
     });
@@ -1119,6 +1128,24 @@
   async function prepareAnalysisSubmission(refs) {
     if (!refs?.analysisForm || state.page1.isPreparingAnalysis) {
       return;
+    }
+    const demoRedirectUrl = selectedDemoCourseRedirectUrl();
+    if (demoRedirectUrl) {
+      state.page1.isPreparingAnalysis = true;
+      setButtonDisabled(refs.submitButton, true);
+      try {
+        showPage1Loading(
+          refs,
+          "준비된 샘플 결과를 여는 중입니다",
+          "심사용으로 미리 준비된 결과 페이지로 이동하고 있습니다. 잠시만 기다려 주세요.",
+        );
+        await waitForNextPaint();
+        window.location.href = demoRedirectUrl;
+        return;
+      } finally {
+        state.page1.isPreparingAnalysis = false;
+        syncPage1State(refs);
+      }
     }
     if (!canSubmitAnalysis()) {
       setStatus(refs.previewState, "과정을 선택하고 강사 1명 이상에게 자료를 연결해 주세요.");
@@ -1934,11 +1961,31 @@
   function normalizeCoursePayload(course) {
     return {
       ...course,
+      isDemoSeeded: Boolean(course?.is_demo_seeded || course?.isDemoSeeded),
+      demoReadyJobId: String(course?.demo_ready_job_id || course?.demoReadyJobId || "").trim(),
+      demoReadyJobUrl: String(course?.demo_ready_job_url || course?.demoReadyJobUrl || "").trim(),
+      isLocked: Boolean(course?.is_locked || course?.isLocked),
       instructor_names: Array.isArray(course?.instructor_names)
         ? course.instructor_names.map((item) => String(item || "").trim()).filter(Boolean)
         : [],
       sections: Array.isArray(course?.sections) ? course.sections : [],
     };
+  }
+
+  function selectedDemoCourseRedirectUrl() {
+    const course = state.page1.selectedCourse;
+    if (!course || !course.isDemoSeeded) {
+      return "";
+    }
+    return String(course.demoReadyJobUrl || "").trim();
+  }
+
+  function dismissDemoCourseHint(refs) {
+    if (!refs?.demoCourseHint) {
+      return;
+    }
+    refs.demoCourseHint.classList.add(CSS.hidden);
+    refs.demoCourseHint.hidden = true;
   }
 
   function page1Refs() {

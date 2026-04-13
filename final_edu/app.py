@@ -26,6 +26,14 @@ from final_edu.courses import (
     preview_course_pdf,
     section_to_dict,
 )
+from final_edu.demo_seed import (
+    DEMO_HINT_TEXT,
+    DEMO_JOB_ID,
+    build_demo_seed_bundle,
+    demo_course_url,
+    ensure_demo_seeded,
+    is_demo_seeded_course,
+)
 from final_edu.jobs import (
     build_upload_key,
     delete_job,
@@ -47,7 +55,7 @@ from final_edu.models import (
     UploadedAsset,
 )
 from final_edu.storage import create_object_storage
-from final_edu.utils import build_safe_storage_name, ensure_kiwi_ready
+from final_edu.utils import build_safe_storage_name
 
 try:
     from openai import OpenAI
@@ -115,19 +123,21 @@ def _static_asset_url(request: Request, path: str) -> str:
     return str(url.include_query_params(v=asset_path.stat().st_mtime_ns))
 
 
-@asynccontextmanager
-async def _app_lifespan(_app: FastAPI):
-    yield
-
-
 def create_app() -> FastAPI:
     settings = get_settings()
     storage = create_object_storage(settings)
     course_repository = create_course_repository(settings, storage)
+
+    @asynccontextmanager
+    async def app_lifespan(_app: FastAPI):
+        if settings.demo_seeding_enabled:
+            _app.state.demo_seed = ensure_demo_seeded(settings, course_repository)
+        yield
+
     app = FastAPI(
         title=settings.app_name,
         description="강의 자료 기반 커리큘럼 커버리지 분석 MVP",
-        lifespan=_app_lifespan,
+        lifespan=app_lifespan,
     )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_ROOT / "static")), name="static")
     templates.env.globals["static_asset_url"] = _static_asset_url
@@ -230,24 +240,26 @@ def create_app() -> FastAPI:
         course_repository.save(record)
         return JSONResponse(
             {
-                "course": _serialize_course(record),
-                "courses": [_serialize_course(item) for item in course_repository.list_all()],
+                "course": _serialize_course(record, settings),
+                "courses": _serialize_courses_for_page1(course_repository.list_all(), settings),
             }
         )
 
     @app.get("/courses", response_class=JSONResponse)
     async def list_courses() -> JSONResponse:
-        return JSONResponse({"courses": [_serialize_course(course) for course in course_repository.list_all()]})
+        return JSONResponse({"courses": _serialize_courses_for_page1(course_repository.list_all(), settings)})
 
     @app.get("/courses/{course_id}", response_class=JSONResponse)
     async def get_course_detail(course_id: str) -> JSONResponse:
         course = course_repository.get(course_id)
         if course is None:
             raise HTTPException(status_code=404, detail="과정을 찾지 못했습니다.")
-        return JSONResponse({"course": _serialize_course(course)})
+        return JSONResponse({"course": _serialize_course(course, settings)})
 
     @app.delete("/courses/{course_id}", response_class=JSONResponse)
     async def delete_course(course_id: str) -> JSONResponse:
+        if settings.demo_seeding_enabled and is_demo_seeded_course(course_id):
+            raise HTTPException(status_code=409, detail="심사용 데모 과정은 삭제할 수 없습니다.")
         course = course_repository.get(course_id)
         if course is None:
             raise HTTPException(status_code=404, detail="과정을 찾지 못했습니다.")
@@ -580,7 +592,7 @@ def _index_context(
     error: str | None = None,
     selected_course: CourseRecord | None = None,
 ) -> dict:
-    serialized_courses = [_serialize_course(course) for course in courses]
+    serialized_courses = _serialize_courses_for_page1(courses, settings)
     recent_job_records = list_recent_jobs(limit=settings.max_saved_jobs, settings=settings)
     return {
         "request": request,
@@ -589,12 +601,14 @@ def _index_context(
         "courses": serialized_courses,
         "courses_json": json.dumps(serialized_courses, ensure_ascii=False),
         "course_restore_drafts_json": json.dumps(
-            _serialize_course_restore_drafts(request, settings, recent_job_records),
+            _serialize_course_restore_drafts(request, settings, _jobs_for_course_restore_drafts(settings, recent_job_records)),
             ensure_ascii=False,
         ),
         "selected_course_id": selected_course.id if selected_course else "",
         "selected_course_name": selected_course.name if selected_course else "",
         "recent_jobs": [_job_card(job, request) for job in recent_job_records],
+        "demo_hint_text": DEMO_HINT_TEXT if settings.demo_seeding_enabled else "",
+        "demo_hint_enabled": settings.demo_seeding_enabled,
     }
 
 
@@ -639,138 +653,24 @@ def _solutions_context(*, request: Request, settings, job: dict, result: dict) -
 
 
 def _demo_context(*, request: Request, settings) -> dict:
-    # Simplified sample data focusing on the Overview
-    sections = [
-        {"id": "python-core", "title": "Python 핵심 문법", "description": "기초 데이터 타입 및 제어 흐름", "target_weight": 15.0},
-        {"id": "data-viz", "title": "데이터 시각화", "description": "Matplotlib 및 Seaborn 실습", "target_weight": 20.0},
-        {"id": "ml-theory", "title": "머신러닝 이론", "description": "지도 학습과 비지도 학습 알고리즘", "target_weight": 20.0},
-        {"id": "deep-learning", "title": "딥러닝 응용", "description": "CNN, RNN 기반 실무 적용", "target_weight": 25.0},
-        {"id": "nlp-basics", "title": "자연어 처리 기초", "description": "텍스트 전처리 및 임베딩 모델", "target_weight": 10.0},
-        {"id": "deployment", "title": "모델 배포/운영", "description": "FastAPI 및 Docker 기반 서빙", "target_weight": 10.0},
-    ]
-    
-    instructor_names = ["전체 평균", "오정훈 강사", "김데이터 강사", "이파이썬 강사"]
-    
-    inst_data = []
-    for i, name in enumerate(instructor_names):
-        # Base values with some variance
-        results = {
-            "python-core": 12 + i * 2,
-            "data-viz": 18 + (i % 3) * 3,
-            "ml-theory": 22 - i * 2,
-            "deep-learning": 20 + (i % 2) * 8,
-            "nlp-basics": 8 + i,
-            "deployment": 15 - i * 3
-        }
-        total = sum(results.values())
-        normalized = {k: round(v * 100 / total, 1) for k, v in results.items()}
-        
-        keywords = [
-            {"text": "Python", "value": 25 - i},
-            {"text": "Pandas", "value": 20 + i},
-            {"text": "TensorFlow", "value": 15 + i*2},
-            {"text": "실무 예제", "value": 30 - i*3},
-            {"text": "수학 원리", "value": 10 + i*4}
-        ]
-        inst_data.append({"name": name, "results": normalized, "keywords": keywords})
-
-    result = {
-        "course_id": "demo-curriculum-2026",
-        "course_name": "2026 실무 인공지능 마스터 클래스",
-        "sections": sections,
-        "instructors": [
-            {
-                "name": inst["name"],
-                "results": [{"section_id": sid, "value": val} for sid, val in inst["results"].items()],
-                "keywords": inst["keywords"]
-            }
-            for inst in inst_data
-        ],
-        "rose_series_by_instructor": {
-            inst["name"]: [{"section_id": sid, "value": val} for sid, val in inst["results"].items()]
-            for inst in inst_data
-        },
-        "rose_series_by_mode": {
-            "combined": {
-                inst["name"]: [{"section_id": sid, "value": val} for sid, val in inst["results"].items()]
-                for inst in inst_data
-            },
-            "material": {
-                inst["name"]: [{"section_id": sid, "value": round(val * 0.75, 1)} for sid, val in inst["results"].items()]
-                for inst in inst_data
-            },
-            "speech": {
-                inst["name"]: [{"section_id": sid, "value": round(val * 0.25, 1)} for sid, val in inst["results"].items()]
-                for inst in inst_data
-            }
-        },
-        "keywords_by_instructor": {
-            inst["name"]: inst["keywords"]
-            for inst in inst_data
-        },
-        "keywords_by_mode": {
-            "combined": {inst["name"]: inst["keywords"] for inst in inst_data},
-            "material": {inst["name"]: inst["keywords"][:3] for inst in inst_data},
-            "speech": {inst["name"]: inst["keywords"][2:] for inst in inst_data}
-        },
-        "average_keywords_by_mode": {
-            "combined": inst_data[0]["keywords"][:5],
-            "material": inst_data[0]["keywords"][:3],
-            "speech": inst_data[0]["keywords"][2:6],
-        },
-        # Necessary for average and comparison visuals even if simplified
-        "mode_series": {
-            "combined": {
-                "average": [
-                    {"section_id": s["id"], "section_title": s["title"], "share": sum(inst["results"][s["id"]] for inst in inst_data) / (len(inst_data) * 100)}
-                    for s in sections
-                ],
-                "instructors": {
-                    inst["name"]: [{"section_id": sid, "share": val / 100} for sid, val in inst["results"].items()]
-                    for inst in inst_data
-                }
-            }
-        },
-        "line_series_by_mode": {
-            "combined": {
-                "target": [{"section_id": s["id"], "share": s["target_weight"] / 100} for s in sections],
-                "instructors": {
-                    inst["name"]: [{"section_id": sid, "share": val / 100} for sid, val in inst["results"].items()]
-                    for inst in inst_data
-                }
-            }
-        },
-        "selected_instructor": "전체 평균",
-        "external_trends_status": "reflected",
-        "insights": [
-            {
-                "title": "딥러닝 강조 수준",
-                "category": "강점",
-                "issue": f"{inst_data[0]['name']}는 딥러닝 응용 부문에서 매우 상세한 커버리지를 보입니다.",
-                "evidence": f"전체 강의의 {inst_data[0]['results']['deep-learning']}%를 딥러닝 실무에 할당함.",
-                "recommendation": "기초 문법 대비 심화 학습 비율이 우수하여 고급 과정으로 적합합니다.",
-                "icon": "spark"
-            }
-        ]
-    }
-
+    bundle = build_demo_seed_bundle()
     return {
         "request": request,
         "settings": settings,
         "job": {
-            "id": "job-demo-full",
-            "course_name": "2026 실무 인공지능 마스터 클래스",
+            "id": bundle.job.id,
+            "course_name": bundle.course.name,
             "status": "completed",
             "status_label": "완료",
-            "section_count": len(sections),
+            "section_count": len(bundle.course.sections),
             "updated_at_label": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "is_active": False,
             "is_failed": False,
             "is_completed": True,
         },
-        "result": result,
-        "result_json": json.dumps(result, ensure_ascii=False),
-        "selected_instructor": inst_data[0]["name"],
+        "result": bundle.result,
+        "result_json": json.dumps(bundle.result, ensure_ascii=False),
+        "selected_instructor": bundle.result["selected_instructor"],
     }
 
 
@@ -895,7 +795,8 @@ def _parse_instructor_manifest(raw: str) -> list[dict]:
     return manifest
 
 
-def _serialize_course(course: CourseRecord) -> dict:
+def _serialize_course(course: CourseRecord, settings) -> dict:  # noqa: ANN001
+    is_demo_seeded = bool(settings.demo_seeding_enabled and is_demo_seeded_course(course.id))
     return {
         "id": course.id,
         "name": course.name,
@@ -905,7 +806,30 @@ def _serialize_course(course: CourseRecord) -> dict:
         "created_at": course.created_at,
         "updated_at": course.updated_at,
         "section_count": len(course.sections),
+        "is_demo_seeded": is_demo_seeded,
+        "demo_ready_job_id": DEMO_JOB_ID if is_demo_seeded else "",
+        "demo_ready_job_url": demo_course_url(DEMO_JOB_ID) if is_demo_seeded else "",
+        "is_locked": is_demo_seeded,
     }
+
+
+def _serialize_courses_for_page1(courses: list[CourseRecord], settings) -> list[dict]:  # noqa: ANN001
+    serialized = [_serialize_course(course, settings) for course in courses]
+    if not settings.demo_seeding_enabled:
+        return serialized
+    demo_courses = [course for course in serialized if course.get("is_demo_seeded")]
+    regular_courses = [course for course in serialized if not course.get("is_demo_seeded")]
+    return demo_courses + regular_courses
+
+
+def _jobs_for_course_restore_drafts(settings, recent_jobs):  # noqa: ANN001
+    jobs = list(recent_jobs)
+    if not settings.demo_seeding_enabled:
+        return jobs
+    demo_job = get_job(DEMO_JOB_ID, settings)
+    if demo_job and all(str(getattr(job, "id", "") or "") != DEMO_JOB_ID for job in jobs):
+        jobs.insert(0, demo_job)
+    return jobs
 
 
 async def _prepare_analysis_request(
@@ -1219,6 +1143,7 @@ def _phase_label(phase: str | None) -> str:
         "playlist_expanding": "재생목록 확장 중",
         "transcript_fetching": "자막 수집 중",
         "chunking": "텍스트 정리 중",
+        "embedding": "임베딩 계산 중",
         "assigning": "커리큘럼 매핑 중",
         "insight_generating": "인사이트 생성 중",
     }

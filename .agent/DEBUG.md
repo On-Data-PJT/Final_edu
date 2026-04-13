@@ -258,6 +258,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/courses.py`, `final_edu/app.py`, `final_edu/storage.py`, `tests/test_course_repository.py`
   Trigger Commands: Render Blueprint sync, redeploy 뒤 과정 목록 확인, `GET /courses`, `POST /courses`
   Must Read When: course repository selection, Render persistence, object-storage key prefix 변경
+- `DBG-054` `active` Lane: `Web / Demo Agent`
+  Tags: `demo`, `seeding`, `render`, `storage`, `page1`, `startup`
+  Related Files: `final_edu/demo_seed.py`, `final_edu/app.py`, `final_edu/static/app.js`, `final_edu/templates/index.html`, `tests/test_page1_restore.py`, `render.yaml`
+  Trigger Commands: Render startup, 심사용 demo smoke test, 강의 목록 popup, `GET /jobs/{job_id}`, `GET /review`, `GET /solution`
+  Must Read When: demo seeding, startup seed job, locked demo course, Page 1 fast-path, `_demo_context` 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1455,3 +1460,55 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - Render처럼 ephemeral filesystem 위에서 재배포가 잦은 환경에서는 user-facing metadata를 local runtime dir에만 저장하지 말 것
   - 이미 object storage를 쓰는 배포에서는 course/job/result처럼 서로 연결된 사용자 상태를 같은 persistence tier로 맞출 것
   - object storage에 새 metadata prefix를 도입할 때는 binary asset prefix(`courses/{id}/curriculum/...`)와 분리해 list/delete 범위를 단순하게 유지할 것
+
+### DBG-053 `active` 분석 overlay progress 가 `0 / N`에 오래 멈춰 보인 것은 assignment/embedding 내부 루프 progress 를 저장하지 않던 설계 때문이었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `progress`, `render`, `overlay`, `jobs`, `embedding`, `assignment`
+- Related Files: `final_edu/analysis.py`, `final_edu/jobs.py`, `final_edu/app.py`, `tests/test_render_runtime.py`
+- Trigger Commands: Page 1 분석 시작 overlay, `GET /jobs/{job_id}/status`, large job 진행률 관찰
+- Must Read When: progress 가 `0 / N`에 멈춤, OpenAI embedding 단계 가시화, small-total progress persistence 조정
+- Symptom:
+  - 실제 분석은 진행 중인데 Page 1 overlay 는 `커리큘럼 매칭 중 · 진행 0 / N`에서 오래 멈춰 있다가, 완료 직전에만 갑자기 결과 화면으로 넘어갔음
+  - 특히 chunk 수가 큰 YouTube/파일 혼합 분석에서 사용자가 “멈췄다”고 오해하기 쉬웠음
+- Root Cause:
+  - non-streaming 경로는 `assigning 0 / len(chunks)` snapshot만 한 번 저장하고, 실제 chunk assignment 루프 안에서는 progress 를 올리지 않았음
+  - OpenAI 경로의 가장 긴 작업인 embedding batch 호출도 별도 phase 없이 `assigning` 안에 숨어 있어, 사용자는 `0 / N` 정지처럼 보였음
+  - `run_analysis_job()`는 `0`, `total`, `5의 배수`, `phase 변경`만 저장해 small-total 단계(`3 / 8`, `4 / 8`)는 더더욱 보이지 않았음
+- Resolution:
+  - OpenAI 경로는 `embedding` phase를 분리하고, embedding batch 완료마다 progress snapshot을 저장하도록 변경했음
+  - lexical/openai assignment 루프는 chunk 처리마다 `assigning current / total`을 올리도록 수정했음
+  - lexical streaming 경로도 source별 chunk 누적 total을 잡고 실제 처리 chunk 수에 따라 `assigning` progress가 증가하도록 보강했음
+  - `run_analysis_job()`는 `progress_total <= 20`이면 모든 증가분을 저장하게 바꿔 작은 단계도 overlay에서 움직이게 했음
+  - `tests.test_render_runtime`에 embedding phase label, openai/lexical/streaming progress, small-total persistence 회귀를 추가했음
+- Prevention Rule:
+  - long-running phase는 시작/종료 snapshot만 보내지 말고, 실제 처리 단위(batch, chunk, item) 기준 progress를 주기적으로 저장할 것
+  - OpenAI embedding 같은 선행 비용이 큰 단계는 `assigning` 안에 숨기지 말고 별도 phase label로 분리할 것
+  - progress persistence throttling 을 둘 때도 `progress_total <= 20`인 small-total 단계는 모든 증가분을 저장해 UI가 정지처럼 보이지 않게 할 것
+
+### DBG-054 `active` Render 심사용 demo를 `_demo_context`만으로 유지하면 Page 1 course list, 실제 storage, 결과 페이지가 서로 다른 상태로 드리프트할 수 있음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `demo`, `seeding`, `render`, `storage`, `page1`, `startup`
+- Related Files: `final_edu/demo_seed.py`, `final_edu/app.py`, `final_edu/static/app.js`, `final_edu/templates/index.html`, `tests/test_page1_restore.py`, `render.yaml`
+- Trigger Commands: Render startup, 심사용 demo smoke test, 강의 목록 popup, `GET /jobs/{job_id}`, `GET /review`, `GET /solution`
+- Must Read When: demo seeding, startup seed job, locked demo course, Page 1 fast-path, `_demo_context` 변경
+- Symptom:
+  - 심사위원에게 보여 줄 샘플은 있었지만, 기존 `_demo_context`는 별도 demo 페이지용 context일 뿐이라 Page 1 강의 목록과 실제 storage/job repository에는 아무것도 심어지지 않았음
+  - 그래서 심사용 course를 강의 목록에서 선택해 바로 review/solution까지 보여 주는 흐름을 만들기 어려웠고, demo 데이터가 실제 결과 페이지 payload와 쉽게 드리프트할 수 있었음
+- Root Cause:
+  - demo narrative가 `_demo_context` 안에만 하드코딩돼 있어 storage-backed course/job/result와 공유되는 단일 source가 없었음
+  - startup 시 실제 course repository, object storage, job repository에 demo course/completed job/result를 보장하는 경로가 없었음
+  - Page 1 `넘어가기`는 일반 prepare/confirm queue 흐름만 알고 있어, 심사용 seeded 결과로 즉시 진입하는 fast-path가 없었음
+- Resolution:
+  - `final_edu/demo_seed.py`를 추가해 demo course, 3명 강사 자산, completed job payload/result, `_demo_context`가 같은 `DemoSeedBundle` builder를 공유하도록 정리했음
+  - `FINAL_EDU_DEMO_SEEDING_ENABLED=true`인 startup은 `ensure_demo_seeded(...)`를 통해 demo course, curriculum PDF, 강사별 자료/VOC asset, completed job payload/result를 object storage와 job repository에 idempotent 하게 시드하도록 변경했음
+  - Page 1 course serialization에 `is_demo_seeded`, `demo_ready_job_id`, `demo_ready_job_url`, `is_locked`를 추가하고, demo course를 목록 최상단에 고정하며 삭제를 `409`로 막았음
+  - 강의 목록 버튼에는 `준비된 샘플로 결과 보기(데모)` 말풍선을 붙이고, demo course 선택 시 3명 강사 lane draft가 자동 복원되며 `넘어가기`는 seeded `/jobs/{job_id}`로 즉시 이동하도록 fast-path를 추가했음
+  - `tests.test_page1_restore`에 demo course pinning/restore, seeded review/solution render, demo delete rejection 회귀를 추가했음
+- Prevention Rule:
+  - 심사용 demo 데이터를 유지할 때는 `_demo_context`와 실제 storage/job seed를 서로 다른 하드코딩 소스로 두지 말고, 하나의 shared builder를 source of truth로 사용할 것
+  - demo course는 일반 사용 데이터와 구분되는 locked metadata를 가져야 하며, course list pinning / delete guard / direct result fast-path를 한 세트로 유지할 것
+  - Render startup 시 idempotent seed가 필요한 기능은 env flag로 명시적으로 켜고, 누락 복구만 수행하도록 만들어 기존 사용자 데이터를 건드리지 않게 할 것

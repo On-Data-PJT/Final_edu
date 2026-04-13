@@ -50,6 +50,8 @@ services:
         value: "25000000"
       - key: FINAL_EDU_YOUTUBE_STT_MONTHLY_MINUTES_BUDGET
         value: "500"
+      - key: FINAL_EDU_DEMO_SEEDING_ENABLED
+        value: "true"
       - key: REDIS_URL
         fromService:
           type: keyvalue
