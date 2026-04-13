@@ -196,11 +196,17 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertIn("review.csv", review_response.text)
         self.assertIn("강의 속도 조절", review_response.text)
         self.assertIn("친절한 설명", review_response.text)
+        self.assertIn('href="/jobs/job123"', review_response.text)
+        self.assertIn('href="/review?job_id=job123"', review_response.text)
+        self.assertIn('href="/solution?job_id=job123"', review_response.text)
 
         self.assertEqual(solution_response.status_code, 200)
         self.assertIn("VOC 기반 인사이트", solution_response.text)
         self.assertIn("강의 속도", solution_response.text)
         self.assertIn("실제 VOC 결과", solution_response.text)
+        self.assertIn('href="/jobs/job123"', solution_response.text)
+        self.assertIn('href="/review?job_id=job123"', solution_response.text)
+        self.assertIn('href="/solution?job_id=job123"', solution_response.text)
 
     def test_analysis_includes_xlsx_voc_by_instructor_and_summary(self) -> None:
         result = _build_result_with_xlsx_voc()

@@ -488,6 +488,7 @@ def create_app() -> FastAPI:
 
         solution_input = _build_solution_payload(result)
         solution_content, generation_mode, generation_warning = _generate_solution_content(solution_input, settings)
+        dashboard_links = _job_dashboard_links(request, job)
 
         return templates.TemplateResponse(
             request,
@@ -496,6 +497,7 @@ def create_app() -> FastAPI:
                 "request": request,
                 "settings": settings,
                 "job": job.to_dict() if job else None,
+                "dashboard_links": dashboard_links,
                 "solution_payload": {
                     **solution_input,
                     "content": solution_content,
@@ -521,10 +523,17 @@ def create_app() -> FastAPI:
                     break
 
         payload = _build_review_payload(result)
+        dashboard_links = _job_dashboard_links(request, job)
         return templates.TemplateResponse(
             request,
             "review.html",
-            {"request": request, "settings": settings, "review_payload": payload},
+            {
+                "request": request,
+                "settings": settings,
+                "job": job.to_dict() if job else None,
+                "dashboard_links": dashboard_links,
+                "review_payload": payload,
+            },
         )
 
     @app.post("/api/evaluate", response_class=JSONResponse)
@@ -1102,6 +1111,32 @@ def _job_card(job, request: Request) -> dict:  # noqa: ANN001
         "expanded_video_count": job.expanded_video_count,
         "section_count": job.section_count,
         "url": request.url_for("job_detail", job_id=job.id),
+    }
+
+
+def _job_dashboard_links(request: Request, job) -> dict[str, str]:  # noqa: ANN001
+    review_url = str(request.app.url_path_for("review_page"))
+    solution_url = str(request.app.url_path_for("solution_page"))
+    if job is None:
+        return {
+            "overview": "/demo",
+            "review": review_url,
+            "solution": solution_url,
+        }
+
+    job_id = str(getattr(job, "id", "") or "").strip()
+    if not job_id:
+        return {
+            "overview": "/demo",
+            "review": review_url,
+            "solution": solution_url,
+        }
+
+    encoded_job_id = quote(job_id, safe="")
+    return {
+        "overview": str(request.app.url_path_for("job_detail", job_id=job_id)),
+        "review": f"{review_url}?job_id={encoded_job_id}",
+        "solution": f"{solution_url}?job_id={encoded_job_id}",
     }
 
 
