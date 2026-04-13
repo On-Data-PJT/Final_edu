@@ -141,7 +141,14 @@ def _build_result_with_xlsx_voc() -> dict:
             settings=settings,
             analysis_mode="lexical",
         )
-        return result.to_dict()
+    return result.to_dict()
+
+
+def _extract_solution_props(html: str) -> dict:
+    marker = '<script id="solution-props" type="application/json">'
+    start = html.index(marker) + len(marker)
+    end = html.index("</script>", start)
+    return json.loads(html[start:end])
 
 
 def _survey_workbook_rows() -> list[list[object]]:
@@ -332,7 +339,7 @@ class VocAnalysisTests(unittest.TestCase):
             )
         ]
 
-        with patch("final_edu.app.OpenAI") as openai_class:
+        with patch("final_edu.solution_content.OpenAI") as openai_class:
             openai_class.return_value.chat.completions.create.return_value = mock_response
             settings = replace(get_settings(), openai_api_key="test-key")
             _generate_solution_content(
@@ -426,6 +433,9 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertTrue(instructor["voc_analysis"]["repeated_complaints"])
         self.assertTrue(result["voc_summary"]["negative"])
         self.assertTrue(result["voc_summary"]["next_suggestions"])
+        self.assertIn("solution_content", result)
+        self.assertIn("trendAnalysis", result["solution_content"])
+        self.assertIn("solution_generation_mode", result)
 
     def test_review_and_solution_pages_render_real_voc_results(self) -> None:
         result = _build_result_with_voc()
@@ -482,6 +492,110 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertIn('href="/jobs/job123"', solution_response.text)
         self.assertIn('href="/review?job_id=job123"', solution_response.text)
         self.assertIn('href="/solution?job_id=job123"', solution_response.text)
+
+    def test_solution_page_uses_precomputed_solution_content_without_regeneration(self) -> None:
+        result = _build_result_with_voc()
+        result["solution_content"] = {
+            "insights": [
+                {"text": "사전 생성 인사이트 1", "numbers": []},
+                {"text": "사전 생성 인사이트 2", "numbers": []},
+                {"text": "사전 생성 인사이트 3", "numbers": []},
+                {"text": "사전 생성 인사이트 4", "numbers": []},
+                {"text": "사전 생성 인사이트 5", "numbers": []},
+            ],
+            "trendAnalysis": [
+                {"title": "사전 생성 동향 1", "detail": "상세 1", "badge": "갭", "comparison": "비교 1"},
+                {"title": "사전 생성 동향 2", "detail": "상세 2", "badge": "일치", "comparison": "비교 2"},
+                {"title": "사전 생성 동향 3", "detail": "상세 3", "badge": "신규", "comparison": "비교 3"},
+            ],
+        }
+        result["solution_generation_mode"] = "precomputed"
+        result["solution_generation_warning"] = None
+        record = AnalysisJobRecord(
+            id="job123",
+            course_id="course-1",
+            course_name="AI 데이터 과정",
+            status="completed",
+            created_at="2026-04-09T10:00:00",
+            updated_at="2026-04-09T10:05:00",
+            created_at_ts=1.0,
+            updated_at_ts=2.0,
+            payload_key="payload.json",
+            result_key="result.json",
+            instructor_names=["오정훈 강사"],
+            instructor_count=1,
+            asset_count=2,
+            youtube_url_count=0,
+            section_count=2,
+            warning_count=0,
+            selected_analysis_mode="lexical",
+        )
+
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            client = TestClient(create_app())
+            with patch("final_edu.app.get_job", return_value=record), patch(
+                "final_edu.app.load_job_result",
+                return_value=result,
+            ), patch("final_edu.app._generate_solution_content") as generate_mock:
+                solution_response = client.get("/solution?job_id=job123")
+            get_settings.cache_clear()
+
+        self.assertEqual(solution_response.status_code, 200)
+        solution_props = _extract_solution_props(solution_response.text)
+        self.assertEqual(solution_props["content"]["trendAnalysis"][0]["title"], "사전 생성 동향 1")
+        generate_mock.assert_not_called()
+
+    def test_solution_page_uses_fallback_without_regeneration_when_stored_content_missing(self) -> None:
+        result = _build_result_with_voc()
+        result.pop("solution_content", None)
+        result.pop("solution_generation_mode", None)
+        result.pop("solution_generation_warning", None)
+        record = AnalysisJobRecord(
+            id="job123",
+            course_id="course-1",
+            course_name="AI 데이터 과정",
+            status="completed",
+            created_at="2026-04-09T10:00:00",
+            updated_at="2026-04-09T10:05:00",
+            created_at_ts=1.0,
+            updated_at_ts=2.0,
+            payload_key="payload.json",
+            result_key="result.json",
+            instructor_names=["오정훈 강사"],
+            instructor_count=1,
+            asset_count=2,
+            youtube_url_count=0,
+            section_count=2,
+            warning_count=0,
+            selected_analysis_mode="lexical",
+        )
+
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            client = TestClient(create_app())
+            with patch("final_edu.app.get_job", return_value=record), patch(
+                "final_edu.app.load_job_result",
+                return_value=result,
+            ), patch("final_edu.app._generate_solution_content") as generate_mock:
+                solution_response = client.get("/solution?job_id=job123")
+            get_settings.cache_clear()
+
+        self.assertEqual(solution_response.status_code, 200)
+        solution_props = _extract_solution_props(solution_response.text)
+        self.assertEqual(
+            solution_props["content"]["trendAnalysis"][0]["title"],
+            "실습·사례 중심 학습 비중 확대 추세",
+        )
+        generate_mock.assert_not_called()
 
     def test_analysis_includes_xlsx_voc_by_instructor_and_summary(self) -> None:
         result = _build_result_with_xlsx_voc()

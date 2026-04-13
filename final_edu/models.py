@@ -167,6 +167,9 @@ class AnalysisRun:
     insights: list[dict] = field(default_factory=list)
     voc_summary: dict = field(default_factory=dict)
     insight_generation_mode: str = "deterministic-fallback"
+    solution_content: dict = field(default_factory=dict)
+    solution_generation_mode: str = "fallback"
+    solution_generation_warning: str | None = None
     external_trends_status: str = "planned"
 
     def to_dict(self) -> dict:

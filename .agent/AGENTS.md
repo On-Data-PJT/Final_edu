@@ -251,12 +251,14 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
     - 결과 렌더는 저장된 course 와 실제 업로드/YouTube 분석 결과만 사용
   - `GET /review`: 강사별 실제 VOC 결과 페이지
   - `GET /solution`: 기존 인사이트 2섹션 + 별도 `VOC 기반 인사이트` 패널 페이지
+    - `solution` route 는 저장된 result 의 `solution_content`를 우선 사용하고, page navigation 중 route-level OpenAI 호출을 하지 않는다
 - 결과 payload contract:
   - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `average_keywords_by_mode`, `line_series_by_mode`, `available_source_modes`, `source_mode_stats`를 사용
   - `keywords_by_mode`와 `keywords_by_instructor`는 공개 UI용 실제 강사 keyword list만 담고, off-curriculum/debug keyword는 별도 내부 경로로 분리한다
   - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
   - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있고, survey workbook 이면 `voc_analysis.question_scores`가 함께 들어갈 수 있다
   - top-level 결과에는 `voc_summary`가 포함될 수 있고, aggregate 된 `voc_summary.question_scores`가 함께 들어갈 수 있다
+  - top-level 결과에는 `solution_content`, `solution_generation_mode`, `solution_generation_warning`가 포함될 수 있고, `/solution`은 이를 precomputed trend payload 로 사용한다
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
   - lexical fallback 은 `kiwipiepy` 기반 tokenization + section title 사용자 사전을 사용한다
@@ -265,6 +267,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - speech section assignment 는 section `title + description`에서 generic fragment anchor 를 만들고, 제목 rescue 는 exact/normalized fragment match 와 bounded chapter index 만 보조 신호로 쓴다
   - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
   - 솔루션 인사이트와 VOC 분석은 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback
+  - `solution_content`는 분석 완료 시점 또는 demo seeding 시점에 미리 생성하고 저장하며, `/solution` route 에서는 재생성하지 않는다
   - 현재 기본 insight model 은 `gpt-5.4-mini`
 - 환경 변수 로딩: 로컬 실행 시 저장소 루트 `.env`를 자동 로드하고, 이미 export 된 환경 변수가 있으면 그 값을 우선 사용
 - YouTube throttle / cache env:

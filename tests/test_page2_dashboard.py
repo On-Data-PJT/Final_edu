@@ -28,6 +28,7 @@ from final_edu.analysis import (
 )
 from final_edu.app import create_app
 from final_edu.config import get_settings
+from final_edu.demo_seed import build_demo_seed_bundle
 from final_edu.models import (
     AnalysisJobRecord,
     CurriculumSection,
@@ -491,6 +492,45 @@ class Page2DashboardTests(unittest.TestCase):
                 result["average_keywords_by_mode"][mode],
                 result["keywords_by_mode"][mode]["강사 A"],
             )
+
+    def test_demo_seed_emphasizes_gaps_and_wordcloud_variety(self) -> None:
+        result = build_demo_seed_bundle().result
+        targets = {section["id"]: float(section["target_weight"]) for section in result["sections"]}
+        average_rows = result["mode_series"]["combined"]["average"]
+        average_gaps = [
+            abs(round(float(item["share"]) * 100, 1) - targets[item["section_id"]])
+            for item in average_rows
+        ]
+
+        self.assertGreaterEqual(len([gap for gap in average_gaps if gap >= 4.0]), 3)
+
+        strongest_total_gap = 0.0
+        widest_section_spread = 0.0
+        for section in result["sections"]:
+            values = []
+            for instructor in result["instructors"]:
+                for coverage in instructor["section_coverages"]:
+                    if coverage["section_id"] != section["id"]:
+                        continue
+                    actual = round(float(coverage["token_share"]) * 100, 1)
+                    values.append(actual)
+            if values:
+                widest_section_spread = max(widest_section_spread, max(values) - min(values))
+
+        for instructor in result["instructors"]:
+            gaps = sorted(
+                [
+                    abs(round(float(coverage["token_share"]) * 100, 1) - targets[coverage["section_id"]])
+                    for coverage in instructor["section_coverages"]
+                ],
+                reverse=True,
+            )
+            strongest_total_gap = max(strongest_total_gap, round(sum(gaps[:4]), 1))
+
+        self.assertGreaterEqual(strongest_total_gap, 40.0)
+        self.assertGreaterEqual(widest_section_spread, 10.0)
+        self.assertGreaterEqual(len(result["keywords_by_mode"]["combined"]["박강사"]), 16)
+        self.assertGreaterEqual(len(result["average_keywords_by_mode"]["combined"]), 24)
 
     def test_keyword_tokenizer_filters_low_signal_terms_but_keeps_english_terms(self) -> None:
         tokens = tokenize_keywords("다음 생각 모양 SQL SVM 데이터 2026 강의 자료")
@@ -1257,11 +1297,19 @@ class Page2DashboardTests(unittest.TestCase):
         self.assertIn("강사별 커리큘럼 구성 비중", response.text)
         self.assertIn("직접 연결된", response.text)
         self.assertIn("전체 주요 수업 키워드", response.text)
+        self.assertIn("sizeRange: [14, 40]", response.text)
+        self.assertIn("gridSize: 6", response.text)
+        self.assertIn("emphasis: { focus: 'series' }", response.text)
         self.assertIn("Study Labs Dashboard", response.text)
         self.assertIn("VOC Analysis", response.text)
         self.assertIn("강사 A", response.text)
         self.assertNotIn("오정훈 강사", response.text)
         self.assertNotIn("name: '미분류'", response.text)
+        comparison_panel_index = response.text.index("강사 커리큘럼 구성 비교")
+        legend_index = response.text.index('id="comparisonLegend"')
+        average_subtitle_index = response.text.index("강사 평균 커리큘럼 구성 비중")
+        self.assertGreater(legend_index, comparison_panel_index)
+        self.assertLess(legend_index, average_subtitle_index)
 
 
 if __name__ == "__main__":

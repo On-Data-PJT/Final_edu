@@ -27,6 +27,7 @@ from final_edu.models import (
     RawTextSegment,
     SectionCoverage,
 )
+from final_edu.solution_content import build_solution_payload, generate_solution_content
 from final_edu.storage import ObjectStorage
 from final_edu.youtube_cache import (
     YOUTUBE_REQUEST_LIMIT_ERROR_MESSAGE,
@@ -1282,14 +1283,23 @@ def analyze_submissions(
     )
     warnings.extend(insight_warnings)
 
+    attached_summaries = _attach_voc_to_summaries(
+        summaries=summaries,
+        submissions=active_submissions,
+        voc_analyses_by_instructor=voc_analyses_by_instructor,
+    )
+    solution_content, solution_generation_mode, solution_generation_warning, external_trends_status = (
+        _build_precomputed_solution_fields(
+            sections=normalized_sections,
+            summaries=attached_summaries,
+            voc_summary=voc_summary,
+            settings=settings,
+        )
+    )
     duration_ms = int((time.perf_counter() - started) * 1000)
     return AnalysisRun(
         sections=normalized_sections,
-        instructors=_attach_voc_to_summaries(
-            summaries=summaries,
-            submissions=active_submissions,
-            voc_analyses_by_instructor=voc_analyses_by_instructor,
-        ),
+        instructors=attached_summaries,
         warnings=_dedupe_messages(warnings),
         scorer_mode=scorer_mode,
         duration_ms=duration_ms,
@@ -1320,7 +1330,10 @@ def analyze_submissions(
         insights=insights,
         voc_summary=voc_summary,
         insight_generation_mode=insight_generation_mode,
-        external_trends_status="planned",
+        solution_content=solution_content,
+        solution_generation_mode=solution_generation_mode,
+        solution_generation_warning=solution_generation_warning,
+        external_trends_status=external_trends_status,
     )
 
 
@@ -1542,14 +1555,23 @@ def _analyze_submissions_lexical_streaming(
         settings=replace(settings, openai_api_key=None),
     )
     warnings.extend(insight_warnings)
+    attached_summaries = _attach_voc_to_summaries(
+        summaries=summaries,
+        submissions=submissions,
+        voc_analyses_by_instructor=voc_analyses_by_instructor or {},
+    )
+    solution_content, solution_generation_mode, solution_generation_warning, external_trends_status = (
+        _build_precomputed_solution_fields(
+            sections=sections,
+            summaries=attached_summaries,
+            voc_summary=voc_summary or {},
+            settings=settings,
+        )
+    )
     duration_ms = int((time.perf_counter() - started) * 1000)
     return AnalysisRun(
         sections=sections,
-        instructors=_attach_voc_to_summaries(
-            summaries=summaries,
-            submissions=submissions,
-            voc_analyses_by_instructor=voc_analyses_by_instructor or {},
-        ),
+        instructors=attached_summaries,
         warnings=_dedupe_messages(warnings),
         scorer_mode="lexical-streaming",
         duration_ms=duration_ms,
@@ -1580,7 +1602,10 @@ def _analyze_submissions_lexical_streaming(
         insights=insights,
         voc_summary=voc_summary or {},
         insight_generation_mode=insight_generation_mode,
-        external_trends_status="planned",
+        solution_content=solution_content,
+        solution_generation_mode=solution_generation_mode,
+        solution_generation_warning=solution_generation_warning,
+        external_trends_status=external_trends_status,
     )
 
 
@@ -1711,6 +1736,14 @@ def _build_voc_only_run(
     keywords_by_mode = _empty_keywords_by_mode(submissions)
     average_keywords_by_mode = _empty_average_keywords_by_mode()
     duration_ms = int((time.perf_counter() - started) * 1000)
+    solution_content, solution_generation_mode, solution_generation_warning, external_trends_status = (
+        _build_precomputed_solution_fields(
+            sections=sections,
+            summaries=summaries,
+            voc_summary=voc_summary,
+            settings=settings,
+        )
+    )
     return AnalysisRun(
         sections=sections,
         instructors=summaries,
@@ -1746,7 +1779,10 @@ def _build_voc_only_run(
         insights=[],
         voc_summary=voc_summary,
         insight_generation_mode="deterministic-fallback",
-        external_trends_status="planned",
+        solution_content=solution_content,
+        solution_generation_mode=solution_generation_mode,
+        solution_generation_warning=solution_generation_warning,
+        external_trends_status=external_trends_status,
     )
 
 
@@ -3726,3 +3762,34 @@ def _rebalance_last_weight(sections: list[CurriculumSection], running_total: flo
         return
     total = running_total if running_total is not None else sum(section.target_weight for section in sections)
     sections[-1].target_weight = round(sections[-1].target_weight + (100 - total), 2)
+def _build_precomputed_solution_fields(
+    *,
+    sections: list[CurriculumSection],
+    summaries: list[InstructorSummary],
+    voc_summary: dict,
+    settings: Settings,
+) -> tuple[dict, str, str | None, str]:
+    result_like = {
+        "sections": [
+            {
+                "id": section.id,
+                "title": section.title,
+                "description": section.description,
+                "target_weight": section.target_weight,
+            }
+            for section in sections
+        ],
+        "instructors": summaries,
+        "voc_summary": voc_summary,
+    }
+    solution_payload = build_solution_payload(result_like)
+    solution_content, solution_generation_mode, solution_generation_warning = generate_solution_content(
+        solution_payload,
+        settings,
+    )
+    return (
+        solution_content,
+        solution_generation_mode,
+        solution_generation_warning,
+        "reflected" if solution_content else "planned",
+    )

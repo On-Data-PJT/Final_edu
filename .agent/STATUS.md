@@ -59,16 +59,18 @@ Last Updated: 2026-04-13
 - `mapped_tokens / total_tokens`가 낮은 mode 는 coverage note 를 함께 보여 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 한다.
 - speech coverage note 는 도넛 의미를 바꾸지 않고, `전체 발화 중 ...만 비중 계산에 사용되었습니다`처럼 제외된 발화가 있다는 사실만 상단에서 설명한다.
 - `강사 평균 커리큘럼 구성 비중` hover 는 `목표 / 평균 / 강사별 비중`을 함께 보여주는 compact breakdown card 여야 한다.
-- `강사별 커리큘럼 구성 비교`의 범례는 차트 내부 legend 대신 제목 바로 아래 HTML legend row 로 배치한다.
+- `강사 평균 커리큘럼 구성 비중` hover/emphasis 는 하단 stacked bar 와 같은 series-focus 방식으로, hover 한 색상만 강조되게 유지한다.
+- `강사별 커리큘럼 구성 비교`의 범례는 패널 제목 바로 아래, 첫 번째 subtitle 위 HTML legend row 로 배치한다.
   - 영상 제목과 transcript 주제가 크게 어긋나면 non-blocking warning 을 남겨 explainability 를 보강한다.
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
   - `GET /review`는 강사별 실제 VOC 결과 페이지다.
   - 강사별 `voc_analysis`를 사용해 파일 메타, 문항별 평균 점수, 감성 키워드, 반복 불만 패턴, 개선 포인트를 렌더한다.
 - `Page 4 / Solution`
-  - `GET /solution`은 기존 `분석 결과 기반 인사이트`, `최신 업계 동향 분석` 2섹션을 유지한다.
-  - solution gap/benchmark 비교는 강사 평균 actual share 가 아니라 과정의 `target_weight`를 기준으로 계산한다.
-  - `강사별 갭 현황` 카피는 `강사별 표준커리큘럼 준수도` 기준 문구로 정리되어 있다.
+- `GET /solution`은 기존 `분석 결과 기반 인사이트`, `최신 업계 동향 분석` 2섹션을 유지한다.
+- solution gap/benchmark 비교는 강사 평균 actual share 가 아니라 과정의 `target_weight`를 기준으로 계산한다.
+- `강사별 갭 현황` 카피는 `강사별 표준커리큘럼 준수도` 기준 문구로 정리되어 있다.
+- `/solution`은 저장된 result 의 `solution_content`를 우선 사용하며, `Overview`/`VOC Analysis`에서 넘어갈 때 route-level OpenAI 호출 없이 즉시 열려야 한다.
 - 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`의 전체 문항 평균 점수와 자유의견 요약을 함께 렌더한다.
 - `VOC 기반 인사이트`의 반복 피드백은 `N건` count row 로 누적해서 보여주고, 다음 개선 액션은 `HIGH/MEDIUM/LOW` badge 없이 action row 로 보여준다.
   - legacy `/jiye` 실험 페이지와 `/jobs/{job_id}/solutions` 별도 solutions 페이지는 제거되고, 메인 결과 흐름은 `/jobs/{job_id}` → `/review` → `/solution`만 유지한다.
@@ -76,6 +78,7 @@ Last Updated: 2026-04-13
 ## Backend Contract
 
 - `dev` UI/레이아웃/라우트는 유지하고, `lexical`의 백엔드를 이식한 상태다.
+- top-level 결과 payload 는 `solution_content`, `solution_generation_mode`, `solution_generation_warning`를 저장할 수 있고, `/solution` route 는 이를 재사용한다.
 - 과정 preview/save 계약은 `preview decision`이 아니라 최종 `sections_json` 유효성 기준으로 저장 가능 여부를 판단한다.
 - YouTube 처리 계약:
   - 명시적 `playlist?list=...`만 playlist 로 확장한다.
@@ -262,12 +265,12 @@ Last Updated: 2026-04-13
 
 - 현재 작업 브랜치는 `main`이다.
 - 현재 구현은 `dev` UI 유지 + `lexical` 백엔드 이식 + 실제 VOC 분석 연결 상태를 기준으로 한다.
-- 현재 작업 트리에는 demo seeded 결과 화면 polish와 seeded VOC/keyword 확장 관련 미커밋 변경이 남아 있다.
+- 이 round의 핵심 변경 범위는 `/solution` precompute 경로, demo seeded contrast 강화, Page 2 comparison legend/hover polish다.
 - `.codex/config.toml`은 로컬 Codex 실행 설정으로 취급하며 저장소 커밋 대상이 아니다.
 
 ## Consulted DEBUG IDs
 
-- `DBG-031`, `DBG-033`, `DBG-040`, `DBG-054`
+- `DBG-031`, `DBG-033`, `DBG-040`, `DBG-054`, `DBG-055`, `DBG-056`
 
 ## Recent Updates
 
@@ -303,6 +306,12 @@ Last Updated: 2026-04-13
 - 과정 목록 삭제 버튼이 `svg/path`를 직접 클릭하면 delegated click handler의 `HTMLElement` guard 때문에 첫 클릭이 무시되던 회귀를 잡고, `Element` 기준 target 정규화와 40px hit area로 first-click 반응성을 복구했다.
 
 ### 2026-04-13
+
+- `/solution`은 더 이상 route-level OpenAI 생성에 의존하지 않고, 분석 완료 시점 또는 demo seed 시점에 저장된 `solution_content`를 우선 읽도록 바꿨다.
+- top-level 결과 payload 에 `solution_content`, `solution_generation_mode`, `solution_generation_warning`를 추가하고, legacy 결과는 route에서 즉시 deterministic fallback 으로 렌더하도록 정리했다.
+- demo seeded target/course share 를 `Python 20 / 데이터 분석 16 / 머신러닝 24 / 딥러닝 16 / NLP 14 / 배포 10` 기준으로 다시 벌려 강사별 편차와 목표 대비 차이가 더 분명히 읽히게 조정했다.
+- demo seeded word cloud keyword pool 은 강사별 `16개` 수준, 전체 평균은 `28개` 수준으로 확장해 박강사/전체 평균 cloud 가 빈약해 보이지 않도록 보강했다.
+- Page 2 comparison 패널 범례를 패널 제목 아래, 첫 subtitle 위로 이동했고 평균 stacked bar hover 도 하단 stacked bar 와 같은 series-focus 강조로 맞췄다.
 
 - `README.md`, base/index/job/demo 템플릿 title, CLI 설명 문자열에 남아 있던 `Final Edu` 사용자 노출 브랜딩을 `Study Labs`로 통일했다.
 - 패키지명 `final_edu`, env var `FINAL_EDU_*`, Render 서비스명 같은 런타임 식별자는 호환성을 위해 유지했다.

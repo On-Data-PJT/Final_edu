@@ -263,6 +263,16 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/demo_seed.py`, `final_edu/app.py`, `final_edu/static/app.js`, `final_edu/templates/index.html`, `tests/test_page1_restore.py`, `render.yaml`
   Trigger Commands: Render startup, 심사용 demo smoke test, 강의 목록 popup, `GET /jobs/{job_id}`, `GET /review`, `GET /solution`
   Must Read When: demo seeding, startup seed job, locked demo course, Page 1 fast-path, `_demo_context` 변경
+- `DBG-055` `active` Lane: `Web / Demo Agent`
+  Tags: `page2`, `demo`, `legend`, `tooltip`, `wordcloud`, `voc`
+  Related Files: `final_edu/templates/job.html`, `final_edu/templates/solution.html`, `final_edu/demo_seed.py`, `tests/test_page1_restore.py`, `tests/test_page2_dashboard.py`
+  Trigger Commands: `/jobs/{demo_job_id}`, `/review?job_id=...`, `/solution?job_id=...`, 심사용 seeded demo 결과 확인
+  Must Read When: seeded result payload 필드, Page 2 comparison legend/tooltip, demo keyword/VOC 콘텐츠를 바꿀 때
+- `DBG-056` `active` Lane: `Lead / Integration`
+  Tags: `solution`, `latency`, `openai`, `precompute`, `demo`
+  Related Files: `final_edu/analysis.py`, `final_edu/app.py`, `final_edu/solution_content.py`, `final_edu/demo_seed.py`, `tests/test_voc_analysis.py`
+  Trigger Commands: `GET /solution`, `Overview -> Insight`, `VOC Analysis -> Insight`, demo seeded `/solution`
+  Must Read When: solution navigation latency, route-level OpenAI 제거, precomputed trend payload, seeded solution contrast 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1541,3 +1551,29 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - dense stacked-bar panel 에서는 ECharts 내장 legend 보다 HTML legend row 를 우선 검토해 차트 영역과 겹치지 않게 할 것
   - 심사용 demo seed는 최소 shell 이 아니라 실제 카드/word cloud/tooltip이 충분히 풍부해 보일 만큼 keyword/VOC copy 를 채워 둘 것
   - solution VOC 영역에서 `repeated_complaints`와 `next_suggestions`를 동시에 보여줄 때는 priority badge 가 count row hierarchy 를 압도하지 않도록 count row와 action row를 분리해 렌더할 것
+
+### DBG-056 `active` `/solution`에서 route-level OpenAI 생성이 남아 있으면 `Overview/VOC Analysis -> Insight` 이동이 느려지고 demo/실결과 모두 navigation 체감이 무거워짐
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `solution`, `latency`, `openai`, `precompute`, `demo`
+- Related Files: `final_edu/analysis.py`, `final_edu/app.py`, `final_edu/solution_content.py`, `final_edu/demo_seed.py`, `tests/test_voc_analysis.py`
+- Trigger Commands: `GET /solution`, `Overview -> Insight`, `VOC Analysis -> Insight`, demo seeded `/solution`
+- Must Read When: solution navigation latency, route-level OpenAI 제거, precomputed trend payload, seeded solution contrast 변경
+- Symptom:
+  - `Overview`나 `VOC Analysis`에서 `Insight`로 이동할 때 페이지가 오래 비거나 멈춘 것처럼 보여 심사용 흐름이 끊겼음
+  - 특히 배포 환경에서 `OPENAI_API_KEY`가 켜져 있으면 `GET /solution` 진입마다 OpenAI 응답을 다시 기다리게 되어 navigation latency가 그대로 노출됐음
+  - demo seeded 결과는 수치 편차와 word cloud 밀도가 약해 인사이트 카드가 눈에 띄지 않았음
+- Root Cause:
+  - `/solution` route 가 저장된 result를 읽은 뒤에도 `_generate_solution_content()`를 매번 다시 호출해 trend payload를 재생성하고 있었음
+  - solution/trend 생성 로직이 analysis 단계가 아니라 route 단계에 남아 있어, result page navigation 에 네트워크 비용이 끼어들었음
+  - demo seeded course의 target/share/keyword seed가 비교용 데모치고는 너무 평평해 `강사별 편차`와 `목표 대비 차이`가 약하게 읽혔음
+- Resolution:
+  - top-level result payload 에 `solution_content`, `solution_generation_mode`, `solution_generation_warning`를 추가하고, analysis 완료 시점과 demo seeding 시점에 미리 저장하도록 변경했음
+  - `/solution` route 는 저장된 `solution_content`를 우선 사용하고, legacy result에는 route-level OpenAI 호출 없이 즉시 deterministic fallback 을 사용하도록 정리했음
+  - demo seeded target/share를 더 과감한 편차 구조로 재설계하고, 강사별/평균 word cloud keyword pool 도 확장해 인사이트 카드와 word cloud 의 대비를 높였음
+  - `tests.test_voc_analysis`에 stored-content/no-stored-content 모두 `_generate_solution_content()`를 다시 부르지 않는 회귀를 추가했음
+- Prevention Rule:
+  - page navigation route(`GET /solution` 같은 결과 페이지)는 network LLM 호출을 직접 수행하지 말고, analysis 완료 시점에 precompute 한 payload 를 읽기만 할 것
+  - 결과 payload contract에 precomputed text field를 추가할 때는 generation mode/warning 도 함께 저장해 legacy/fallback 판별을 단순하게 유지할 것
+  - 심사용 demo seed는 단순 shell 이 아니라 `gap`, `spread`, `keyword density`가 카드와 chart에서 즉시 읽힐 정도의 contrast 를 가져야 할 것

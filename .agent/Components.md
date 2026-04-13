@@ -27,6 +27,7 @@ Last Updated: 2026-04-13
   - `line_series_by_mode`
   - `available_source_modes`
   - `source_mode_stats`
+- Page 4는 실제 결과 JSON의 `solution_content`, `solution_generation_mode`, `solution_generation_warning`, `voc_summary`를 사용할 수 있어야 한다.
 - 강사별 VOC 페이지는 강사별 `voc_analysis`를 실제 결과 JSON에서 받아 쓴다.
 - 솔루션 페이지는 기존 insight/trend payload와 별도로 공통 `voc_summary`를 실제 결과 JSON에서 받아 쓴다.
 - 특정 mode 데이터가 비어 있으면 해당 mode 기준 empty 상태를 보여주고 다른 mode 결과로 치환하지 않는다.
@@ -234,7 +235,8 @@ Last Updated: 2026-04-13
 - 중간 divider 로만 구분하고 패널 수를 늘리지 않는다.
 - 두 차트 모두 Panel 1의 `view mode`를 그대로 따라야 한다.
 - `강사 평균 커리큘럼 구성 비중` hover 는 단일 퍼센트만이 아니라 `목표 / 평균 / 강사별 비중`을 함께 보여주는 compact breakdown card 여야 한다.
-- `강사별 커리큘럼 구성 비교`의 범례는 ECharts 내부 legend 대신 제목 바로 아래의 HTML legend row 로 배치해 차트 영역과 겹치지 않게 유지한다.
+- `강사 평균 커리큘럼 구성 비중` hover/emphasis 는 하단 stacked bar 와 같은 series-focus 방식으로, hover 한 색상만 강조되는 읽기여야 한다.
+- `강사별 커리큘럼 구성 비교`의 범례는 ECharts 내부 legend 대신 패널 제목 바로 아래, 첫 번째 subtitle 위의 HTML legend row 로 배치해 차트 영역과 겹치지 않게 유지한다.
 
 ### Panel 4. Goal Comparison
 
@@ -284,6 +286,7 @@ Last Updated: 2026-04-13
 
 - 이 페이지는 첫 번째 결과 페이지의 지표를 바탕으로 도출 가능한 **순수 인사이트**만 보여주는 페이지다.
 - 차트를 반복하지 않고 사람이 바로 읽을 수 있는 개선 포인트 카드 중심으로 구성한다.
+- `Overview`나 `VOC Analysis`에서 넘어올 때는 즉시 열려야 하며, route-level 생성 지연 없이 저장된 `solution_content`를 우선 사용해야 한다.
 
 ### Layout
 
