@@ -18,6 +18,7 @@ class Settings:
     openai_embedding_model: str
     openai_insight_model: str
     openai_curriculum_model: str
+    kiwi_model_path: str | None
     max_sections: int
     max_instructors: int
     max_upload_bytes: int
@@ -135,6 +136,7 @@ def get_settings() -> Settings:
     }
     youtube_scraperapi_max_cost_raw = os.getenv("FINAL_EDU_YOUTUBE_SCRAPERAPI_MAX_COST", "").strip()
     youtube_scraperapi_max_cost = int(youtube_scraperapi_max_cost_raw) if youtube_scraperapi_max_cost_raw else None
+    kiwi_model_path = os.getenv("FINAL_EDU_KIWI_MODEL_PATH", "").strip() or None
     return Settings(
         app_name="Final Edu",
         host=os.getenv("FINAL_EDU_HOST", "127.0.0.1"),
@@ -146,6 +148,7 @@ def get_settings() -> Settings:
         ),
         openai_insight_model=os.getenv("OPENAI_INSIGHT_MODEL", "gpt-5.4-mini"),
         openai_curriculum_model=os.getenv("OPENAI_CURRICULUM_MODEL", "gpt-5.4-mini"),
+        kiwi_model_path=kiwi_model_path,
         max_sections=8,
         max_instructors=3,
         max_upload_bytes=max_upload_mb * 1024 * 1024,

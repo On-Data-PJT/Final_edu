@@ -393,6 +393,63 @@
         margin-bottom: 12px;
     }
 
+    .voc-score-groups {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+
+    .voc-score-group {
+        border-radius: 16px;
+        padding: 16px 18px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+
+    .voc-score-group-title {
+        font-size: 12px;
+        font-weight: 800;
+        color: #166534;
+        margin-bottom: 10px;
+        letter-spacing: 0.04em;
+    }
+
+    .voc-score-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .voc-score-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+    }
+
+    .voc-score-label {
+        font-size: 13px;
+        color: #334155;
+        line-height: 1.55;
+    }
+
+    .voc-score-value {
+        flex-shrink: 0;
+        text-align: right;
+    }
+
+    .voc-score-main {
+        font-size: 14px;
+        font-weight: 800;
+        color: #166534;
+    }
+
+    .voc-score-meta {
+        margin-top: 2px;
+        font-size: 11px;
+        color: #94a3b8;
+    }
+
     .voc-chips {
         display: flex;
         flex-wrap: wrap;
@@ -574,7 +631,7 @@
                     <p class="panel-subtitle">강사별 평가서에서 반복된 피드백을 묶어 공통 개선 포인트를 정리했습니다.</p>
                 </div>
                 <span class="source-badge">
-                    {% if solution_payload.voc_summary and (solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
+                    {% if solution_payload.voc_summary and (solution_payload.voc_summary.question_score_groups or solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
                     실제 VOC 결과
                     {% else %}
                     대기 중
@@ -582,7 +639,27 @@
                 </span>
             </div>
 
-            {% if solution_payload.voc_summary and (solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
+            {% if solution_payload.voc_summary and (solution_payload.voc_summary.question_score_groups or solution_payload.voc_summary.positive or solution_payload.voc_summary.negative or solution_payload.voc_summary.repeated_complaints or solution_payload.voc_summary.next_suggestions) %}
+            {% if solution_payload.voc_summary.question_score_groups %}
+            <div class="voc-score-groups">
+                {% for group in solution_payload.voc_summary.question_score_groups %}
+                <div class="voc-score-group">
+                    <div class="voc-score-group-title">{{ group.group }} 평균 점수</div>
+                    <div class="voc-score-list">
+                        {% for item in group.entries %}
+                        <div class="voc-score-row">
+                            <div class="voc-score-label">{{ item.label }}</div>
+                            <div class="voc-score-value">
+                                <div class="voc-score-main">{{ "%.2f"|format(item.average) }} / {{ item.scale_max }}</div>
+                                <div class="voc-score-meta">응답 {{ item.response_count }}명</div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="voc-grid">
                 <div class="voc-box">
                     <div class="voc-box-label">공통 긍정 피드백</div>

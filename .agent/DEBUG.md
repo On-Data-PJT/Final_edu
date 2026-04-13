@@ -228,6 +228,16 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/courses.py`, `final_edu/static/app.js`, `tests/test_course_preview.py`
   Trigger Commands: `POST /courses/preview`, 과정 추가 popup 저장
   Must Read When: 커리큘럼 preview 비중 산출 기준, preview weight input step, chapter roadmap parser 변경
+- `DBG-043` `active` Lane: `Lead / Integration`
+  Tags: `voc`, `excel`, `survey-matrix`, `question-scores`, `review`, `solution`
+  Related Files: `final_edu/extractors.py`, `final_edu/analysis.py`, `final_edu/app.py`, `final_edu/templates/review.html`, `final_edu/templates/solution.html`, `tests/test_voc_analysis.py`, `tests/test_page1_restore.py`
+  Trigger Commands: `POST /analyze/prepare`, survey형 VOC Excel 업로드, `GET /review`, `GET /solution`
+  Must Read When: survey workbook VOC 지원, `BQ` 점수 집계, Review/Solution VOC score 렌더 계약 변경
+- `DBG-044` `active` Lane: `Lead / Integration`
+  Tags: `kiwi`, `windows`, `startup`, `non-ascii-path`, `config`
+  Related Files: `final_edu/config.py`, `final_edu/utils.py`, `final_edu/app.py`, `final_edu/worker.py`, `tests/test_voc_analysis.py`
+  Trigger Commands: `uv run python -m final_edu --reload`, `uv run python -m final_edu.worker`, 자료 업로드 후 lexical 분석
+  Must Read When: `Kiwi` 초기화, startup dependency check, Windows/한글 경로 workaround, 분석이 무한 대기처럼 보이는 환경 의존 오류를 조사할 때
 
 ## Active Incidents
 
@@ -1155,3 +1165,49 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - auto-filled preview number input 의 정밀도와 HTML step/min contract 를 반드시 같이 바꿀 것
   - 같은 문서에서 `%`, `총 강수`, `주차` 등 weight evidence 가 여러 개 보이면 canonical precedence 를 먼저 고정하고 OpenAI 결과를 그대로 노출하지 말 것
   - chapter roadmap 같은 반복 가능한 문서 형식은 OpenAI에게 weight 근거를 맡기지 말고 deterministic local parser 를 우선 사용할 것
+
+### DBG-043 `active` survey형 VOC Excel 은 숫자 비중이 높아 기존 text-rich sheet validator 에서 거부되고, question score 결과도 어디에도 저장되지 않았음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `voc`, `excel`, `survey-matrix`, `question-scores`, `review`, `solution`
+- Related Files: `final_edu/extractors.py`, `final_edu/analysis.py`, `final_edu/app.py`, `final_edu/templates/review.html`, `final_edu/templates/solution.html`, `tests/test_voc_analysis.py`, `tests/test_page1_restore.py`
+- Trigger Commands: `POST /analyze/prepare`, survey형 VOC Excel 업로드, `GET /review`, `GET /solution`
+- Must Read When: survey workbook VOC 지원, `BQ` 점수 집계, Review/Solution VOC score 렌더 계약 변경
+- Symptom:
+  - `rawdata` 시트처럼 `BQ 점수 열 + 기타 의견 열`이 함께 있는 만족도 조사 workbook 이 prepare 단계에서 `엑셀 구조가 모호합니다`로 거부됐음
+  - 설령 업로드가 통과해도 기존 VOC 결과 schema 에는 `문항별 평균 점수`가 없어 Review/Insight 어디에도 점수 결과를 표시할 수 없었음
+- Root Cause:
+  - 기존 workbook scorer 는 `text-rich response sheet`만 VOC 시트로 인정했고, 숫자형 평점 열이 대부분인 survey matrix sheet 는 `numeric_ratio` 때문에 탈락했음
+  - VOC extractor/analysis/result payload 는 자유의견 row text만 다뤘고, `BQ` 같은 구조화된 설문 점수 집계를 보관할 필드가 없었음
+- Resolution:
+  - VOC spreadsheet 경로를 `text-rich response sheet`와 `survey matrix sheet`로 분리하고, multi-row header collapse 로 `BQ` 평점 문항과 `기타 의견` 열을 동시에 추출하도록 보강했음
+  - `AQ` 계열은 점수 집계에서 제외하고, 자유의견 열만 텍스트 VOC 분석 source 로 사용하도록 정리했음
+  - 강사별 `voc_analysis.question_scores`와 전체 `voc_summary.question_scores`를 result payload 에 추가하고, Review/Solution 페이지에 그룹별 점수 섹션을 렌더하도록 연결했음
+- Prevention Rule:
+  - survey형 VOC workbook 을 free-text sheet validator 에 억지로 맞추지 말고, `BQ 점수`와 `자유의견`을 separate-but-linked 구조로 다룰 것
+  - VOC 결과 schema 를 바꿀 때는 prepare validator, analyzer, result payload, Review, Solution 을 한 세트로 같이 grep 해서 contract drift 가 없는지 확인할 것
+  - Jinja payload 에 dict 를 넘길 때 `items`, `keys`, `values` 같은 메서드 이름을 그룹 키로 쓰지 말 것
+
+### DBG-044 `active` Windows/비ASCII 경로 환경에서 `Kiwi` 기본 모델 로딩이 실패하면 분석 제출 후 무한 대기처럼 보일 수 있음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `kiwi`, `windows`, `startup`, `non-ascii-path`, `config`
+- Related Files: `final_edu/config.py`, `final_edu/utils.py`, `final_edu/app.py`, `final_edu/worker.py`, `tests/test_voc_analysis.py`
+- Trigger Commands: `uv run python -m final_edu --reload`, `uv run python -m final_edu.worker`, 자료 업로드 후 lexical 분석
+- Must Read When: `Kiwi` 초기화, startup dependency check, Windows/한글 경로 workaround, 분석이 무한 대기처럼 보이는 환경 의존 오류를 조사할 때
+- Symptom:
+  - 일부 Windows 환경에서 저장소 경로나 기본 모델 경로에 비ASCII 문자가 섞이면 `Kiwi()` 초기화가 실패했고, 사용자는 자료 업로드 후 결과 페이지로 넘어가지 않고 멈춘 것처럼 느낄 수 있었음
+  - 팀원 단위 workaround 로 `utils.py`에 `model_path=\"C:\\kiwi_model\"`를 하드코딩하거나, 실행 불일치 원인을 `final_edu.app:app` 부재로 오해하는 경우가 생겼음
+- Root Cause:
+  - 공식 웹 실행은 `final_edu/cli.py -> uvicorn factory(final_edu.app:create_app)`라서 module-level `app`가 필수가 아닌데, 다른 실행 방식을 섞어 원인을 잘못 분리한 경우가 있었음
+  - 실제 환경 의존 실패 지점은 `Kiwi` 모델 초기화였고, 기존 코드는 이를 분석 경로에서 늦게 만나 사용자에게는 무한 대기처럼 보일 수 있었음
+- Resolution:
+  - `FINAL_EDU_KIWI_MODEL_PATH` 선택적 설정을 추가해, Windows/비ASCII 경로 환경에서는 ASCII-only 모델 경로로 override 할 수 있게 정리했음
+  - `Kiwi` 초기화 실패는 명확한 `RuntimeError`로 감싸고, web/worker startup 에서 readiness check 를 먼저 수행해 늦은 분석 실패 대신 시작 단계에서 바로 드러나게 변경했음
+  - 공식 실행 계약은 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, repo 코드에는 Windows 전용 하드코딩 경로나 module-level `app` 의존을 넣지 않았음
+- Prevention Rule:
+  - Windows/비ASCII 경로에서 `Kiwi` 문제를 해결할 때 repo 코드에 `C:\\...` 같은 OS 전용 모델 경로를 하드코딩하지 말 것
+  - 공식 실행 경로와 다른 `uvicorn module:app` 방식에서만 생기는 증상을 앱 버그와 혼동하지 말 것
+  - `Kiwi` 같은 핵심 분석 의존성은 업로드 후 뒤늦게 만나지 말고 web/worker startup 에서 readiness check 로 먼저 검증할 것

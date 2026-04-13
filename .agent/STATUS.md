@@ -10,6 +10,8 @@ Last Updated: 2026-04-13
 - 현재 실행 명령:
   - Web: `uv run python -m final_edu --reload`
   - Worker: `uv run python -m final_edu.worker`
+- 선택적 실행 환경 변수:
+  - `FINAL_EDU_KIWI_MODEL_PATH`: Windows/비ASCII 경로에서 `Kiwi` 기본 모델 로딩이 실패할 때 ASCII-only 경로를 지정하는 override
 - 현재 입력 포맷:
   - 과정 등록: `커리큘럼 PDF`
   - 강의 자료: `PDF`, `PPTX`, `TXT/MD`
@@ -32,7 +34,7 @@ Last Updated: 2026-04-13
   - `youtube` surface 에서는 파일 업로드를 받지 않고 안내 메시지만 보여준다.
   - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다.
   - persisted draft auto-restore 는 `page1_submission_version >= 2`인 저장본만 사용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다.
-  - VOC input 은 `PDF/CSV/TXT/XLSX/XLS`를 받되, Excel workbook 은 응답이 담긴 단일 clear sheet만 허용하고 구조가 모호하면 prepare 단계에서 거부한다.
+  - VOC input 은 `PDF/CSV/TXT/XLSX/XLS`를 받되, Excel workbook 은 `clear response sheet` 또는 `BQ 평점 + 기타 의견` survey matrix sheet를 허용하고 구조가 모호하면 prepare 단계에서 거부한다.
   - VOC chip 은 일반 파일 chip 과 구분되는 `VOC` 배지로 표시된다.
   - analyze submit 과 prepare confirm 대기 중에는 blocking loading overlay 를 띄워 현재 처리 중임을 보여준다.
   - 분석 제출은 `과정 선택 + 유효 lane 1개 이상`일 때만 활성화된다.
@@ -52,10 +54,10 @@ Last Updated: 2026-04-13
   - 결과 렌더는 저장된 `course`와 실제 업로드/YouTube 분석 결과만 사용한다.
 - `Page 3 / Review`
   - `GET /review`는 강사별 실제 VOC 결과 페이지다.
-  - 강사별 `voc_analysis`를 사용해 파일 메타, 감성 키워드, 반복 불만 패턴, 개선 포인트를 렌더한다.
+  - 강사별 `voc_analysis`를 사용해 파일 메타, 문항별 평균 점수, 감성 키워드, 반복 불만 패턴, 개선 포인트를 렌더한다.
 - `Page 4 / Solution`
   - `GET /solution`은 기존 `분석 결과 기반 인사이트`, `최신 업계 동향 분석` 2섹션을 유지한다.
-  - 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`를 렌더한다.
+  - 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`의 전체 문항 평균 점수와 자유의견 요약을 함께 렌더한다.
 
 ## Backend Contract
 
@@ -73,6 +75,9 @@ Last Updated: 2026-04-13
   - probe 정책은 `30개 이하 full / 31~200 partial / 200+ skip`이다.
 - lexical 분석 계약:
   - `kiwipiepy` 기반 tokenization 을 사용한다.
+  - 공식 웹 실행은 factory entrypoint(`uv run python -m final_edu --reload`) 기준이며, module-level `final_edu.app:app` 객체 존재를 전제로 하지 않는다.
+  - web/worker startup 은 `Kiwi` readiness 를 먼저 검증하고, 실패 시 업로드 후 무한 대기 대신 명시적 startup/runtime error 를 노출한다.
+  - `FINAL_EDU_KIWI_MODEL_PATH`가 설정되면 해당 경로로 `Kiwi` 모델을 로드하고, 없으면 패키지 기본 경로를 사용한다.
   - section title 사용자 사전을 미리 등록한다.
   - curriculum-first keyword ranking 을 유지한다.
   - material 파일 chunking 은 PDF/슬라이드 경계를 넘겨 합치지 않고, overlap 없이 page/slide 단위로 처리한다.
@@ -83,11 +88,13 @@ Last Updated: 2026-04-13
   - speech title prior 는 exact chapter anchor match 에만 적용하고, transcript 에 최소 anchor 근거가 없거나 off-curriculum topic 이면 nearest-neighbor 로 강제 배정하지 않는다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
-  - VOC spreadsheet 는 CSV와 동일하게 row text(`header: value | ...`)로 정규화해 분석한다.
-  - `xlsx/xls` workbook 에 응답 후보 sheet 가 여러 개이거나 숫자 집계표 중심 구조면 prepare 단계에서 명시적 오류로 거부한다.
+  - VOC spreadsheet 는 `BQ 평점 문항 점수 집계`와 `자유의견 row text 분석`을 함께 지원한다.
+  - `xlsx/xls` survey workbook 은 multi-row header 를 collapse 해 `BQ` 평점 문항과 `기타 의견` 열을 동시에 추출한다.
+  - `AQ` 계열 문항은 점수 집계에서 제외하고, `기타 의견` 같은 자유의견 열만 텍스트 VOC 분석 source 로 사용한다.
+  - `xlsx/xls` workbook 에 응답 후보 sheet 가 여러 개이거나 survey/text 구조가 모두 모호하면 prepare 단계에서 명시적 오류로 거부한다.
   - Page 1 lane payload 는 `JobInstructorInput.mode`로 explicit lane mode 를 함께 저장한다.
   - 단일 roster 과정에서 generic 강사명(`강사 1`)이 submit payload 로 남으면 과정 roster 기준으로 정규화한다.
-  - 강사별 `voc_analysis`, 공통 `voc_summary`를 result JSON에 저장한다.
+  - 강사별 `voc_analysis`, 공통 `voc_summary`를 result JSON에 저장하고, 둘 다 `question_scores`를 포함할 수 있다.
   - 커버리지 자료가 없어도 VOC만 있으면 VOC-only 결과를 반환한다.
 - 과정 삭제 계약:
   - `DELETE /courses/{course_id}`는 과정 JSON, curriculum PDF object, 해당 과정의 completed/failed job metadata와 `jobs/{job_id}/...` object prefix, matching prepare cache 를 함께 hard delete 한다.
@@ -141,10 +148,12 @@ Last Updated: 2026-04-13
 - local `inline` queue 모드에서도 결과 페이지로 넘어가기 전까지 loading overlay 가 유지되도록 submit UX를 보강했다.
 - `pyproject.toml`과 `uv.lock`에 `kiwipiepy` 의존성을 반영했다.
 - VOC input 에 `xlsx/xls`를 추가하고, prepare 단계에서 ambiguous workbook 을 거부하는 sheet-selection validator 를 넣었다.
+- VOC survey workbook(`BQ 점수 + 기타 의견`)을 first-class 로 지원하도록 extractor 를 확장하고, 강사별/전체 `question_scores`를 result payload 에 추가했다.
+- `review`는 강사별 문항 평균 점수와 자유의견 기반 VOC 요약을 함께 보여주고, `solution`의 `VOC 기반 인사이트`는 전체 문항 평균 점수와 전체 자유의견 요약을 함께 보여주도록 정리했다.
 - 과정 목록 popup 에 과정 삭제 버튼과 확인 popup 을 추가하고, `DELETE /courses/{course_id}` hard delete 경로를 연결했다.
 - 삭제는 관련 completed/failed job metadata, `jobs/{job_id}` object prefix, matching `analysis-preparations/*.json`까지 함께 정리하도록 보강했다.
 - 진행 중 job 이 있는 과정 삭제는 `409`로 거부하고, stale prepare confirm 은 course existence check 로 차단하도록 정리했다.
-- VOC extractor 는 Excel row 를 CSV와 같은 `header: value | ...` 형식으로 직렬화하고, clear response sheet 만 분석하도록 보강했다.
+- VOC extractor 는 clear response sheet 뿐 아니라 multi-row-header survey workbook 에서 `BQ` 점수 문항과 `기타 의견` 열을 동시에 추출하도록 보강했다.
 - 과정 추가 popup 의 preview table 을 `accepted/review_required/rejected` 모두에서 항상 editable 하게 바꾸고, `대주제 추가`/행 삭제를 지원하도록 보강했다.
 - Page 1 course save gating 에서 `preview.decision === "rejected"` 차단을 제거하고, 유효한 preview rows 가 있으면 사용자가 직접 정리한 커리큘럼도 저장할 수 있게 맞췄다.
 - 과정 추가 popup 의 preview 비중 input step 을 `0.01`로 맞춰 자동 산출된 `13.33`, `20.01` 같은 값이 브라우저 native validation 에 걸리지 않도록 보강했다.
@@ -230,6 +239,9 @@ Last Updated: 2026-04-13
 - `DBG-036`
 - `DBG-037`
 - `DBG-038`
+- `DBG-043`
+- `DBG-006`
+- `DBG-044`
 - `DBG-039`
 - `DBG-040`
 - `DBG-041`
@@ -261,11 +273,18 @@ Last Updated: 2026-04-13
 - `source_mode_stats`에 `mapped_tokens`를 추가하고, source는 있지만 mapped coverage가 0인 mode는 toggle 을 유지한 채 coverage empty state 로 분기하도록 보강했다.
 - word cloud 는 raw token 기준을 유지해 비커리큘럼 표현을 별도로 관찰할 수 있게 했다.
 - VOC 업로드 허용 형식에 `XLSX/XLS`를 추가했고, workbook 에 응답 후보 sheet 가 여러 개면 prepare 단계에서 명시적으로 거부하도록 보강했다.
-- VOC Excel extractor 는 clear response sheet 를 선택해 `header: value | ...` row text 로 정규화하고, 같은 데이터의 CSV/XLSX 분석 계약을 맞췄다.
+- VOC Excel extractor 는 clear response sheet 뿐 아니라 survey matrix workbook 도 읽어 `BQ` 점수 집계와 `기타 의견` row text 분석을 함께 수행하도록 보강했다.
 - 과정 목록 popup 에 row별 삭제 버튼과 중앙 확인 popup 을 추가했다.
 - `DELETE /courses/{course_id}` hard delete route 를 추가해 course/curriculum PDF/관련 completed job/prepare cache 를 함께 정리하도록 보강했다.
 - 진행 중 분석이 걸린 과정 삭제는 `409`로 막고, stale prepare confirm 은 course existence 재검사 후 `404`로 차단하도록 정리했다.
 - 과정 목록 삭제 버튼이 `svg/path`를 직접 클릭하면 delegated click handler의 `HTMLElement` guard 때문에 첫 클릭이 무시되던 회귀를 잡고, `Element` 기준 target 정규화와 40px hit area로 first-click 반응성을 복구했다.
+
+### 2026-04-13
+
+- `Kiwi` 모델 경로를 repo 코드에 하드코딩하지 않고, 선택적 `FINAL_EDU_KIWI_MODEL_PATH` 설정으로 override 할 수 있게 정리했다.
+- web/worker startup 에서 `Kiwi` readiness 를 먼저 검증해, 분석 제출 후 무한 대기처럼 보이던 환경 의존 오류를 startup 단계에서 명확한 에러로 드러내도록 바꿨다.
+- 공식 실행 경로는 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, module-level `app` 객체 추가는 기본 계약으로 채택하지 않았다.
+- `tests.test_voc_analysis`에 configured `Kiwi` model path 사용과 startup failure 메시지 회귀를 추가했다.
 
 ### 2026-04-11
 

@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - handled at runtime when dependency is 
 from pydantic import BaseModel, Field
 
 from final_edu.config import Settings
-from final_edu.extractors import extract_file_asset, extract_youtube_asset
+from final_edu.extractors import extract_file_asset, extract_voc_asset, extract_youtube_asset
 from final_edu.models import (
     AnalysisRun,
     ChunkAssignment,
@@ -1047,26 +1047,36 @@ def analyze_voc_assets(
     collected_segments = []
     analyzed_files: list[str] = []
     response_count = 0
+    question_score_batches: list[list[dict]] = []
 
     for upload in uploads:
-        source, segments, source_warnings = extract_file_asset(upload, instructor_name)
-        warnings.extend(source_warnings)
-        if not segments:
+        extraction = extract_voc_asset(upload, instructor_name)
+        warnings.extend(extraction.warnings)
+        if not extraction.segments and not extraction.question_scores:
             continue
         analyzed_files.append(upload.original_name)
-        collected_segments.extend(segments)
-        response_count += _estimate_voc_response_count(source.asset_type, segments)
+        collected_segments.extend(extraction.segments)
+        response_count += max(
+            extraction.response_count,
+            max((int(item.get("response_count", 0) or 0) for item in extraction.question_scores), default=0),
+            len(extraction.segments),
+        )
+        if extraction.question_scores:
+            question_score_batches.append(extraction.question_scores)
 
-    if not collected_segments:
+    if not collected_segments and not question_score_batches:
         raise ValueError("VOC 파일에서 분석 가능한 텍스트를 추출하지 못했습니다.")
 
-    structured, generation_warning = _generate_voc_analysis(
-        instructor_name=instructor_name,
-        segments=collected_segments,
-        settings=settings,
-    )
-    if generation_warning:
-        warnings.append(generation_warning)
+    if collected_segments:
+        structured, generation_warning = _generate_voc_analysis(
+            instructor_name=instructor_name,
+            segments=collected_segments,
+            settings=settings,
+        )
+        if generation_warning:
+            warnings.append(generation_warning)
+    else:
+        structured = _empty_voc_text_analysis()
 
     file_name = ""
     if len(analyzed_files) == 1:
@@ -1078,6 +1088,7 @@ def analyze_voc_assets(
         "file_name": file_name,
         "analyzed_at": datetime.now(UTC).astimezone().strftime("%Y-%m-%d"),
         "response_count": max(response_count, len(collected_segments)),
+        "question_scores": _aggregate_question_scores(question_score_batches),
         "sentiment": structured["sentiment"],
         "repeated_complaints": structured["repeated_complaints"],
         "next_suggestions": structured["next_suggestions"],
@@ -1230,6 +1241,61 @@ def _estimate_voc_response_count(source_type: str, segments: list) -> int:
     return len(segments)
 
 
+def _empty_voc_text_analysis() -> dict:
+    return {
+        "sentiment": {"positive": [], "negative": []},
+        "repeated_complaints": [],
+        "next_suggestions": [],
+    }
+
+
+def _aggregate_question_scores(question_score_batches: list[list[dict]]) -> list[dict]:
+    aggregates: dict[tuple[str, str, str, int], dict] = {}
+    order: list[tuple[str, str, str, int]] = []
+
+    for batch in question_score_batches:
+        for item in batch:
+            question_id = str(item.get("question_id", "")).strip().upper()
+            group = str(item.get("group", "")).strip().upper()
+            label = normalize_text(str(item.get("label", "")).strip())
+            scale_max = int(item.get("scale_max", 5) or 5)
+            response_count = max(0, int(item.get("response_count", 0) or 0))
+            average = float(item.get("average", 0.0) or 0.0)
+            if not question_id or not label or response_count <= 0:
+                continue
+            key = (group or question_id, question_id, label, scale_max)
+            if key not in aggregates:
+                aggregates[key] = {
+                    "question_id": question_id,
+                    "group": group or question_id,
+                    "label": label,
+                    "scale_max": scale_max,
+                    "response_count": 0,
+                    "total_score": 0.0,
+                }
+                order.append(key)
+            aggregates[key]["response_count"] += response_count
+            aggregates[key]["total_score"] += average * response_count
+
+    payload: list[dict] = []
+    for key in order:
+        item = aggregates[key]
+        response_count = int(item["response_count"])
+        if response_count <= 0:
+            continue
+        payload.append(
+            {
+                "question_id": item["question_id"],
+                "group": item["group"],
+                "label": item["label"],
+                "average": round(float(item["total_score"]) / response_count, 2),
+                "response_count": response_count,
+                "scale_max": int(item["scale_max"]),
+            }
+        )
+    return payload
+
+
 def _generate_voc_analysis(
     *,
     instructor_name: str,
@@ -1237,6 +1303,8 @@ def _generate_voc_analysis(
     settings: Settings,
 ) -> tuple[dict, str | None]:
     lines = [normalize_text(segment.text) for segment in segments if normalize_text(segment.text)]
+    if not lines:
+        return _empty_voc_text_analysis(), None
     fallback = _fallback_voc_analysis(lines)
     if not settings.openai_api_key or OpenAI is None:
         return fallback, None
@@ -1390,11 +1458,13 @@ def _build_voc_summary(analyses: dict[str, dict]) -> dict:
     complaint_weeks: dict[str, str] = {}
     suggestion_counts: Counter[str] = Counter()
     suggestion_payloads: dict[str, dict] = {}
+    question_score_batches: list[list[dict]] = []
 
     for analysis in analyses.values():
         sentiment = analysis.get("sentiment", {})
         positive_counts.update(sentiment.get("positive", []))
         negative_counts.update(sentiment.get("negative", []))
+        question_score_batches.append(list(analysis.get("question_scores", []) or []))
         for item in analysis.get("repeated_complaints", []):
             pattern = str(item.get("pattern", "")).strip()
             if not pattern:
@@ -1417,6 +1487,7 @@ def _build_voc_summary(analyses: dict[str, dict]) -> dict:
             )
 
     return {
+        "question_scores": _aggregate_question_scores(question_score_batches),
         "positive": [label for label, _count in positive_counts.most_common(6)],
         "negative": [label for label, _count in negative_counts.most_common(6)],
         "repeated_complaints": [

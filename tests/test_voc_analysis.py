@@ -16,6 +16,7 @@ from final_edu.analysis import analyze_submissions
 from final_edu.app import create_app
 from final_edu.config import get_settings
 from final_edu.extractors import TabularSheet, extract_file_asset
+from final_edu import utils as edu_utils
 from final_edu.models import AnalysisJobRecord, CurriculumSection, InstructorSubmission, UploadedAsset
 
 
@@ -142,7 +143,115 @@ def _build_result_with_xlsx_voc() -> dict:
         return result.to_dict()
 
 
+def _survey_workbook_rows() -> list[list[object]]:
+    return [
+        [
+            "Section A. 참여자 정보",
+            "",
+            "Section B. 교육 전반 만족도",
+            "",
+            "",
+            "Section C. 강사 만족도",
+            "",
+            "Section D. 서술형",
+        ],
+        [
+            "AQ1. 응답자 기본 정보",
+            "",
+            "BQ1. 교육 전반 만족도",
+            "",
+            "",
+            "BQ2. 강사 만족도",
+            "",
+            "DQ1. 기타 의견",
+        ],
+        [
+            "AQ1-1. 소속",
+            "AQ1-2. 직무",
+            "BQ1-1. 교육 신청 및 안내 절차가 수월하였다.",
+            "BQ1-2. 교육 목표가 명확하였다.",
+            "BQ1-3. 교육 운영이 전반적으로 만족스러웠다.",
+            "BQ2-1. 강사의 설명이 이해하기 쉬웠다.",
+            "BQ2-2. 질의응답이 도움이 되었다.",
+            "기타 의견",
+        ],
+        ["제조", "신규", 5, 4, 5, 5, 4, "설명이 친절했고 진행이 매끄러웠습니다."],
+        ["서비스", "재직", 4, 4, 4, 5, 5, "실습 예시는 좋았지만 환경 안내가 더 필요합니다."],
+        ["공공", "관리", 3, 4, 4, 4, 4, ""],
+    ]
+
+
+def _build_result_with_survey_xlsx_voc() -> dict:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        material_path = Path(temp_dir) / "material.txt"
+        material_path.write_text(
+            "SQL 데이터 분석 전처리 시각화 pandas SQL 데이터 분석",
+            encoding="utf-8",
+        )
+
+        voc_path = Path(temp_dir) / "survey-review.xlsx"
+        voc_path.write_bytes(_build_xlsx_bytes({"rawdata": _survey_workbook_rows()}))
+
+        submissions = [
+            InstructorSubmission(
+                name="윤막강",
+                files=[UploadedAsset(path=material_path, original_name="material.txt")],
+                voc_files=[UploadedAsset(path=voc_path, original_name="survey-review.xlsx")],
+            )
+        ]
+
+        settings = replace(
+            get_settings(),
+            openai_api_key=None,
+            chunk_target_tokens=32,
+            chunk_overlap_segments=0,
+            max_evidence_per_section=1,
+        )
+        result = analyze_submissions(
+            course_id="course-survey",
+            course_name="설문형 VOC 과정",
+            sections=_sample_sections(),
+            submissions=submissions,
+            settings=settings,
+            analysis_mode="lexical",
+        )
+        return result.to_dict()
+
+
 class VocAnalysisTests(unittest.TestCase):
+    def test_kiwi_uses_configured_model_path_when_present(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FINAL_EDU_KIWI_MODEL_PATH": "C:/kiwi_model"},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with patch("final_edu.utils.Kiwi") as kiwi_class, patch("final_edu.utils._KIWI", None):
+                edu_utils.ensure_kiwi_ready()
+
+            get_settings.cache_clear()
+
+        kiwi_class.assert_called_once_with(num_workers=1, model_path="C:/kiwi_model")
+
+    def test_app_startup_surfaces_kiwi_model_path_error_clearly(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FINAL_EDU_KIWI_MODEL_PATH": "C:/kiwi_model"},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            with patch("final_edu.utils.Kiwi", side_effect=RuntimeError("cannot open model")), patch(
+                "final_edu.utils._KIWI",
+                None,
+            ):
+                with self.assertRaises(RuntimeError) as context:
+                    with TestClient(create_app()):
+                        pass
+            get_settings.cache_clear()
+
+        self.assertIn("FINAL_EDU_KIWI_MODEL_PATH", str(context.exception))
+        self.assertIn("C:/kiwi_model", str(context.exception))
+
     def test_analysis_includes_voc_by_instructor_and_summary(self) -> None:
         result = _build_result_with_voc()
 
@@ -217,6 +326,33 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertTrue(instructor["voc_analysis"]["sentiment"]["negative"])
         self.assertTrue(result["voc_summary"]["next_suggestions"])
 
+    def test_analysis_includes_question_scores_for_survey_xlsx_voc(self) -> None:
+        result = _build_result_with_survey_xlsx_voc()
+
+        instructor = result["instructors"][0]
+        question_scores = instructor["voc_analysis"]["question_scores"]
+        summary_scores = result["voc_summary"]["question_scores"]
+
+        self.assertTrue(question_scores)
+        self.assertEqual([item["question_id"] for item in question_scores], [
+            "BQ1-1",
+            "BQ1-2",
+            "BQ1-3",
+            "BQ2-1",
+            "BQ2-2",
+        ])
+        self.assertEqual([item["question_id"] for item in summary_scores], [
+            "BQ1-1",
+            "BQ1-2",
+            "BQ1-3",
+            "BQ2-1",
+            "BQ2-2",
+        ])
+        self.assertNotIn("AQ1-1", {item["question_id"] for item in question_scores})
+        self.assertGreaterEqual(instructor["voc_analysis"]["response_count"], 3)
+        self.assertTrue(instructor["voc_analysis"]["sentiment"]["positive"])
+        self.assertTrue(result["voc_summary"]["negative"])
+
     def test_extract_file_asset_supports_xls_voc_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch(
             "final_edu.extractors._read_xls_sheets",
@@ -243,6 +379,52 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertEqual(len(segments), 2)
         self.assertEqual(segments[0].locator, "응답.row.1")
         self.assertIn("comment: 설명은 친절했어요", segments[0].text)
+
+    def test_review_and_solution_pages_render_voc_question_scores(self) -> None:
+        result = _build_result_with_survey_xlsx_voc()
+        record = AnalysisJobRecord(
+            id="job-survey",
+            course_id="course-survey",
+            course_name="설문형 VOC 과정",
+            status="completed",
+            created_at="2026-04-13T10:00:00",
+            updated_at="2026-04-13T10:05:00",
+            created_at_ts=1.0,
+            updated_at_ts=2.0,
+            payload_key="payload.json",
+            result_key="result.json",
+            instructor_names=["윤막강"],
+            instructor_count=1,
+            asset_count=2,
+            youtube_url_count=0,
+            section_count=2,
+            warning_count=0,
+            selected_analysis_mode="lexical",
+        )
+
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            client = TestClient(create_app())
+            with patch("final_edu.app.get_job", return_value=record), patch(
+                "final_edu.app.load_job_result",
+                return_value=result,
+            ):
+                review_response = client.get("/review?job_id=job-survey")
+                solution_response = client.get("/solution?job_id=job-survey")
+            get_settings.cache_clear()
+
+        self.assertEqual(review_response.status_code, 200)
+        self.assertIn("문항별 평균 점수", review_response.text)
+        self.assertIn("BQ1", review_response.text)
+        self.assertIn("교육 신청 및 안내 절차가 수월하였다", review_response.text)
+
+        self.assertEqual(solution_response.status_code, 200)
+        self.assertIn("BQ1 평균 점수", solution_response.text)
+        self.assertIn("강사의 설명이 이해하기 쉬웠다", solution_response.text)
 
 
 if __name__ == "__main__":

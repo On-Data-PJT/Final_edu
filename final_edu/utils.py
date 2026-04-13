@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kiwipiepy import Kiwi
 
+from final_edu.config import get_settings
 from final_edu.models import ExtractedChunk, RawTextSegment
 
 WHITESPACE_RE = re.compile(r"\s+")
@@ -171,6 +172,28 @@ _KIWI: Kiwi | None = None
 _REGISTERED_KIWI_TERMS: set[str] = set()
 
 
+def _build_kiwi() -> Kiwi:
+    settings = get_settings()
+    configured_model_path = str(settings.kiwi_model_path or "").strip()
+    kiwi_kwargs: dict[str, object] = {"num_workers": 1}
+    if configured_model_path:
+        kiwi_kwargs["model_path"] = configured_model_path
+
+    try:
+        return Kiwi(**kiwi_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        if configured_model_path:
+            raise RuntimeError(
+                "Kiwi 모델 초기화에 실패했습니다. "
+                f"설정된 FINAL_EDU_KIWI_MODEL_PATH={configured_model_path!r} 경로를 확인해 주세요. ({exc})"
+            ) from exc
+        raise RuntimeError(
+            "Kiwi 모델 초기화에 실패했습니다. "
+            "Windows/비ASCII 경로 문제라면 FINAL_EDU_KIWI_MODEL_PATH를 ASCII-only 경로로 지정해 주세요. "
+            f"({exc})"
+        ) from exc
+
+
 def normalize_text(text: str) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()
 
@@ -178,8 +201,12 @@ def normalize_text(text: str) -> str:
 def _get_kiwi() -> Kiwi:
     global _KIWI
     if _KIWI is None:
-        _KIWI = Kiwi(num_workers=1)
+        _KIWI = _build_kiwi()
     return _KIWI
+
+
+def ensure_kiwi_ready() -> None:
+    _get_kiwi()
 
 
 def _append_chunk_token(tokens: list[str], current_chunk: list[str]) -> None:

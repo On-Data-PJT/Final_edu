@@ -4,6 +4,7 @@ import json
 import mimetypes
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -35,7 +36,7 @@ from final_edu.jobs import (
     load_job_result,
     new_job_id,
 )
-from final_edu.extractors import extract_file_asset
+from final_edu.extractors import extract_voc_asset
 from final_edu.models import (
     AnalysisJobPayload,
     AnalysisPreparation,
@@ -45,7 +46,7 @@ from final_edu.models import (
     UploadedAsset,
 )
 from final_edu.storage import create_object_storage
-from final_edu.utils import build_safe_storage_name
+from final_edu.utils import build_safe_storage_name, ensure_kiwi_ready
 
 try:
     from openai import OpenAI
@@ -110,6 +111,12 @@ def _static_asset_url(request: Request, path: str) -> str:
     return str(url.include_query_params(v=asset_path.stat().st_mtime_ns))
 
 
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    ensure_kiwi_ready()
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     storage = create_object_storage(settings)
@@ -117,6 +124,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         description="강의 자료 기반 커리큘럼 커버리지 분석 MVP",
+        lifespan=_app_lifespan,
     )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_ROOT / "static")), name="static")
     templates.env.globals["static_asset_url"] = _static_asset_url
@@ -871,7 +879,7 @@ async def _validate_voc_upload(path: Path, original_name: str, instructor_name: 
     if suffix not in {".xlsx", ".xls"}:
         return
     upload = UploadedAsset(path=path, original_name=original_name)
-    await run_in_threadpool(extract_file_asset, upload, instructor_name)
+    await run_in_threadpool(extract_voc_asset, upload, instructor_name)
 
 
 def _ensure_pdf_upload(upload: UploadFile) -> None:
@@ -1588,7 +1596,12 @@ def _build_solution_payload(result: dict | None) -> dict:
         "target": target,
         "sections": [{"id": _read(section, "id"), "title": _read(section, "title")} for section in sections],
         "instructors": instructor_payloads,
-        "voc_summary": _read(result, "voc_summary") or {},
+        "voc_summary": {
+            **(_read(result, "voc_summary") or {}),
+            "question_score_groups": _group_question_scores(
+                _read(_read(result, "voc_summary") or {}, "question_scores") or []
+            ),
+        },
     }
 
 
@@ -1646,6 +1659,8 @@ def _demo_solution_payload() -> dict:
         "sections": [{"id": t.replace(" ", "-"), "title": t} for t in topics],
         "instructors": instructors,
         "voc_summary": {
+            "question_scores": [],
+            "question_score_groups": [],
             "positive": ["실습 중심", "친절한 설명"],
             "negative": ["강의 속도", "자료 부족"],
             "repeated_complaints": [
@@ -1662,13 +1677,24 @@ def _build_review_payload(result: dict | None) -> dict:
     if result:
         instructors = _read(result, "instructors") or []
         return {
-            "common_summary": _read(result, "voc_summary") or {"positive": [], "negative": []},
+            "common_summary": {
+                **(_read(result, "voc_summary") or {"positive": [], "negative": []}),
+                "question_score_groups": _group_question_scores(
+                    _read(_read(result, "voc_summary") or {}, "question_scores") or []
+                ),
+            },
             "instructors": [
                 {
                     "name": _read(inst, "name"),
                     "file_name": _read(_read(inst, "voc_analysis") or {}, "file_name"),
                     "analyzed_at": _read(_read(inst, "voc_analysis") or {}, "analyzed_at"),
                     "response_count": _read(_read(inst, "voc_analysis") or {}, "response_count"),
+                    "question_scores": list(
+                        _read(_read(inst, "voc_analysis") or {}, "question_scores") or []
+                    ),
+                    "question_score_groups": _group_question_scores(
+                        _read(_read(inst, "voc_analysis") or {}, "question_scores") or []
+                    ),
                     "sentiment": _read(_read(inst, "voc_analysis") or {}, "sentiment")
                     or {"positive": [], "negative": []},
                     "repeated_complaints": list(
@@ -1684,6 +1710,8 @@ def _build_review_payload(result: dict | None) -> dict:
 
     return {
         "common_summary": {
+            "question_scores": [],
+            "question_score_groups": [],
             "positive": ["실습 중심 강의 구성", "친절하고 명확한 설명"],
             "negative": ["강의 속도 및 실습 시간 부족", "실습 환경·자료 지원 미흡"],
         },
@@ -1693,6 +1721,8 @@ def _build_review_payload(result: dict | None) -> dict:
                 "file_name": "evaluation_ojh_2026q1.pdf",
                 "analyzed_at": "2026-04-10",
                 "response_count": 28,
+                "question_scores": [],
+                "question_score_groups": [],
                 "sentiment": {
                     "positive": ["실습 위주", "친절한 설명", "예시 풍부", "이해하기 쉬움"],
                     "negative": ["속도 빠름", "과제 부담", "PDF 자료 부족"],
@@ -1726,6 +1756,22 @@ def _build_review_payload(result: dict | None) -> dict:
             },
         ]
     }
+
+
+def _group_question_scores(question_scores: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for item in question_scores:
+        group = str(_read(item, "group") or "기타").strip() or "기타"
+        grouped.setdefault(group, []).append(
+            {
+                "question_id": str(_read(item, "question_id") or "").strip(),
+                "label": str(_read(item, "label") or "").strip(),
+                "average": float(_read(item, "average") or 0.0),
+                "response_count": int(_read(item, "response_count") or 0),
+                "scale_max": int(_read(item, "scale_max") or 5),
+            }
+        )
+    return [{"group": group, "entries": items} for group, items in grouped.items()]
 
 if __name__ == "__main__":
     import uvicorn

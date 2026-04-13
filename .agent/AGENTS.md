@@ -184,6 +184,10 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 실행 명령:
   - Web: `uv run python -m final_edu --reload`
   - Worker: `uv run python -m final_edu.worker`
+- 실행 엔트리포인트는 `final_edu/cli.py -> uvicorn factory(final_edu.app:create_app)` 기준이다.
+  - module-level `final_edu.app:app` 객체 존재를 공식 실행 계약으로 가정하지 않는다.
+- 선택적 환경 변수:
+  - `FINAL_EDU_KIWI_MODEL_PATH`: Windows/비ASCII 경로 환경에서 기본 `Kiwi` 모델 로딩이 실패할 때 ASCII-only 모델 경로를 지정한다.
 - 핵심 엔드포인트:
   - `GET /`
   - `GET /demo`
@@ -218,7 +222,7 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
     - 자산 저장은 항상 `files / youtubeUrls / vocFiles`로 분리 유지
     - lane `mode`는 마지막으로 열어 둔 입력면 복원용 UI 상태로만 사용
     - 파일 업로드는 현재 보이는 `files` 또는 `voc` surface에서만 받고, YouTube surface는 파일 drop/click 업로드를 받지 않는다
-    - VOC는 `PDF/CSV/TXT/XLSX/XLS`를 지원하되, 스프레드시트는 응답이 담긴 단일 clear sheet만 허용하고 구조가 모호하면 prepare 단계에서 거부한다
+    - VOC는 `PDF/CSV/TXT/XLSX/XLS`를 지원하되, 스프레드시트는 응답이 담긴 단일 clear sheet 또는 `BQ 평점 + 자유의견`이 함께 있는 survey matrix sheet를 허용하고 구조가 모호하면 prepare 단계에서 거부한다
     - analyze submit multipart 는 hidden file input `FileList`가 아니라 lane JS state(`files / youtubeUrls / vocFiles`)에서 직접 조립한다
   - 과정 삭제 계약:
     - `DELETE /courses/{course_id}`는 과정 등록, 커리큘럼 PDF object, 해당 과정의 completed/failed job metadata + `jobs/{job_id}/...` object prefix, matching `analysis-preparations/*.json`을 함께 hard delete 한다
@@ -244,8 +248,8 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
   - Page 2는 `mode_series`, `rose_series_by_mode`, `keywords_by_mode`, `average_keywords_by_mode`, `line_series_by_mode`, `available_source_modes`, `source_mode_stats`를 사용
   - `keywords_by_mode`와 `keywords_by_instructor`는 공개 UI용 실제 강사 keyword list만 담고, off-curriculum/debug keyword는 별도 내부 경로로 분리한다
   - `rose_series_by_instructor`, `keywords_by_instructor`는 `combined` alias 호환용으로 유지
-  - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있다
-  - top-level 결과에는 `voc_summary`가 포함될 수 있다
+  - 강사별 결과에는 `voc_analysis`, `voc_file_count`가 포함될 수 있고, survey workbook 이면 `voc_analysis.question_scores`가 함께 들어갈 수 있다
+  - top-level 결과에는 `voc_summary`가 포함될 수 있고, aggregate 된 `voc_summary.question_scores`가 함께 들어갈 수 있다
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
   - lexical fallback 은 `kiwipiepy` 기반 tokenization + section title 사용자 사전을 사용한다

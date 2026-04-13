@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from final_edu.config import get_settings
+from final_edu.utils import ensure_kiwi_ready
 
 
 def main() -> None:
     settings = get_settings()
     if not settings.redis_url:
         raise RuntimeError("Worker 실행에는 REDIS_URL이 필요합니다.")
+
+    ensure_kiwi_ready()
 
     try:
         from redis import Redis

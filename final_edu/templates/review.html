@@ -172,6 +172,62 @@
     margin: 0 0 18px;
   }
 
+  .score-groups {
+    display: grid;
+    gap: 14px;
+  }
+
+  .score-group {
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    padding: 16px 18px;
+  }
+
+  .score-group-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #166534;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+  }
+
+  .score-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .score-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .score-label {
+    font-size: 13px;
+    color: #334155;
+    line-height: 1.55;
+  }
+
+  .score-value {
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .score-value-main {
+    font-size: 14px;
+    font-weight: 800;
+    color: #166534;
+  }
+
+  .score-value-meta {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
   /* ── 메타 칩 ── */
   .meta-chips {
     display: flex;
@@ -493,6 +549,30 @@
         <span class="meta-chip chip-count">👥 응답 {{ inst.response_count }}명</span>
         {% endif %}
       </div>
+
+      {% if inst.question_score_groups %}
+      <div class="rv-card" style="margin-bottom:20px">
+        <p class="rv-card-title">문항별 평균 점수</p>
+        <div class="score-groups">
+          {% for group in inst.question_score_groups %}
+          <div class="score-group">
+            <div class="score-group-title">{{ group.group }}</div>
+            <div class="score-list">
+              {% for item in group.entries %}
+              <div class="score-row">
+                <div class="score-label">{{ item.label }}</div>
+                <div class="score-value">
+                  <div class="score-value-main">{{ "%.2f"|format(item.average) }} / {{ item.scale_max }}</div>
+                  <div class="score-value-meta">응답 {{ item.response_count }}명</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
 
       <div class="rv-card" style="margin-bottom:20px">
         <p class="rv-card-title">감성 분석</p>

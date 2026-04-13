@@ -254,7 +254,7 @@ Last Updated: 2026-04-13
 ### Page Role
 
 - 이 페이지는 강사별 평가서(VOC) 분석 결과를 보여주는 실제 결과 페이지다.
-- 강사 탭, 파일 메타, 감성 키워드, 반복 불만 패턴, 다음 기수 개선 포인트를 카드형으로 보여준다.
+- 강사 탭, 파일 메타, 문항별 평균 점수, 감성 키워드, 반복 불만 패턴, 다음 기수 개선 포인트를 카드형으로 보여준다.
 - VOC가 없는 강사는 placeholder 카드만 보여주고 페이지 구조는 유지한다.
 
 ### Layout
@@ -262,11 +262,13 @@ Last Updated: 2026-04-13
 - 현재 `dev`의 sidebar, 상단 Evaluation 헤더, 강사 탭 구조를 유지한다.
 - 본문은 강사별 단일 패널 전환형이어야 하며, 탭을 바꾸면 해당 강사의 VOC 카드만 보여야 한다.
 - 메타 칩에는 파일명, 분석 날짜, 응답 수를 우선 노출한다.
+- survey workbook 이 있으면 `BQ1/BQ2...` 그룹별 문항 평균 점수 카드가 감성 분석보다 앞에 보여야 한다.
 
 ### Acceptance Checklist
 
 - 강사 탭 구조와 기존 카드 레이아웃이 유지되어야 한다.
 - 실제 `voc_analysis`가 있으면 placeholder 대신 강사별 결과 카드가 렌더되어야 한다.
+- survey workbook 이 있으면 문항별 평균 점수 섹션이 그룹별(`BQ1`, `BQ2` 등)로 렌더되어야 한다.
 - `sentiment`, `repeated_complaints`, `next_suggestions`가 각각 별도 카드/블록으로 보여야 한다.
 - VOC가 없는 강사는 페이지 전체가 아니라 해당 강사 패널만 빈 상태여야 한다.
 
@@ -285,6 +287,7 @@ Last Updated: 2026-04-13
   - insight card grid
   - external trend status card
 - 기존 두 영역은 유지하고, 하단에 별도 `VOC 기반 인사이트` 패널을 추가한다.
+- `VOC 기반 인사이트` 패널은 전체 문항 평균 점수와 자유의견 요약을 함께 담아야 한다.
 
 ### Insight Cards
 
@@ -300,3 +303,4 @@ Last Updated: 2026-04-13
 - insight card 는 읽기 쉬운 card grid 로 유지한다.
 - external trend slot 은 과장 없이 상태 중심으로 보여준다.
 - 기존 insight/trend 2섹션은 유지하고, VOC 결과는 섞지 않고 별도 패널로 보여야 한다.
+- `VOC 기반 인사이트`에는 전체 `BQ` 문항 평균 점수와 공통 자유의견 요약이 함께 보여야 한다.
