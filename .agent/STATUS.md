@@ -300,6 +300,8 @@ Last Updated: 2026-04-13
 
 ### 2026-04-13
 
+- `README.md`, base/index/job/demo 템플릿 title, CLI 설명 문자열에 남아 있던 `Final Edu` 사용자 노출 브랜딩을 `Study Labs`로 통일했다.
+- 패키지명 `final_edu`, env var `FINAL_EDU_*`, Render 서비스명 같은 런타임 식별자는 호환성을 위해 유지했다.
 - `render.yaml`에 Render Blueprint 검증용 `region`, Key Value `ipAllowList: []`, `maxmemoryPolicy: noeviction`를 추가해 Blueprint schema 오류 없이 web/worker/keyvalue를 같은 리전으로 생성할 수 있게 정리했다.
 - Render 대상 사용자 지연시간을 줄이기 위해 Blueprint의 `web`, `worker`, `keyvalue` 리전을 `singapore`로 통일했다.
 - Render secret env 는 저장소의 `.env`를 자동 sync 하지 않으므로, `OPENAI_API_KEY`, `FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY`, `R2_*` 값은 계속 `sync: false` 상태로 Render 대시보드에서 직접 입력해야 한다.

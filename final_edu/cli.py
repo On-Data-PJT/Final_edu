@@ -10,7 +10,7 @@ from final_edu.config import get_settings
 def main() -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(
-        description="Run the Final Edu curriculum coverage dashboard.",
+        description="Run the Study Labs curriculum coverage dashboard.",
     )
     parser.add_argument("--host", default=settings.host, help="Host interface to bind.")
     parser.add_argument("--port", default=settings.port, type=int, help="Port to bind.")
