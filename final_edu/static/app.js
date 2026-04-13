@@ -3542,6 +3542,7 @@
     `;
     const tbody = table.querySelector("tbody");
     sections.forEach((section, index) => {
+      const isLast = index === sections.length - 1;
       const row = document.createElement("tr");
       row.dataset.previewRow = String(index);
       row.innerHTML = `
@@ -3553,7 +3554,7 @@
             min="0"
             step="0.01"
             data-preview-field="target_weight"
-            placeholder="직접 입력"
+            ${isLast ? 'data-auto-weight="true" placeholder="자동 계산" style="background:#f0fdf4;color:#16a34a;font-weight:700;"' : 'placeholder="직접 입력"'}
             value="${section.target_weight === null || section.target_weight === undefined ? "" : escapeAttr(section.target_weight)}"
           />
         </td>
@@ -3562,6 +3563,23 @@
         </td>
       `;
       tbody.appendChild(row);
+    });
+    table.addEventListener("input", (event) => {
+      const target = eventTargetElement(event);
+      if (!target || !target.matches("[data-preview-field='target_weight']")) {
+        return;
+      }
+      const allWeightInputs = Array.from(table.querySelectorAll("[data-preview-field='target_weight']"));
+      const lastInput = allWeightInputs[allWeightInputs.length - 1];
+      if (!(lastInput instanceof HTMLInputElement) || !lastInput.dataset.autoWeight) {
+        return;
+      }
+      const othersSum = allWeightInputs.slice(0, -1).reduce((sum, input) => {
+        const value = Number.parseFloat(String(input.value || ""));
+        return sum + (Number.isNaN(value) ? 0 : value);
+      }, 0);
+      const remaining = Math.max(0, Math.round((100 - othersSum) * 100) / 100);
+      lastInput.value = remaining > 0 ? String(remaining) : "";
     });
     return table;
   }

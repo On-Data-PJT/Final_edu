@@ -364,6 +364,7 @@ def _preview_with_openai(
             input=candidate_excerpt,
             text_format=CurriculumClassificationSchema,
             max_output_tokens=900,
+            temperature=0,
         ).output_parsed
     except Exception as exc:  # noqa: BLE001
         fallback_warnings = list(warnings)
@@ -453,6 +454,7 @@ def _preview_with_openai(
             ),
             text_format=CurriculumExtractionSchema,
             max_output_tokens=1800,
+            temperature=0,
         ).output_parsed
     except Exception as exc:  # noqa: BLE001
         preview_warnings.append(f"구조화 추출 API 호출에 실패해 검토 필요 모드로 전환했습니다. ({exc})")

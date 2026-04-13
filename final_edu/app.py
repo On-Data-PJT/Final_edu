@@ -1313,7 +1313,10 @@ def _generate_solution_content(payload: dict, settings) -> tuple[dict, str, str 
                         "당신은 교육 커리큘럼 분석 전문가입니다. "
                         "강사별 커버리지 데이터와 목표 커리큘럼을 비교해 "
                         "실행 가능한 인사이트와 업계 동향 분석을 JSON으로 반환하세요. "
-                        "모든 문구는 자연스러운 한국어로 작성하고, 과장 없이 데이터 기반으로만 분석하세요."
+                        "모든 문구는 자연스러운 한국어로 작성하고, 과장 없이 데이터 기반으로만 분석하세요. "
+                        "trendAnalysis는 topics의 섹션명을 보고 과목 도메인을 먼저 파악한 뒤, "
+                        "그 도메인에 실제로 존재하는 교육기관·자격시험·교육 정책을 구체적으로 언급하세요. "
+                        "특정 연도(예: 2024, 2025)를 언급하지 말고 '최근' 또는 '현재' 등의 표현을 사용하세요."
                     ),
                 },
                 {
@@ -1335,8 +1338,12 @@ def _generate_solution_content(payload: dict, settings) -> tuple[dict, str, str 
                         "}\n\n"
                         "요구사항:\n"
                         "- insights: 전체 강사 평균과 목표 커리큘럼 비교 인사이트 5개 이상. 각각 구체적 수치(%p, %) 포함\n"
-                        "- trendAnalysis: 2024-2025년 IT 교육 시장 동향과 현재 커리큘럼 비교. "
-                        "패스트캠퍼스·부트캠프·Coursera 등 타 기관과의 차이점 포함\n"
+                        "- trendAnalysis: topics 섹션명을 읽어 과목 도메인을 파악하고, "
+                        "그 도메인에 맞는 최신 교육 트렌드 3개를 작성하세요. "
+                        "예를 들어 한국사·역사 관련 과목이라면 한국사능력검정시험·EBS 한국사·교육부 역사교육 지침 등을 언급하고, "
+                        "수학이라면 수능·경시대회·교육과정, 과학이라면 과학탐구·KSF 등을 언급하세요. "
+                        "도메인에 실제로 존재하는 교육기관·자격시험·정책만 언급하고, "
+                        "특정 연도 수치(2024, 2025 등)는 사용하지 말고 '최근' 표현을 쓰세요.\n"
                         "- badge는 반드시 갭/일치/신규 중 하나\n\n"
                         f"데이터:\n{json.dumps(prompt_data, ensure_ascii=False)}"
                     ),
@@ -1463,37 +1470,38 @@ def _fallback_solution_content(payload: dict) -> dict:
         )
 
     top_topic = topic_gaps[0][0] if topic_gaps else "핵심 섹션"
+    bottom_topic = topic_gaps[-1][0] if topic_gaps else "기초 섹션"
     return {
         "insights": insights[:8],
         "trendAnalysis": [
             {
-                "title": "실무 프로젝트 기반 학습 확대 추세",
+                "title": "실습·사례 중심 학습 비중 확대 추세",
                 "detail": (
-                    "2024-2025년 국내외 주요 IT 교육기관(패스트캠퍼스, 코드스테이츠, Coursera)은 "
-                    "프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다. "
+                    "최근 국내외 주요 교육기관들은 이론 강의 비중을 줄이고 "
+                    "실습·사례 분석 중심으로 커리큘럼을 재편하는 추세입니다. "
                     "현재 커리큘럼의 이론-실습 비율 검토가 필요합니다."
                 ),
                 "badge": "갭",
-                "comparison": "타 기관 평균 대비 프로젝트 비중이 낮은 편",
+                "comparison": "타 기관 평균 대비 실습 비중 검토 필요",
             },
             {
-                "title": "LLM·생성 AI 활용 실습 급증",
+                "title": f"{top_topic} 관련 교육 수요 증가",
                 "detail": (
-                    "ChatGPT, Claude 등 생성 AI 도구를 실습에 직접 활용하는 커리큘럼이 "
-                    "2024년 대비 2.3배 증가했습니다. "
-                    "현재 커리큘럼에 AI 도구 활용 섹션 추가를 검토하세요."
-                ),
-                "badge": "신규",
-                "comparison": "업계 표준 대비 AI 도구 활용 섹션 부재",
-            },
-            {
-                "title": f"{top_topic} 심화 콘텐츠 수요 증가",
-                "detail": (
-                    f"구직 플랫폼 기술 요구사항 분석 결과 {top_topic} 관련 직무 요구사항이 "
-                    "전년 대비 35% 증가했습니다. 해당 섹션의 심화 내용 편성을 권장합니다."
+                    f"최근 교육 시장에서 {top_topic} 관련 강좌 수요가 지속적으로 증가하고 있습니다. "
+                    "해당 섹션의 심화 내용 편성 및 비중 강화를 권장합니다."
                 ),
                 "badge": "일치",
-                "comparison": "업계 수요와 방향 일치 — 비중 강화 권장",
+                "comparison": "교육 시장 수요와 방향 일치 — 비중 강화 권장",
+            },
+            {
+                "title": f"{bottom_topic} 기초 역량 강화 필요",
+                "detail": (
+                    f"학습자 기초 역량 격차를 줄이기 위해 {bottom_topic} 섹션의 "
+                    "단계별 학습 콘텐츠 구성이 중요해지고 있습니다. "
+                    "입문자와 심화 학습자를 위한 난이도 구분이 필요합니다."
+                ),
+                "badge": "신규",
+                "comparison": "기초-심화 연계 콘텐츠 구성 강화 권장",
             },
         ],
     }
@@ -1563,7 +1571,7 @@ def _build_solution_payload(result: dict | None) -> dict:
 
         sorted_rows = sorted(all_rows, key=lambda item: item["gapScore"], reverse=True)
         top_rows = [r for r in sorted_rows if r["gapScore"] > 0][:4] or sorted_rows[:1]
-        total_gap = round(sum(item["gapScore"] for item in top_rows), 1)
+        total_gap = min(round(sum(item["gapScore"] for item in top_rows), 1), 100.0)
         raw_values = [r["actualShare"] for r in all_rows]
 
         instructor_payloads.append(
@@ -1628,7 +1636,7 @@ def _demo_solution_payload() -> dict:
 
         sorted_rows = sorted(all_rows, key=lambda r: r["gapScore"], reverse=True)
         top_rows = [r for r in sorted_rows if r["gapScore"] > 0][:4] or sorted_rows[:1]
-        total_gap = round(sum(r["gapScore"] for r in top_rows), 1)
+        total_gap = min(round(sum(r["gapScore"] for r in top_rows), 1), 100.0)
 
         instructors.append({
             "name": raw["name"],

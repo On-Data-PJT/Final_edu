@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from final_edu.analysis import _generate_voc_analysis, analyze_submissions
-from final_edu.app import _build_solution_payload, create_app
+from final_edu.app import _build_solution_payload, _fallback_solution_content, _generate_solution_content, create_app
 from final_edu.config import get_settings
 from final_edu.extractors import TabularSheet, extract_file_asset
 from final_edu import utils as edu_utils
@@ -280,6 +281,107 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertEqual(payload["instructors"][0]["allRows"][0]["benchmarkShare"], 60.0)
         self.assertEqual(payload["instructors"][0]["allRows"][1]["benchmarkShare"], 40.0)
 
+    def test_solution_payload_caps_total_gap_score_at_hundred(self) -> None:
+        payload = _build_solution_payload(
+            {
+                "sections": [
+                    {"id": "sec-a", "title": "섹션 A", "target_weight": 10.0},
+                    {"id": "sec-b", "title": "섹션 B", "target_weight": 10.0},
+                ],
+                "instructors": [
+                    {
+                        "name": "윤막강",
+                        "asset_count": 1,
+                        "warnings": [],
+                        "unmapped_share": 0.0,
+                        "section_coverages": [
+                            {"section_id": "sec-a", "section_title": "섹션 A", "token_share": 1.0},
+                            {"section_id": "sec-b", "section_title": "섹션 B", "token_share": 1.0},
+                        ],
+                    }
+                ],
+                "voc_summary": {"positive": [], "negative": []},
+            }
+        )
+
+        self.assertEqual(payload["instructors"][0]["totalGapScore"], 100.0)
+
+    def test_generate_solution_content_uses_domain_specific_trend_guidance(self) -> None:
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=json.dumps(
+                        {
+                            "insights": [
+                                {"text": "인사이트 1", "numbers": []},
+                                {"text": "인사이트 2", "numbers": []},
+                                {"text": "인사이트 3", "numbers": []},
+                                {"text": "인사이트 4", "numbers": []},
+                                {"text": "인사이트 5", "numbers": []},
+                            ],
+                            "trendAnalysis": [
+                                {"title": "동향 1", "detail": "상세 1", "badge": "갭", "comparison": "비교 1"},
+                                {"title": "동향 2", "detail": "상세 2", "badge": "일치", "comparison": "비교 2"},
+                                {"title": "동향 3", "detail": "상세 3", "badge": "신규", "comparison": "비교 3"},
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            )
+        ]
+
+        with patch("final_edu.app.OpenAI") as openai_class:
+            openai_class.return_value.chat.completions.create.return_value = mock_response
+            settings = replace(get_settings(), openai_api_key="test-key")
+            _generate_solution_content(
+                {
+                    "topics": ["한국사 개론", "조선사"],
+                    "target": [50.0, 50.0],
+                    "instructors": [{"name": "윤막강", "rawValues": [45.0, 55.0], "totalGapScore": 10.0, "chartRows": []}],
+                },
+                settings,
+            )
+
+        messages = openai_class.return_value.chat.completions.create.call_args.kwargs["messages"]
+        system_prompt = messages[0]["content"]
+        user_prompt = messages[1]["content"]
+        self.assertIn("topics의 섹션명을 보고 과목 도메인", system_prompt)
+        self.assertIn("특정 연도(예: 2024, 2025)를 언급하지 말고", system_prompt)
+        self.assertIn("한국사능력검정시험", user_prompt)
+        self.assertNotIn("2024-2025년 IT 교육 시장 동향", user_prompt)
+
+    def test_fallback_solution_content_removes_it_specific_trend_copy(self) -> None:
+        content = _fallback_solution_content(
+            {
+                "topics": ["한국사 개론", "조선사"],
+                "target": [60.0, 40.0],
+                "instructors": [
+                    {
+                        "name": "윤막강",
+                        "rawValues": [45.0, 55.0],
+                        "totalGapScore": 15.0,
+                        "chartRows": [
+                            {
+                                "section": "한국사 개론",
+                                "actualShare": 45.0,
+                                "benchmarkShare": 60.0,
+                                "gapScore": 15.0,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        trend_blob = json.dumps(content["trendAnalysis"], ensure_ascii=False)
+        self.assertNotIn("패스트캠퍼스", trend_blob)
+        self.assertNotIn("Coursera", trend_blob)
+        self.assertNotIn("LLM", trend_blob)
+        self.assertNotIn("2024", trend_blob)
+        self.assertNotIn("2025", trend_blob)
+
     def test_kiwi_uses_configured_model_path_when_present(self) -> None:
         with patch.dict(
             os.environ,
@@ -373,6 +475,7 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertIn("VOC 기반 인사이트", solution_response.text)
         self.assertIn("강의 속도", solution_response.text)
         self.assertIn("실제 VOC 결과", solution_response.text)
+        self.assertIn("현재 커리큘럼과 최신 교육 시장 트렌드 비교", solution_response.text)
         self.assertIn('href="/jobs/job123"', solution_response.text)
         self.assertIn('href="/review?job_id=job123"', solution_response.text)
         self.assertIn('href="/solution?job_id=job123"', solution_response.text)
@@ -485,7 +588,7 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertEqual(solution_response.status_code, 200)
         self.assertIn("BQ1 평균 점수", solution_response.text)
         self.assertIn("강사의 설명이 이해하기 쉬웠다", solution_response.text)
-        self.assertIn("현재 커리큘럼과 최신 IT 교육 시장 트렌드 비교", solution_response.text)
+        self.assertIn("현재 커리큘럼과 최신 교육 시장 트렌드 비교", solution_response.text)
         self.assertIn("강사별 표준커리큘럼 준수도", solution_response.text)
         self.assertIn("최근 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.", solution_response.text)
         self.assertNotIn("2024-2025년 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.", solution_response.text)

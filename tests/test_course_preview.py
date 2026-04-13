@@ -225,12 +225,87 @@ class CoursePreviewTests(unittest.TestCase):
             )
 
         self.assertEqual(mock_client.responses.parse.call_count, 1)
+        self.assertEqual(mock_client.responses.parse.call_args.kwargs["temperature"], 0)
         self.assertEqual([section.weight_source for section in result.sections], ["lecture_count"] * 6)
         self.assertEqual([section.target_weight for section in result.sections], [10.81, 13.51, 10.81, 21.62, 24.32, 18.93])
+
+    def test_preview_with_openai_uses_zero_temperature_for_extraction_call(self) -> None:
+        settings = replace(
+            get_settings(),
+            openai_api_key="test-key",
+            curriculum_preview_timeout_seconds=7.5,
+            curriculum_accept_confidence=0.7,
+            curriculum_review_confidence=0.5,
+        )
+        classification = SimpleNamespace(
+            output_parsed=SimpleNamespace(
+                document_kind="curriculum",
+                confidence=0.93,
+                has_section_structure=True,
+                has_explicit_weight_signals=True,
+                has_derivable_weight_signals=False,
+                warnings=[],
+                blocking_reasons=[],
+                evidence=[],
+            )
+        )
+        extracted = SimpleNamespace(
+            output_parsed=SimpleNamespace(
+                sections=[
+                    SimpleNamespace(
+                        title="대주제 1",
+                        description="설명 1",
+                        raw_weight_value=60,
+                        weight_source="percent",
+                        confidence=0.91,
+                        source_pages=[1],
+                        source_snippets=["대주제 1"],
+                    ),
+                    SimpleNamespace(
+                        title="대주제 2",
+                        description="설명 2",
+                        raw_weight_value=40,
+                        weight_source="percent",
+                        confidence=0.89,
+                        source_pages=[1],
+                        source_snippets=["대주제 2"],
+                    ),
+                ],
+                warnings=[],
+            )
+        )
+
+        with patch("final_edu.courses.OpenAI") as mock_openai, patch(
+            "final_edu.courses._build_preview_candidate_excerpt",
+            return_value="1. 대주제 1 60%\n2. 대주제 2 40%",
+        ), patch(
+            "final_edu.courses._extract_structured_preview_sections",
+            return_value=([], 0.0, "none"),
+        ):
+            mock_client = mock_openai.return_value
+            mock_client.responses.parse.side_effect = [classification, extracted]
+            result = _preview_with_openai(
+                page_records=[{"page": 1, "text": "대주제 1 60%\n대주제 2 40%", "flat_text": "대주제 1 60% 대주제 2 40%", "raw_layout_text": "대주제 1 60%\n대주제 2 40%"}],
+                raw_text="대주제 1 60%\n대주제 2 40%",
+                warnings=[],
+                max_sections=8,
+                settings=settings,
+            )
+
+        self.assertEqual(result.decision, "accepted")
+        self.assertEqual(mock_client.responses.parse.call_count, 2)
+        self.assertEqual(mock_client.responses.parse.call_args_list[0].kwargs["temperature"], 0)
+        self.assertEqual(mock_client.responses.parse.call_args_list[1].kwargs["temperature"], 0)
 
     def test_preview_weight_input_allows_hundredth_step(self) -> None:
         app_js = Path("final_edu/static/app.js").read_text(encoding="utf-8")
         self.assertIn('step="0.01"', app_js)
+
+    def test_preview_weight_input_auto_calculates_last_row(self) -> None:
+        app_js = Path("final_edu/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('data-auto-weight="true"', app_js)
+        self.assertIn('placeholder="자동 계산"', app_js)
+        self.assertIn("Math.round((100 - othersSum) * 100) / 100", app_js)
 
 
 if __name__ == "__main__":
