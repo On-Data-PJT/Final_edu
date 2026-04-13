@@ -61,6 +61,8 @@ Last Updated: 2026-04-13
 - 이 overlay 는 확장 영상 수, 총 재생시간, 예상 chunk, 예상 시간, 예상 비용, warning 을 보여준 뒤 실제 분석 시작 여부를 확정해야 한다.
 - analyze submit 요청이 진행 중이거나 confirm 이후 redirect 를 기다리는 동안에는 **blocking loading overlay**를 띄워 현재 처리 중임을 알려야 한다.
 - loading overlay 는 dismissible 하지 않아야 하며, prepare 결과가 confirmation required 이면 닫히고 분석 범위 확인 overlay 로 전환되어야 한다.
+- confirm 이후 queue 기반 분석에서는 **Page 1 loading overlay 가 기본 대기 UX**여야 하며, `queued/running/stalled` 설명도 여기서 먼저 보여줘야 한다.
+- `/jobs/{job_id}`의 active 상태 패널은 직접 URL로 들어왔을 때만 보는 fallback/debug 용도여야 하고, 기본 흐름은 terminal state 이후에만 그 페이지로 이동해야 한다.
 
 ### Course Creation Popup
 
@@ -166,6 +168,7 @@ Last Updated: 2026-04-13
 - `prepare` 단계는 raw YouTube 입력을 유지한 채 내부 영상 수와 추천 분석 모드를 계산해야 한다.
 - playlist가 현재 상한을 넘으면 enqueue 대신 분할 또는 축소가 필요하다는 에러를 반환해야 한다.
 - submit 직후와 confirm 직후에는 결과 overlay 또는 결과 페이지로 넘어가기 전까지 간단한 loading state 를 즉시 보여야 한다.
+- queue 기반 submit/confirm 은 즉시 `/jobs/{job_id}`로 redirect 하지 말고, Page 1 overlay 에서 `queued -> running -> terminal` 상태를 polling 한 뒤 terminal state 에서만 `/jobs/{job_id}`로 이동해야 한다.
 - analyze submit multipart 는 hidden file input 값이 아니라 lane JS state 기준으로 조립해야 하며, rail에 보이는 asset 구성과 서버 payload가 일치해야 한다.
 
 ### Page 1 Acceptance Checklist
@@ -200,6 +203,7 @@ Last Updated: 2026-04-13
 - 이 toggle 이 Page 2 전체 dataset source 의 source of truth 다.
 - `available_source_modes`에 없는 mode 는 disabled 로 보여야 하며, 왜 비활성화됐는지 설명을 제공해야 한다.
 - job 이 아직 running 이면 status panel 에 단순 상태값만이 아니라 현재 phase 와 영상 처리 progress 를 함께 보여줘야 한다.
+- active job page 는 기본 대기 경로가 아니라 fallback/debug 경로이므로, 진행 패널은 결과 대시보드를 가리는 primary hero 처럼 과장하지 않는다.
 
 ### Panel 1. Coverage Donut
 

@@ -308,7 +308,7 @@ def create_job_record(
         asset_count=asset_count,
         youtube_url_count=youtube_url_count,
         section_count=section_count,
-        phase="playlist_expanding" if youtube_url_count else "chunking",
+        phase=None,
         selected_analysis_mode=selected_analysis_mode or payload.analysis_mode,
         estimated_cost_usd=estimated_cost_usd,
         expanded_video_count=max(expanded_video_count, youtube_url_count),

@@ -230,6 +230,8 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
     - stale prepare confirm 은 과정 존재 여부를 다시 검사하고, 이미 삭제된 과정이면 confirm 을 차단한다
     - persisted draft auto-restore 는 `page1_submission_version >= 2`인 payload만 허용하고, legacy draft 는 notice 후 빈 lane 으로 초기화한다
   - YouTube 입력에 재생목록이 포함되면 `prepare -> confirm -> enqueue` 2단계로 확장/추정 후 실행
+  - queue 기반 `confirm` 이후 기본 대기 UX는 `Page 1` loading overlay 이며, `queued/running/stalled` 설명을 여기서 polling 한 뒤 terminal state 에서만 `/jobs/{job_id}`로 이동한다
+  - `/jobs/{job_id}`의 active 상태 패널은 direct-entry fallback/status 용도이며, queued 상태에 worker 미시작 placeholder phase 를 미리 노출하지 않는다
   - 명시적 `playlist?list=...`만 playlist 로 확장하고, `watch?v=...&list=...`는 단일 영상으로 유지한다
   - YouTube metadata/playlist 해석과 transcript fetch 는 object-storage shared cache + process-local throttle + distributed throttle 을 함께 사용한다
   - web `prepare`와 worker 본분석은 같은 cache 경로를 재사용해야 하며, 같은 YouTube URL의 반복 호출을 줄이는 것이 기본 정책이다

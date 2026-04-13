@@ -14,7 +14,8 @@ from fastapi.testclient import TestClient
 
 from final_edu.app import create_app
 from final_edu.config import get_settings
-from final_edu.models import AnalysisJobRecord
+from final_edu.jobs import create_job_record
+from final_edu.models import AnalysisJobPayload, AnalysisJobRecord, CurriculumSection, JobInstructorInput
 from final_edu import worker as worker_module
 
 
@@ -146,11 +147,31 @@ class RenderRuntimeTests(unittest.TestCase):
         self.assertIn("startCommand: .venv/bin/python -m final_edu --host 0.0.0.0 --port $PORT", render_yaml)
         self.assertIn("startCommand: .venv/bin/python -m final_edu.worker", render_yaml)
 
+    def test_queued_job_record_starts_without_placeholder_phase(self) -> None:
+        payload = AnalysisJobPayload(
+            job_id="job-phase-none",
+            course_id="course-1",
+            course_name="상태 점검 과정",
+            course_sections=[CurriculumSection(id="section-1", title="대주제", description="설명", target_weight=100.0)],
+            curriculum_text="대주제 | 설명",
+            instructors=[JobInstructorInput(name="강사 1", youtube_urls=["https://www.youtube.com/watch?v=test"])],
+            submitted_at=_iso_from_ts(datetime.now(UTC).timestamp()),
+        )
+
+        record = create_job_record(payload, "jobs/job-phase-none/payload.json", 1, SimpleNamespace())
+
+        self.assertEqual(record.status, "queued")
+        self.assertIsNone(record.phase)
+
     def test_page1_requests_use_render_timeout_messages(self) -> None:
         app_js = Path("final_edu/static/app.js").read_text(encoding="utf-8")
         self.assertIn("timeoutMs: 120000", app_js)
         self.assertIn("timeoutMs: 30000", app_js)
         self.assertIn("Render 인스턴스가 재시작되었습니다", app_js)
+        self.assertIn("waitForPreparedJobTerminalState", app_js)
+        self.assertIn("buildPage1JobStatusUrl", app_js)
+        self.assertIn("worker가 작업을 시작할 때까지 잠시 기다려 주세요.", app_js)
+        self.assertIn("window.location.href = targetUrl", app_js)
 
 
 if __name__ == "__main__":

@@ -243,6 +243,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/utils.py`, `final_edu/app.py`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `render.yaml`
   Trigger Commands: Render OOM 이벤트, `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`
   Must Read When: Render starter 메모리 절감, `Kiwi` startup preload, stalled job/status UX, Blueprint start command 변경
+- `DBG-050` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `jobs`, `overlay`, `queued-phase`, `fallback`
+  Related Files: `final_edu/static/app.js`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `.agent/Components.md`
+  Trigger Commands: `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`, Page 1 분석 시작
+  Must Read When: Page 1 confirm handoff, queued phase labeling, job waiting UX 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1366,3 +1371,27 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - Render Blueprint start command 는 이미 생성된 `.venv`를 직접 실행하고, `uv run`을 runtime wrapper 로 다시 태우지 말 것
   - queue 기반 결과 페이지는 `queued/running` 정체를 terminal state 기다림으로만 두지 말고, stalled 안내와 poll failure 안내를 함께 둘 것
   - Render OOM/restart 로그가 보이면 YouTube warning 만 보지 말고 web memory footprint, worker pickup 로그, stalled status payload 를 같이 확인할 것
+
+### DBG-050 `active` confirm 직후 기본 흐름이 `/jobs/{job_id}` 대기 페이지로 이동하면서 queued placeholder phase 가 실제 진행처럼 보였음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `jobs`, `overlay`, `queued-phase`, `fallback`
+- Related Files: `final_edu/static/app.js`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `.agent/Components.md`
+- Trigger Commands: `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`, Page 1 분석 시작
+- Must Read When: Page 1 confirm handoff, queued phase labeling, job waiting UX 변경
+- Symptom:
+  - 사용자는 기존 Page 1 톱니바퀴 overlay 를 기대했는데, confirm 직후 별도 `/jobs/{job_id}` 진행 화면으로 이동해 낯선 중간 페이지가 갑자기 나타난 것처럼 느꼈음
+  - queued job 이 worker pickup 전인데도 `재생목록 확장 중` 같은 실제 작업 phase 가 먼저 보이면서, 아직 시작하지 않은 일을 진행 중처럼 오해하게 만들었음
+- Root Cause:
+  - `confirmPreparedAnalysis()`가 confirm 응답 직후 `redirect_url`로 즉시 이동해, Page 1 overlay 가 기본 대기 UX로 유지되지 않았음
+  - `create_job_record()`가 queued 상태에서 `playlist_expanding`/`chunking` placeholder phase 를 미리 채워 넣어, worker progress callback 이전에도 진짜 phase 처럼 노출됐음
+  - `/jobs/{job_id}` active panel 이 direct-entry fallback 이 아니라 primary progress page처럼 크게 렌더돼 혼동을 키웠음
+- Resolution:
+  - confirm 후에는 Page 1 overlay 를 유지한 채 `/jobs/{job_id}/status`를 polling 하고, `completed/failed` terminal state 에서만 `/jobs/{job_id}`로 이동하도록 변경했음
+  - queued job record 는 `phase=None`으로 시작하고, 실제 phase 는 worker 가 running 상태에서 progress 를 쓸 때만 채워지게 정리했음
+  - `/jobs/{job_id}` active panel 은 direct-entry fallback/status 화면임이 드러나도록 카피와 밀도를 축소했음
+- Prevention Rule:
+  - queued 상태에는 worker 가 아직 시작하지 않은 실제 작업 phase 를 placeholder 로 넣지 말 것
+  - Page 1 기본 submit/confirm 흐름은 terminal state 전까지 origin page overlay 에 머물게 하고, 중간 상태 페이지로 즉시 redirect 하지 말 것
+  - fallback/debug status page 는 primary happy-path UX 와 시각적으로 구분해 사용자가 “새 메인 페이지”로 오해하지 않게 할 것

@@ -37,6 +37,7 @@ Last Updated: 2026-04-13
   - VOC input 은 `PDF/CSV/TXT/XLSX/XLS`를 받되, Excel workbook 은 `clear response sheet` 또는 `BQ 평점 + 기타 의견` survey matrix sheet를 허용하고 구조가 모호하면 prepare 단계에서 거부한다.
   - VOC chip 은 일반 파일 chip 과 구분되는 `VOC` 배지로 표시된다.
   - analyze submit 과 prepare confirm 대기 중에는 blocking loading overlay 를 띄워 현재 처리 중임을 보여준다.
+  - queue 기반 confirm 이후에는 Page 1 loading overlay 가 `queued/running/stalled` 상태를 계속 보여주고, terminal state 이후에만 `/jobs/{job_id}`로 이동한다.
   - 분석 제출은 `과정 선택 + 유효 lane 1개 이상`일 때만 활성화된다.
   - 현재 선택된 과정을 삭제하면 선택 상태, persisted/local draft, pending prepare 상태를 비우고 composer 를 즉시 초기 empty state 로 리셋한다.
 - `Page 2`
@@ -258,6 +259,7 @@ Last Updated: 2026-04-13
 - `DBG-047`
 - `DBG-048`
 - `DBG-049`
+- `DBG-050`
 - `DBG-038`
 - `DBG-043`
 - `DBG-006`
@@ -320,7 +322,10 @@ Last Updated: 2026-04-13
 - `/jobs/{job_id}/status`가 `queue_wait_seconds`, `last_update_seconds`, `is_stalled`, `stalled_message`를 함께 내려 queued/running 정체를 UI와 로그에서 더 쉽게 식별할 수 있게 했다.
 - job polling 화면은 stalled job 과 반복 poll 실패 때 generic spinner 대신 Render worker/restart 점검 안내를 보여주도록 보강했다.
 - Page 1 `prepare`/`confirm` 요청에는 Render 재시작/OOM 상황을 감안한 timeout 과 명시적 네트워크 오류 문구를 추가했다.
+- Page 1 confirm 흐름은 더 이상 응답 직후 `/jobs/{job_id}`로 redirect 하지 않고, loading overlay 에서 `queued/running/stalled`를 polling 하다가 terminal state 에서만 결과/실패 페이지로 이동하도록 정리했다.
+- queued job record 는 placeholder phase 없이 시작하고, `/jobs/{job_id}` active panel 은 direct-entry fallback status 화면이라는 점이 드러나도록 카피와 밀도를 축소했다.
 - `tests.test_render_runtime`에 web startup no-Kiwi preload, worker fail-fast, stalled job status, Render start command, Page 1 timeout 회귀를 추가했다.
+- `tests.test_render_runtime`에 queued job phase 없음과 Page 1 confirm polling 경로 회귀를 추가했다.
 - `tests.test_voc_analysis`에 configured `Kiwi` model path 사용과 startup failure 메시지 회귀를 추가했다.
 - chapter형 커리큘럼 speech 분류에서 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하던 문제를 줄이기 위해, section `title + description` 기반 generic fragment anchor 와 exact/normalized fragment + bounded chapter-index title rescue 를 도입했다.
 - Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제 `mapped_tokens` 비율이 낮을 때 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 보조 설명을 노출하도록 정리했다.

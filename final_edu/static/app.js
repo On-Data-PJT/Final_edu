@@ -22,6 +22,10 @@
       isPreparingAnalysis: false,
       isDeletingCourse: false,
       pendingDeleteCourseId: "",
+      jobPollToken: 0,
+      jobPollFailureCount: 0,
+      jobPollJobId: "",
+      jobPollRedirectUrl: "",
     },
     page2: {
       result: null,
@@ -1317,14 +1321,14 @@
       return;
     }
     const closePrepareModalFirst = options.closePrepareModalFirst === true;
-    let redirecting = false;
+    let waitingForTerminalState = false;
     if (closePrepareModalFirst) {
       closePrepareModal(refs);
     }
     showPage1Loading(
       refs,
-      "분석을 시작하는 중입니다",
-      "자료를 업로드하고 결과 페이지로 이동하고 있습니다. 잠시만 기다려 주세요.",
+      "분석 작업을 등록하는 중입니다",
+      "작업을 큐에 등록하고 상태 확인을 준비하고 있습니다. 잠시만 기다려 주세요.",
     );
     if (!options.loadingVisible || closePrepareModalFirst) {
       await waitForNextPaint();
@@ -1335,15 +1339,22 @@
         method: "POST",
         timeoutMs: 30000,
       });
-      if (payload.redirect_url) {
-        redirecting = true;
-        window.location.href = payload.redirect_url;
+      if (payload.job_id) {
+        waitingForTerminalState = true;
+        await waitForPreparedJobTerminalState(refs, payload.job_id, payload.redirect_url);
+        return;
       }
+      if (payload.redirect_url) {
+        waitingForTerminalState = true;
+        window.location.href = payload.redirect_url;
+        return;
+      }
+      throw new Error("분석 작업 ID를 확인하지 못했습니다.");
     } catch (error) {
       hidePage1Loading(refs);
       setStatus(refs.previewState, `분석 시작에 실패했습니다. ${error.message}`);
     } finally {
-      if (!redirecting) {
+      if (!waitingForTerminalState) {
         hidePage1Loading(refs);
       }
       setBusy(refs.prepareConfirmButton, false);
@@ -1363,7 +1374,154 @@
     if (!refs?.loadingOverlay) {
       return;
     }
+    resetPage1JobPolling();
     closeSurface(refs.loadingOverlay);
+  }
+
+  function resetPage1JobPolling() {
+    state.page1.jobPollToken += 1;
+    state.page1.jobPollFailureCount = 0;
+    state.page1.jobPollJobId = "";
+    state.page1.jobPollRedirectUrl = "";
+  }
+
+  function buildPage1JobStatusUrl(jobId) {
+    return `/jobs/${encodeURIComponent(jobId)}/status`;
+  }
+
+  function resolvePage1JobRedirectUrl(jobId, redirectUrl) {
+    const normalizedRedirectUrl = String(redirectUrl || "").trim();
+    if (normalizedRedirectUrl) {
+      return normalizedRedirectUrl;
+    }
+    return `/jobs/${encodeURIComponent(jobId)}`;
+  }
+
+  function buildRunningJobDetail(payload) {
+    const phaseLabel = String(payload?.phase_label || "").trim();
+    const progressTotal = Number(payload?.progress_total || 0);
+    const progressCurrent = Number(payload?.progress_current || 0);
+    const expandedVideoCount = Number(payload?.expanded_video_count || 0);
+    const processedVideoCount = Number(payload?.processed_video_count || 0);
+    const progressParts = [];
+
+    if (progressTotal > 0) {
+      progressParts.push(`진행 ${progressCurrent} / ${progressTotal}`);
+    } else if (expandedVideoCount > 0) {
+      progressParts.push(`영상 ${processedVideoCount} / ${expandedVideoCount}`);
+    }
+
+    if (phaseLabel) {
+      const progressCopy = progressParts.length ? ` ${progressParts.join(" · ")}` : "";
+      return `${phaseLabel} 단계입니다.${progressCopy}`.trim();
+    }
+    if (progressParts.length) {
+      return `${progressParts.join(" · ")} 기준으로 계속 처리하고 있습니다.`;
+    }
+    return "자막 수집과 텍스트 정리, 커리큘럼 매핑을 계속 진행하고 있습니다.";
+  }
+
+  function describePage1JobStatus(payload, pollFailureCount = 0) {
+    const status = String(payload?.status || "").trim();
+
+    if (pollFailureCount >= 3) {
+      return {
+        title: "상태 확인이 지연되고 있습니다",
+        detail: "Render 서비스가 재시작되었거나 worker가 응답하지 않고 있습니다. 잠시 후 결과 페이지를 다시 열거나 Render 로그를 확인해 주세요.",
+      };
+    }
+
+    if (status === "queued") {
+      if (payload?.is_stalled && payload?.stalled_message) {
+        return {
+          title: "작업이 오래 대기 중입니다",
+          detail: String(payload.stalled_message || "").trim(),
+        };
+      }
+      return {
+        title: "분석 대기 중",
+        detail: "worker가 작업을 시작할 때까지 잠시 기다려 주세요.",
+      };
+    }
+
+    if (status === "running") {
+      if (payload?.is_stalled && payload?.stalled_message) {
+        return {
+          title: "작업 로그가 오래 갱신되지 않았습니다",
+          detail: String(payload.stalled_message || "").trim(),
+        };
+      }
+      return {
+        title: "분석 진행 중",
+        detail: buildRunningJobDetail(payload),
+      };
+    }
+
+    if (status === "completed") {
+      return {
+        title: "분석이 완료되었습니다",
+        detail: "결과 페이지로 이동하고 있습니다.",
+      };
+    }
+
+    if (status === "failed") {
+      return {
+        title: "분석이 실패했습니다",
+        detail: "실패 원인을 확인할 수 있는 상태 페이지로 이동하고 있습니다.",
+      };
+    }
+
+    return {
+      title: "분석 상태를 확인하는 중입니다",
+      detail: "잠시만 기다려 주세요.",
+    };
+  }
+
+  function renderPage1JobLoadingState(refs, payload, pollFailureCount = 0) {
+    const copy = describePage1JobStatus(payload, pollFailureCount);
+    showPage1Loading(refs, copy.title, copy.detail);
+  }
+
+  async function waitForPreparedJobTerminalState(refs, jobId, redirectUrl) {
+    const normalizedJobId = String(jobId || "").trim();
+    if (!normalizedJobId) {
+      throw new Error("분석 작업 ID를 확인하지 못했습니다.");
+    }
+    const pollToken = state.page1.jobPollToken + 1;
+    state.page1.jobPollToken = pollToken;
+    state.page1.jobPollFailureCount = 0;
+    state.page1.jobPollJobId = normalizedJobId;
+    state.page1.jobPollRedirectUrl = resolvePage1JobRedirectUrl(normalizedJobId, redirectUrl);
+    let lastPayload = { status: "queued" };
+    renderPage1JobLoadingState(refs, lastPayload);
+
+    while (state.page1.jobPollToken === pollToken) {
+      try {
+        const payload = await fetchJson(buildPage1JobStatusUrl(normalizedJobId), {
+          headers: { Accept: "application/json" },
+          timeoutMs: 10000,
+        });
+        if (state.page1.jobPollToken !== pollToken) {
+          return;
+        }
+        state.page1.jobPollFailureCount = 0;
+        lastPayload = payload;
+        renderPage1JobLoadingState(refs, payload);
+        if (payload.status === "completed" || payload.status === "failed") {
+          const targetUrl = state.page1.jobPollRedirectUrl || resolvePage1JobRedirectUrl(normalizedJobId, redirectUrl);
+          resetPage1JobPolling();
+          window.location.href = targetUrl;
+          return;
+        }
+      } catch (_error) {
+        if (state.page1.jobPollToken !== pollToken) {
+          return;
+        }
+        state.page1.jobPollFailureCount += 1;
+        renderPage1JobLoadingState(refs, lastPayload, state.page1.jobPollFailureCount);
+      }
+      await waitMilliseconds(3000);
+    }
   }
 
   function renderPrepareSummary(refs, payload) {
@@ -3272,6 +3430,12 @@
       requestAnimationFrame(() => {
         requestAnimationFrame(resolve);
       });
+    });
+  }
+
+  function waitMilliseconds(durationMs) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, durationMs);
     });
   }
 

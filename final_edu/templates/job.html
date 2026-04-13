@@ -457,12 +457,41 @@
 
   /* Status Panel for Polling */
   .status-panel {
-    text-align: center;
-    padding: 4rem;
+    text-align: left;
+    padding: 2rem;
     background: #fff;
     border-radius: 20px;
     margin: 2rem auto;
     max-width: 800px;
+  }
+
+  .status-panel--active .section-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .status-panel__copy {
+    max-width: 40rem;
+  }
+
+  .status-panel--active .job-status-panel {
+    margin-top: 1.5rem;
+    align-items: flex-start;
+  }
+
+  .status-panel--active .job-status-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: #64748b;
+  }
+
+  .status-panel--active #job-status-pill {
+    font-size: 1rem;
+    font-weight: 800;
+    padding: 0.45rem 1rem;
+    border-radius: 12px;
   }
 
   @media (max-width: 1100px) {
@@ -512,17 +541,15 @@
   hidden>{{ result_json | safe }}</script>
 
 {% if job.is_active %}
-<section class="status-panel">
+<section class="status-panel status-panel--active">
   <div class="section-heading">
-    <h2 id="job-status-title">분석 진행 중</h2>
-    <p>작업이 완료되면 아래 대시보드가 자동으로 갱신됩니다.</p>
+    <h2 id="job-status-title">분석 상태</h2>
+    <p class="status-panel__copy">이 화면은 직접 열어 본 경우에만 현재 작업 상태를 보여줍니다. 기본 흐름에서는 Page 1에서 자동으로 결과로 이동합니다.</p>
   </div>
-  <div class="job-status-panel" style="margin-top: 2rem;">
-    <span id="job-status-pill" class="status-pill status-{{ job.status }}"
-      style="font-size: 1.5rem; font-weight: 800; padding: 0.5rem 1.5rem; background: #ecfdf5; color: #10b981; border-radius: 12px;">{{
-      job.status_label }}</span>
-    <div style="margin-top: 1.5rem; color: #64748b; display: flex; flex-direction: column; gap: 8px;">
-      <p id="job-phase-copy">단계: {{ job.phase_label or "작업 준비 중" }}</p>
+  <div class="job-status-panel">
+    <span id="job-status-pill" class="status-pill status-{{ job.status }}">{{ job.status_label }}</span>
+    <div class="job-status-stack">
+      <p id="job-phase-copy">현재 상태: {{ job.phase_label or "작업 준비 중" }}</p>
       <p id="job-progress-copy">진행 상태를 확인 중입니다...</p>
     </div>
   </div>
