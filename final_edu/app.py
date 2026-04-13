@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import tempfile
 import uuid
@@ -57,6 +58,9 @@ from final_edu.youtube import estimate_openai_cost_usd, recommend_analysis_mode,
 PACKAGE_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
 STATIC_ROOT = (PACKAGE_ROOT / "static").resolve()
+QUEUED_JOB_STALLED_SECONDS = 90
+RUNNING_JOB_STALLED_SECONDS = 180
+logger = logging.getLogger(__name__)
 
 
 def _normalize_lane_mode(value: str | None) -> str:
@@ -113,7 +117,6 @@ def _static_asset_url(request: Request, path: str) -> str:
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
-    ensure_kiwi_ready()
     yield
 
 
@@ -295,6 +298,18 @@ def create_app() -> FastAPI:
         if course_repository.get(preparation.payload.course_id) is None:
             storage.delete_key(_preparation_key(request_id))
             raise HTTPException(status_code=404, detail="과정이 삭제되어 분석을 시작할 수 없습니다.")
+        asset_count = sum(len(instructor.files) + len(instructor.voc_files) for instructor in preparation.payload.instructors)
+        youtube_url_count = sum(len(instructor.youtube_urls or instructor.youtube_inputs) for instructor in preparation.payload.instructors)
+        logger.info(
+            "Confirming prepared analysis %s (job_id=%s, course_id=%s, instructors=%s, assets=%s, youtube_urls=%s, queue_mode=%s)",
+            request_id,
+            preparation.payload.job_id,
+            preparation.payload.course_id,
+            len(preparation.payload.instructors),
+            asset_count,
+            youtube_url_count,
+            settings.queue_mode,
+        )
         record = enqueue_analysis_job(
             preparation.payload,
             len(preparation.payload.course_sections),
@@ -303,6 +318,10 @@ def create_app() -> FastAPI:
             estimated_cost_usd=preparation.estimated_cost_usd,
             expanded_video_count=preparation.expanded_video_count,
         )
+        if record.status == "failed":
+            logger.warning("Prepared analysis %s failed to enqueue job %s (%s)", request_id, record.id, record.error)
+        else:
+            logger.info("Prepared analysis %s enqueued job %s", request_id, record.id)
         return JSONResponse(
             {
                 "job_id": record.id,
@@ -547,6 +566,7 @@ def create_app() -> FastAPI:
         payload["phase_label"] = _phase_label(job.phase)
         payload["updated_at_label"] = _format_timestamp(job.updated_at)
         payload["has_result"] = bool(job.result_key)
+        payload.update(_job_runtime_status(job))
         return JSONResponse(payload)
 
     return app
@@ -1230,6 +1250,27 @@ def _format_timestamp(value: str) -> str:
     except ValueError:
         return value
     return parsed.astimezone(UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _job_runtime_status(job) -> dict:  # noqa: ANN001
+    now_ts = datetime.now(UTC).timestamp()
+    queue_wait_seconds = max(0, int(now_ts - float(getattr(job, "created_at_ts", 0.0) or 0.0)))
+    last_update_seconds = max(0, int(now_ts - float(getattr(job, "updated_at_ts", 0.0) or 0.0)))
+    status = str(getattr(job, "status", "") or "").strip()
+    is_stalled = False
+    stalled_message = ""
+    if status == "queued" and last_update_seconds >= QUEUED_JOB_STALLED_SECONDS:
+        is_stalled = True
+        stalled_message = "작업이 오래 대기 중입니다. Render worker 상태와 로그를 확인해 주세요."
+    elif status == "running" and last_update_seconds >= RUNNING_JOB_STALLED_SECONDS:
+        is_stalled = True
+        stalled_message = "작업 진행 로그가 오래 갱신되지 않았습니다. Render worker 상태와 로그를 확인해 주세요."
+    return {
+        "queue_wait_seconds": queue_wait_seconds,
+        "last_update_seconds": last_update_seconds,
+        "is_stalled": is_stalled,
+        "stalled_message": stalled_message,
+    }
 
 
 def _now_iso() -> str:

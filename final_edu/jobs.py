@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from final_edu.storage import ObjectStorage, create_object_storage
 from final_edu.utils import build_safe_storage_name
 
 RECENT_JOBS_LIMIT = 10
+logger = logging.getLogger(__name__)
 
 
 class JobRepository:
@@ -323,6 +325,13 @@ def enqueue_analysis_job(
     expanded_video_count: int = 0,
 ) -> AnalysisJobRecord:
     services = create_job_services(settings)
+    logger.info(
+        "Queueing analysis job %s (queue_mode=%s, instructors=%s, sections=%s)",
+        payload.job_id,
+        services.settings.queue_mode,
+        len(payload.instructors),
+        section_count,
+    )
     payload_key = f"jobs/{payload.job_id}/payload.json"
     services.storage.put_json(payload_key, payload.to_dict())
     record = create_job_record(
@@ -341,8 +350,10 @@ def enqueue_analysis_job(
     except Exception as exc:  # noqa: BLE001
         failed = _updated_record(record, status="failed", error=f"작업을 큐에 등록하지 못했습니다. ({exc})")
         services.repository.save(failed)
+        logger.exception("Failed to enqueue analysis job %s", payload.job_id)
         return failed
 
+    logger.info("Analysis job %s accepted by queue backend", payload.job_id)
     return record
 
 
@@ -386,6 +397,7 @@ def run_analysis_job(job_id: str) -> None:
     if record is None:
         return
 
+    logger.info("Worker picked up analysis job %s", job_id)
     current_record = _updated_record(record, status="running", error=None)
     services.repository.save(current_record)
 
@@ -440,8 +452,15 @@ def run_analysis_job(job_id: str) -> None:
             progress_current=max(current_record.progress_current, current_record.progress_total),
         )
         services.repository.save(completed)
+        logger.info(
+            "Analysis job %s completed (duration_ms=%s, warnings=%s)",
+            job_id,
+            completed.duration_ms,
+            completed.warning_count,
+        )
     except Exception as exc:  # noqa: BLE001
         services.repository.save(_updated_record(current_record, status="failed", error=str(exc)))
+        logger.exception("Analysis job %s failed", job_id)
 
 def _execute_analysis(
     payload: AnalysisJobPayload,

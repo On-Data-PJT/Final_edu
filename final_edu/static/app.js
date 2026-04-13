@@ -1133,6 +1133,7 @@
       const payload = await fetchJson("/analyze/prepare", {
         method: "POST",
         body: buildAnalysisFormData(refs),
+        timeoutMs: 120000,
       });
       state.page1.pendingPreparation = payload;
       if (payload.requires_confirmation) {
@@ -1332,6 +1333,7 @@
     try {
       const payload = await fetchJson(`/analyze/prepare/${encodeURIComponent(requestId)}/confirm`, {
         method: "POST",
+        timeoutMs: 30000,
       });
       if (payload.redirect_url) {
         redirecting = true;
@@ -3151,14 +3153,37 @@
   }
 
   function fetchJson(url, options) {
-    return fetch(url, options).then(async (response) => {
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = payload.detail || payload.message || response.statusText || "요청 실패";
-        throw new Error(detail);
-      }
-      return payload;
-    });
+    const requestOptions = { ...(options || {}) };
+    const timeoutMs = Math.max(0, Number(requestOptions.timeoutMs || 0));
+    delete requestOptions.timeoutMs;
+
+    let timeoutId = 0;
+    if (timeoutMs > 0 && typeof AbortController === "function") {
+      const controller = new AbortController();
+      requestOptions.signal = controller.signal;
+      timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    }
+
+    return fetch(url, requestOptions)
+      .catch((error) => {
+        if (error?.name === "AbortError") {
+          throw new Error("요청이 오래 걸리거나 Render 인스턴스가 재시작되었습니다. 잠시 후 다시 시도해 주세요.");
+        }
+        throw new Error("서버 연결이 끊겼습니다. Render 인스턴스가 재시작되었을 수 있습니다. 잠시 후 다시 시도해 주세요.");
+      })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = payload.detail || payload.message || response.statusText || (response.status ? `HTTP ${response.status}` : "요청 실패");
+          throw new Error(detail);
+        }
+        return payload;
+      })
+      .finally(() => {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      });
   }
 
   function ensureRenderedContainer(surface, name, fallbackTag) {

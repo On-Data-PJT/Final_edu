@@ -5,7 +5,7 @@ Last Updated: 2026-04-13
 ## Current Snapshot
 
 - 저장소 목적: 강의 자료와 YouTube/VOC 입력을 표준 커리큘럼 기준으로 정규화해 강사별 커리큘럼 커버리지 편차와 개선 포인트를 비교하는 공모전용 MVP
-- 현재 기준 브랜치: `dev`
+- 현재 기준 브랜치: `main`
 - 현재 앱 스택: `FastAPI + Jinja + CSS + Vanilla JS + uv + RQ`
 - 현재 실행 명령:
   - Web: `uv run python -m final_edu --reload`
@@ -82,7 +82,8 @@ Last Updated: 2026-04-13
 - lexical 분석 계약:
   - `kiwipiepy` 기반 tokenization 을 사용한다.
   - 공식 웹 실행은 factory entrypoint(`uv run python -m final_edu --reload`) 기준이며, module-level `final_edu.app:app` 객체 존재를 전제로 하지 않는다.
-  - web/worker startup 은 `Kiwi` readiness 를 먼저 검증하고, 실패 시 업로드 후 무한 대기 대신 명시적 startup/runtime error 를 노출한다.
+  - worker startup 은 `Kiwi` readiness 를 먼저 검증하고, web 은 lexical 경로에서만 `Kiwi`를 lazy-load 한다.
+  - `Kiwi` 초기화 실패는 worker startup 또는 실제 lexical 분석 경로에서 명시적 runtime error 로 드러나야 하며, Render starter web 에서는 startup preload 를 하지 않는다.
   - `FINAL_EDU_KIWI_MODEL_PATH`가 설정되면 해당 경로로 `Kiwi` 모델을 로드하고, 없으면 패키지 기본 경로를 사용한다.
   - section title 사용자 사전을 미리 등록한다.
   - curriculum-first keyword ranking 을 유지한다.
@@ -227,7 +228,7 @@ Last Updated: 2026-04-13
 
 ## Working Tree Notes
 
-- 문서 기준 source branch 는 `dev`다.
+- 현재 작업 브랜치는 `main`이다.
 - 현재 구현은 `dev` UI 유지 + `lexical` 백엔드 이식 + 실제 VOC 분석 연결 상태를 기준으로 한다.
 - `.codex/config.toml`은 로컬 Codex 실행 설정으로 취급하며 저장소 커밋 대상이 아니다.
 
@@ -256,6 +257,7 @@ Last Updated: 2026-04-13
 - `DBG-026`
 - `DBG-047`
 - `DBG-048`
+- `DBG-049`
 - `DBG-038`
 - `DBG-043`
 - `DBG-006`
@@ -312,8 +314,13 @@ Last Updated: 2026-04-13
 - `solution.html`의 커버리지/표준커리큘럼 준수도 카피와 trend fallback 문구를 `jiye` 기준으로 일부 갱신하면서도, 최근 `dev`의 VOC question score 그룹 렌더는 그대로 보존했다.
 - route만 남아 있던 `/jiye`, `/jobs/{job_id}/solutions`와 관련 legacy template/scratch 파일을 정리하고, 메인 서비스 플로우에 영향이 없는지 회귀 테스트로 확인했다.
 - `Kiwi` 모델 경로를 repo 코드에 하드코딩하지 않고, 선택적 `FINAL_EDU_KIWI_MODEL_PATH` 설정으로 override 할 수 있게 정리했다.
-- web/worker startup 에서 `Kiwi` readiness 를 먼저 검증해, 분석 제출 후 무한 대기처럼 보이던 환경 의존 오류를 startup 단계에서 명확한 에러로 드러내도록 바꿨다.
+- worker startup 에서만 `Kiwi` readiness 를 fail-fast 로 검증하고, web startup 은 preload 를 제거해 Render starter 메모리 압박을 줄이도록 정리했다.
 - 공식 실행 경로는 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, module-level `app` 객체 추가는 기본 계약으로 채택하지 않았다.
+- Render Blueprint web/worker `startCommand`를 `.venv/bin/python -m ...`로 바꿔 `uv run` 재기동 오버헤드를 줄였다.
+- `/jobs/{job_id}/status`가 `queue_wait_seconds`, `last_update_seconds`, `is_stalled`, `stalled_message`를 함께 내려 queued/running 정체를 UI와 로그에서 더 쉽게 식별할 수 있게 했다.
+- job polling 화면은 stalled job 과 반복 poll 실패 때 generic spinner 대신 Render worker/restart 점검 안내를 보여주도록 보강했다.
+- Page 1 `prepare`/`confirm` 요청에는 Render 재시작/OOM 상황을 감안한 timeout 과 명시적 네트워크 오류 문구를 추가했다.
+- `tests.test_render_runtime`에 web startup no-Kiwi preload, worker fail-fast, stalled job status, Render start command, Page 1 timeout 회귀를 추가했다.
 - `tests.test_voc_analysis`에 configured `Kiwi` model path 사용과 startup failure 메시지 회귀를 추가했다.
 - chapter형 커리큘럼 speech 분류에서 특정 대단원만 anchor 가 풍부해 `SVM 100%`처럼 붕괴하던 문제를 줄이기 위해, section `title + description` 기반 generic fragment anchor 와 exact/normalized fragment + bounded chapter-index title rescue 를 도입했다.
 - Page 2 coverage 패널에 low mapped coverage note 를 추가해, 실제 `mapped_tokens` 비율이 낮을 때 mapped-only `100%`가 전체 발화/자료 `100%`처럼 읽히지 않게 보조 설명을 노출하도록 정리했다.

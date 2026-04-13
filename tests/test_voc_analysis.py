@@ -287,27 +287,26 @@ class VocAnalysisTests(unittest.TestCase):
             clear=False,
         ):
             get_settings.cache_clear()
-            with patch("final_edu.utils.Kiwi") as kiwi_class, patch("final_edu.utils._KIWI", None):
+            with patch("kiwipiepy.Kiwi") as kiwi_class, patch("final_edu.utils._KIWI", None):
                 edu_utils.ensure_kiwi_ready()
 
             get_settings.cache_clear()
 
         kiwi_class.assert_called_once_with(num_workers=1, model_path="C:/kiwi_model")
 
-    def test_app_startup_surfaces_kiwi_model_path_error_clearly(self) -> None:
+    def test_kiwi_model_path_error_is_surfaced_clearly(self) -> None:
         with patch.dict(
             os.environ,
             {"FINAL_EDU_KIWI_MODEL_PATH": "C:/kiwi_model"},
             clear=False,
         ):
             get_settings.cache_clear()
-            with patch("final_edu.utils.Kiwi", side_effect=RuntimeError("cannot open model")), patch(
+            with patch("kiwipiepy.Kiwi", side_effect=RuntimeError("cannot open model")), patch(
                 "final_edu.utils._KIWI",
                 None,
             ):
                 with self.assertRaises(RuntimeError) as context:
-                    with TestClient(create_app()):
-                        pass
+                    edu_utils.ensure_kiwi_ready()
             get_settings.cache_clear()
 
         self.assertIn("FINAL_EDU_KIWI_MODEL_PATH", str(context.exception))

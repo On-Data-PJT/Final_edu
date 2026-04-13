@@ -66,6 +66,17 @@ class _ExplodingYoutubeDL:
 
 
 class YoutubeInputTests(unittest.TestCase):
+    @staticmethod
+    def _local_settings(runtime_dir: str):
+        return replace(
+            get_settings(),
+            runtime_dir=Path(runtime_dir),
+            r2_endpoint_url=None,
+            r2_access_key_id=None,
+            r2_secret_access_key=None,
+            r2_bucket=None,
+        )
+
     def _playlist_input(self, video_count: int) -> ResolvedYoutubeInput:
         videos = [
             ResolvedYoutubeVideo(
@@ -90,7 +101,7 @@ class YoutubeInputTests(unittest.TestCase):
         self.assertFalse(is_explicit_playlist_url(url))
 
         with tempfile.TemporaryDirectory() as runtime_dir:
-            settings = replace(get_settings(), runtime_dir=Path(runtime_dir))
+            settings = self._local_settings(runtime_dir)
             storage = create_object_storage(settings)
 
             with patch("final_edu.youtube.YoutubeDL", _FakeYoutubeDL):
@@ -114,7 +125,7 @@ class YoutubeInputTests(unittest.TestCase):
         self.assertTrue(is_explicit_playlist_url(url))
 
         with tempfile.TemporaryDirectory() as runtime_dir:
-            settings = replace(get_settings(), runtime_dir=Path(runtime_dir))
+            settings = self._local_settings(runtime_dir)
             storage = create_object_storage(settings)
 
             with patch("final_edu.youtube.YoutubeDL", _FakeYoutubeDL):
@@ -138,25 +149,29 @@ class YoutubeInputTests(unittest.TestCase):
         self.assertFalse(is_explicit_playlist_url(url))
 
     def test_summarize_keeps_watch_url_as_single_video(self) -> None:
-        settings = replace(get_settings(), openai_api_key=None, chunk_target_tokens=200)
         url = "https://www.youtube.com/watch?v=U5De-0aglaE&list=PLIYf0rAjO5mY-xE36xaBCJdZzLFH6QjKI&index=7"
 
-        with patch("final_edu.youtube.YoutubeDL", _FakeYoutubeDL), patch(
-            "final_edu.youtube.probe_transcript_samples",
-            return_value={
-                "sample_count": 1,
-                "success_count": 0,
-                "average_tokens_per_second": 0.0,
-                "average_fetch_seconds": 1.0,
-                "warnings": [],
-            },
-        ):
-            summary = summarize_youtube_inputs(
-                [url],
-                settings=settings,
-                instructor_count=1,
-                section_count=3,
-            )
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            settings = replace(self._local_settings(runtime_dir), openai_api_key=None, chunk_target_tokens=200)
+            storage = create_object_storage(settings)
+
+            with patch("final_edu.youtube.YoutubeDL", _FakeYoutubeDL), patch(
+                "final_edu.youtube.probe_transcript_samples",
+                return_value={
+                    "sample_count": 1,
+                    "success_count": 0,
+                    "average_tokens_per_second": 0.0,
+                    "average_fetch_seconds": 1.0,
+                    "warnings": [],
+                },
+            ):
+                summary = summarize_youtube_inputs(
+                    [url],
+                    settings=settings,
+                    instructor_count=1,
+                    section_count=3,
+                    storage=storage,
+                )
 
         self.assertEqual(summary["expanded_video_count"], 1)
         self.assertFalse(summary["has_playlist"])
@@ -264,7 +279,7 @@ class YoutubeInputTests(unittest.TestCase):
         url = "https://www.youtube.com/watch?v=U5De-0aglaE"
 
         with tempfile.TemporaryDirectory() as runtime_dir:
-            settings = replace(get_settings(), runtime_dir=Path(runtime_dir))
+            settings = self._local_settings(runtime_dir)
             storage = create_object_storage(settings)
 
             with patch("final_edu.youtube.YoutubeDL", _ExplodingYoutubeDL):
@@ -283,10 +298,9 @@ class YoutubeInputTests(unittest.TestCase):
 
     def test_single_video_metadata_fallback_warning_is_surface_in_prepare_summary(self) -> None:
         url = "https://www.youtube.com/watch?v=U5De-0aglaE"
-        settings = replace(get_settings(), openai_api_key=None, chunk_target_tokens=200)
 
         with tempfile.TemporaryDirectory() as runtime_dir:
-            settings = replace(settings, runtime_dir=Path(runtime_dir))
+            settings = replace(self._local_settings(runtime_dir), openai_api_key=None, chunk_target_tokens=200)
             storage = create_object_storage(settings)
 
             with patch("final_edu.youtube.YoutubeDL", _ExplodingYoutubeDL), patch(
@@ -314,7 +328,7 @@ class YoutubeInputTests(unittest.TestCase):
         url = "https://www.youtube.com/playlist?list=PLIYf0rAjO5mY-xE36xaBCJdZzLFH6QjKI"
 
         with tempfile.TemporaryDirectory() as runtime_dir:
-            settings = replace(get_settings(), runtime_dir=Path(runtime_dir))
+            settings = self._local_settings(runtime_dir)
             storage = create_object_storage(settings)
 
             with patch("final_edu.youtube.YoutubeDL", _ExplodingYoutubeDL):

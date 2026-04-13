@@ -5,7 +5,7 @@ services:
     region: singapore
     plan: starter
     buildCommand: pip install uv && uv sync
-    startCommand: uv run python -m final_edu --host 0.0.0.0 --port $PORT
+    startCommand: .venv/bin/python -m final_edu --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
@@ -75,7 +75,7 @@ services:
     region: singapore
     plan: standard
     buildCommand: pip install uv && uv sync
-    startCommand: uv run python -m final_edu.worker
+    startCommand: .venv/bin/python -m final_edu.worker
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.12

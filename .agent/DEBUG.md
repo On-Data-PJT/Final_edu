@@ -238,6 +238,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/courses.py`, `final_edu/app.py`, `tests/test_course_preview.py`
   Trigger Commands: `POST /courses/preview`, Render course preview 로그, 보호 PDF 업로드
   Must Read When: unreadable/encrypted PDF preview fallback, Render preview 500 조사
+- `DBG-049` `active` Lane: `Lead / Integration`
+  Tags: `render`, `memory`, `queue`, `kiwi`, `starter`, `stalled-job`
+  Related Files: `final_edu/utils.py`, `final_edu/app.py`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `render.yaml`
+  Trigger Commands: Render OOM 이벤트, `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`
+  Must Read When: Render starter 메모리 절감, `Kiwi` startup preload, stalled job/status UX, Blueprint start command 변경
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -1305,12 +1310,13 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 실제 환경 의존 실패 지점은 `Kiwi` 모델 초기화였고, 기존 코드는 이를 분석 경로에서 늦게 만나 사용자에게는 무한 대기처럼 보일 수 있었음
 - Resolution:
   - `FINAL_EDU_KIWI_MODEL_PATH` 선택적 설정을 추가해, Windows/비ASCII 경로 환경에서는 ASCII-only 모델 경로로 override 할 수 있게 정리했음
-  - `Kiwi` 초기화 실패는 명확한 `RuntimeError`로 감싸고, web/worker startup 에서 readiness check 를 먼저 수행해 늦은 분석 실패 대신 시작 단계에서 바로 드러나게 변경했음
+  - `Kiwi` 초기화 실패는 명확한 `RuntimeError`로 감싸고, worker startup 에서는 readiness check 를 먼저 수행해 분석 worker 가 바로 실패하도록 정리했음
+  - web startup 에서는 `Kiwi` preload 를 제거하고 실제 lexical 경로에서만 lazy-load 하도록 바꿔 Render starter 메모리 압박을 줄였음
   - 공식 실행 계약은 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, repo 코드에는 Windows 전용 하드코딩 경로나 module-level `app` 의존을 넣지 않았음
 - Prevention Rule:
   - Windows/비ASCII 경로에서 `Kiwi` 문제를 해결할 때 repo 코드에 `C:\\...` 같은 OS 전용 모델 경로를 하드코딩하지 말 것
   - 공식 실행 경로와 다른 `uvicorn module:app` 방식에서만 생기는 증상을 앱 버그와 혼동하지 말 것
-  - `Kiwi` 같은 핵심 분석 의존성은 업로드 후 뒤늦게 만나지 말고 web/worker startup 에서 readiness check 로 먼저 검증할 것
+  - `Kiwi` 같은 핵심 분석 의존성은 worker startup 에서는 fail-fast 로 검증하되, Render starter web 에서는 eager preload 를 기본값으로 두지 말 것
 
 ### DBG-048 `active` 보호/손상 PDF가 `/courses/preview`에서 그대로 예외를 올리며 500으로 터질 수 있었음
 
@@ -1334,3 +1340,29 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - `/courses/preview`에서 PDF reader 예외를 route-level 500으로 그대로 올리지 말 것
   - unreadable/encrypted PDF도 현재 Page 1 편집 계약상 `rejected` preview payload로 내려 수동 저장 경로를 유지할 것
   - Render 로그에 `FileNotDecryptedError`나 `PdfReadError`가 보이면 PDF parse fallback부터 먼저 확인할 것
+
+### DBG-049 `active` Render starter web 에서 `Kiwi` preload 와 `uv run` 재기동 오버헤드가 겹치면 OOM/restart 와 stalled spinner 로 보일 수 있음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `render`, `memory`, `queue`, `kiwi`, `starter`, `stalled-job`
+- Related Files: `final_edu/utils.py`, `final_edu/app.py`, `final_edu/jobs.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `render.yaml`
+- Trigger Commands: Render OOM 이벤트, `POST /analyze/prepare`, `POST /analyze/prepare/{request_id}/confirm`, `GET /jobs/{job_id}`
+- Must Read When: Render starter 메모리 절감, `Kiwi` startup preload, stalled job/status UX, Blueprint start command 변경
+- Symptom:
+  - Render `starter` web 인스턴스가 `Ran out of memory (used over 512MB)`로 재시작될 수 있었고, 사용자는 Page 1 loading overlay 나 job polling 화면에서 톱니바퀴만 도는 것처럼 느낄 수 있었음
+  - web 로그에는 YouTube metadata fallback warning 만 남는데, 실제로는 web restart 또는 worker pickup 지연 때문에 결과 페이지가 terminal state 로 가지 못하는 경우가 있었음
+- Root Cause:
+  - web startup 이 `Kiwi`를 eager preload 했고, Render start command 가 `uv run ...`이라 재기동 때마다 환경 확인/bytecode 작업까지 겹치며 starter 메모리 여유를 더 줄였음
+  - `/jobs/{job_id}` polling 화면은 `queued/running` 정체를 별도로 설명하지 않아 worker 미기동, job 정체, web restart 가 모두 generic spinner 로만 보였음
+- Resolution:
+  - `kiwipiepy` import 와 `Kiwi` 생성은 lazy-load 로 옮기고, web startup 에서 preload 를 제거했음
+  - worker startup 은 계속 `Kiwi` readiness 를 fail-fast 로 검증해 lexical 의존성 오류를 startup 에서 드러나게 유지했음
+  - Render Blueprint start command 를 `.venv/bin/python -m ...`로 바꿔 `uv run` 재기동 오버헤드를 줄였음
+  - `/jobs/{job_id}/status`에 stalled 진단 필드를 추가하고, job polling 화면과 Page 1 fetch 경로에 restart/timeout 안내를 넣었음
+  - enqueue / worker pickup / completion / failure 로그를 명시적으로 남겨 web restart 와 worker-side failure 를 로그만으로도 구분할 수 있게 했음
+- Prevention Rule:
+  - Render starter web 에서는 heavy NLP dependency 를 startup 에서 eager preload 하지 말 것
+  - Render Blueprint start command 는 이미 생성된 `.venv`를 직접 실행하고, `uv run`을 runtime wrapper 로 다시 태우지 말 것
+  - queue 기반 결과 페이지는 `queued/running` 정체를 terminal state 기다림으로만 두지 말고, stalled 안내와 poll failure 안내를 함께 둘 것
+  - Render OOM/restart 로그가 보이면 YouTube warning 만 보지 말고 web memory footprint, worker pickup 로그, stalled status payload 를 같이 확인할 것

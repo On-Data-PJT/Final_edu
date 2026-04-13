@@ -184,6 +184,8 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 실행 명령:
   - Web: `uv run python -m final_edu --reload`
   - Worker: `uv run python -m final_edu.worker`
+  - Render Blueprint Web: `.venv/bin/python -m final_edu --host 0.0.0.0 --port $PORT`
+  - Render Blueprint Worker: `.venv/bin/python -m final_edu.worker`
 - 실행 엔트리포인트는 `final_edu/cli.py -> uvicorn factory(final_edu.app:create_app)` 기준이다.
   - module-level `final_edu.app:app` 객체 존재를 공식 실행 계약으로 가정하지 않는다.
 - 선택적 환경 변수:
@@ -252,6 +254,8 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 분석 모드:
   - `OPENAI_API_KEY`가 있으면 임베딩 사용, 실패 시 lexical fallback
   - lexical fallback 은 `kiwipiepy` 기반 tokenization + section title 사용자 사전을 사용한다
+  - worker startup 은 `Kiwi` readiness 를 먼저 검증하고, web 은 lexical 경로에서만 `Kiwi`를 lazy-load 한다
+  - `Kiwi` 초기화 실패는 worker startup 또는 실제 lexical 분석 경로에서 명시적 runtime error 로 드러나야 하며, Render starter web 에서는 startup preload 를 하지 않는다
   - speech section assignment 는 section `title + description`에서 generic fragment anchor 를 만들고, 제목 rescue 는 exact/normalized fragment match 와 bounded chapter index 만 보조 신호로 쓴다
   - 커리큘럼 preview는 `OPENAI_CURRICULUM_MODEL`이 설정된 OpenAI 경로를 우선 사용하고, 없으면 자동 승인 없이 review/reject 중심으로 동작
   - 솔루션 인사이트와 VOC 분석은 `OPENAI_INSIGHT_MODEL`을 사용하고, 실패 시 deterministic fallback

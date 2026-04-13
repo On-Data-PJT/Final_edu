@@ -5,11 +5,13 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-
-from kiwipiepy import Kiwi
+from typing import TYPE_CHECKING
 
 from final_edu.config import get_settings
 from final_edu.models import ExtractedChunk, RawTextSegment
+
+if TYPE_CHECKING:
+    from kiwipiepy import Kiwi
 
 WHITESPACE_RE = re.compile(r"\s+")
 SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?。！？])\s+")
@@ -175,6 +177,8 @@ _REGISTERED_KIWI_TERMS: set[str] = set()
 
 
 def _build_kiwi() -> Kiwi:
+    from kiwipiepy import Kiwi
+
     settings = get_settings()
     configured_model_path = str(settings.kiwi_model_path or "").strip()
     kiwi_kwargs: dict[str, object] = {"num_workers": 1}
