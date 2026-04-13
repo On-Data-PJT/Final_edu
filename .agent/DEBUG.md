@@ -1,6 +1,6 @@
 # DEBUG
 
-Last Updated: 2026-04-12
+Last Updated: 2026-04-13
 
 이 문서는 **실제로 발생했고 해결된 오류만** 기록합니다.
 preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작업과 맞는 재발 방지 규칙을 빠르게 찾는 것입니다.
@@ -218,6 +218,16 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/templates/job.html`, `final_edu/static/app.js`, `tests/test_page2_dashboard.py`
   Trigger Commands: `/jobs/{job_id}` Page 2 `전체 평균`/단일 강사 word cloud 비교
   Must Read When: Page 2 word cloud aggregate, keyword payload public/private 분리, overall average title/renderer 계약 변경
+- `DBG-041` `active` Lane: `Web / Demo Agent`
+  Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
+  Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
+  Trigger Commands: `POST /courses/preview`, 과정 추가 popup 저장, 커리큘럼 preview 표 변경
+  Must Read When: Page 1 course preview visibility, editable rows, preview decision/save 계약 변경
+- `DBG-042` `active` Lane: `Lead / Integration`
+  Tags: `courses`, `preview`, `weights`, `lecture-count`, `browser-validation`
+  Related Files: `final_edu/courses.py`, `final_edu/static/app.js`, `tests/test_course_preview.py`
+  Trigger Commands: `POST /courses/preview`, 과정 추가 popup 저장
+  Must Read When: 커리큘럼 preview 비중 산출 기준, preview weight input step, chapter roadmap parser 변경
 
 ## Active Incidents
 
@@ -1099,3 +1109,49 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - `전체 평균` word cloud 는 `flatten + slice`로 만들지 말고 별도 aggregate field 또는 실제 강사 목록만 대상으로 한 집계 함수를 사용할 것
   - 단일 강사 결과에서는 `전체 평균 == 해당 강사 keyword set`이 되는 회귀 테스트를 반드시 유지할 것
   - word cloud 색상은 `Math.random()` 같은 비결정 경로를 쓰지 말고 token 기반 stable color 를 사용할 것
+
+### DBG-041 `active` Page 1 과정 preview 의 decision 을 저장 차단 기준으로 묶어 사용자가 직접 대주제를 정리해도 저장할 수 없었음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Web / Demo Agent`
+- Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
+- Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
+- Trigger Commands: `POST /courses/preview`, 과정 추가 popup 저장, 커리큘럼 preview 표 변경
+- Must Read When: Page 1 course preview visibility, editable rows, preview decision/save 계약 변경
+- Symptom:
+  - `accepted` preview 는 대주제 표를 숨겨 사용자가 자동 추출 결과를 직접 확인할 수 없었음
+  - `rejected` preview 는 사용자가 대주제/비중을 직접 정리하더라도 save 버튼이 끝까지 비활성화되어 저장할 수 없었음
+- Root Cause:
+  - 프론트가 `preview.decision`을 안내 상태가 아니라 save gating 으로 사용했고, `renderCoursePreviewTable()`도 `review_required`에서만 표를 렌더했음
+  - course preview 표에는 행 추가/삭제가 없어 추출 실패 케이스에서 사용자가 직접 커리큘럼을 만들 수 있는 경로도 부족했음
+- Resolution:
+  - preview 표를 `accepted | review_required | rejected` 모두에서 항상 editable 하게 렌더하도록 변경
+  - 추출된 섹션이 없으면 빈 1행으로 시작하고, `대주제 추가`/행 삭제를 지원하도록 보강
+  - save 활성 조건을 `decision`이 아니라 `title + description + target_weight`가 모두 유효한 preview rows 존재 여부로 변경
+- Prevention Rule:
+  - Page 1 course preview 의 `decision`은 안내/신뢰도 상태로만 사용하고 save 차단 기준으로 재사용하지 말 것
+  - preview 표 visibility 와 editability 를 `review_required` 전용 특수 케이스로 다시 묶지 말 것
+  - 추출 실패(`rejected`)도 사용자가 직접 편집해 저장할 수 있는 경로를 항상 남길 것
+
+### DBG-042 `active` 과정 preview 의 auto-filled 비중이 브라우저 number step validation 에 걸리고, 같은 chapter roadmap PDF도 주차/강수 기준이 번갈아 선택되어 비중이 흔들렸음
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `courses`, `preview`, `weights`, `lecture-count`, `browser-validation`
+- Related Files: `final_edu/courses.py`, `final_edu/static/app.js`, `tests/test_course_preview.py`
+- Trigger Commands: `POST /courses/preview`, 과정 추가 popup 저장
+- Must Read When: 커리큘럼 preview 비중 산출 기준, preview weight input step, chapter roadmap parser 변경
+- Symptom:
+  - 자동 산출된 `13.33`, `20.01` 같은 비중이 preview table 에 채워져도 `유효한 값을 입력하십시오.`가 뜨면서 저장이 진행되지 않았음
+  - 같은 PDF를 반복 preview 하면 어떤 실행은 `weeks`, 어떤 실행은 `schedule_slots` 기반으로 비중이 달라졌음
+- Root Cause:
+  - preview weight input 이 `step="0.1"`인데 backend 는 소수 둘째 자리까지 정규화한 값을 채워 넣고 있었음
+  - chapter roadmap 형태 PDF에서 OpenAI 추출이 `주차`와 `총 강수`를 번갈아 weight 근거로 선택했고, 이를 고정하는 deterministic local parser 가 없었음
+- Resolution:
+  - preview weight input step 을 `0.01`로 맞춰 자동 산출값과 browser validation 계약을 일치시켰음
+  - `강의 구성 로드맵`의 `Chapter ... 총 N강` 형식을 읽는 local parser 를 추가해 `lecture_count`를 canonical weight source 로 고정했음
+  - preview 는 chapter roadmap parser 가 성공하면 그 비중을 우선 사용하고, 주차 기반 값은 fallback 으로만 사용함
+- Prevention Rule:
+  - auto-filled preview number input 의 정밀도와 HTML step/min contract 를 반드시 같이 바꿀 것
+  - 같은 문서에서 `%`, `총 강수`, `주차` 등 weight evidence 가 여러 개 보이면 canonical precedence 를 먼저 고정하고 OpenAI 결과를 그대로 노출하지 말 것
+  - chapter roadmap 같은 반복 가능한 문서 형식은 OpenAI에게 weight 근거를 맡기지 말고 deterministic local parser 를 우선 사용할 것

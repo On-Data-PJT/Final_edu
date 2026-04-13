@@ -28,13 +28,16 @@ from final_edu.utils import build_safe_storage_name, normalize_text, slugify
 
 NUMBER_PREFIX_RE = re.compile(r"^\s*(?:[-*]|\d+[\.\)]?)\s*")
 PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+LECTURE_COUNT_RE = re.compile(r"(?:총\s*)?(\d+(?:\.\d+)?)\s*강\b")
 TIME_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:시간|시수|hr|hrs|hour|hours)")
 WEEK_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:주차|주|weeks?)")
+WEEK_RANGE_RE = re.compile(r"(\d+)\s*(?:~|-|–|—)\s*(\d+)\s*주(?:차)?")
 DAY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:일|days?)")
 SECTION_SPLIT_RE = re.compile(r"[|:：]\s*")
 WEEK_ROW_RE = re.compile(r"^\s*(\d+)\s*주\b")
 SESSION_ROW_RE = re.compile(r"^\s*(오전|오후|저녁|야간)\b")
 SCHEDULE_COLUMN_SPLIT_RE = re.compile(r"\s{2,}")
+CHAPTER_LINE_RE = re.compile(r"^Chapter\s+(\d+)\b", re.IGNORECASE)
 IGNORE_TOKENS = (
     "강사",
     "평가",
@@ -81,6 +84,8 @@ GENERIC_SECTION_TITLES = {
 }
 WEEKDAY_HINT_TOKENS = ("월", "화", "수", "목", "금", "토", "일")
 SCHEDULE_CURRICULUM_HINT_TOKENS = ("시간표", "강의", "교육", "과정", "교과목", "커리큘럼", "종합반")
+CHAPTER_ROADMAP_START_HINTS = ("강의 구성 로드맵", "구성 로드맵")
+CHAPTER_ROADMAP_END_HINTS = ("챕터별 강의 세부 계획", "세부 계획")
 
 
 class CurriculumClassificationEvidenceSchema(BaseModel):
@@ -105,7 +110,7 @@ class CurriculumExtractionSectionSchema(BaseModel):
     description: str
     source_pages: list[int] = Field(default_factory=list, max_length=6)
     source_snippets: list[str] = Field(default_factory=list, max_length=3)
-    weight_source: Literal["percent", "hours", "weeks", "days", "schedule_slots", "none"] = "none"
+    weight_source: Literal["percent", "hours", "weeks", "days", "lecture_count", "schedule_slots", "none"] = "none"
     raw_weight_value: float | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
@@ -325,13 +330,16 @@ def _preview_with_openai(
         fallback_warnings.append(f"커리큘럼 검증 API 호출에 실패해 검토 필요 모드로 전환했습니다. ({exc})")
         return _preview_without_openai(page_records, raw_text, fallback_warnings, max_sections)
 
-    schedule_sections, schedule_confidence = _extract_schedule_sections(page_records, max_sections)
-    has_schedule_weights = bool(schedule_sections) and schedule_confidence >= 0.82
+    structured_sections, structured_confidence, structured_kind = _extract_structured_preview_sections(
+        page_records,
+        max_sections,
+    )
+    has_structured_weights = bool(structured_sections) and structured_confidence >= 0.82
     decision = _resolve_preview_decision(
         classification,
         settings,
-        has_local_section_structure=has_schedule_weights,
-        has_local_weight_signals=has_schedule_weights,
+        has_local_section_structure=has_structured_weights,
+        has_local_weight_signals=has_structured_weights,
     )
     preview_warnings = list(warnings) + list(classification.warnings)
     blocking_reasons = list(classification.blocking_reasons)
@@ -340,15 +348,15 @@ def _preview_with_openai(
         for item in classification.evidence
         if item.snippet or item.reason
     ]
-    schedule_override = has_schedule_weights and _has_schedule_curriculum_hint(raw_text)
-    if schedule_override and classification.document_kind in {"not_curriculum", "unreadable"}:
-        decision = "accepted" if schedule_confidence >= 0.9 else "review_required"
+    structured_override = has_structured_weights and _has_structured_curriculum_hint(raw_text)
+    if structured_override and classification.document_kind in {"not_curriculum", "unreadable"}:
+        decision = "accepted" if structured_confidence >= 0.9 else "review_required"
         preview_warnings = list(warnings)
         blocking_reasons = []
-        evidence = _build_schedule_preview_evidence(schedule_sections)
+        evidence = _build_structured_preview_evidence(structured_sections, structured_kind)
         classification = CurriculumClassificationSchema(
             document_kind="curriculum_like",
-            confidence=max(classification.confidence, schedule_confidence),
+            confidence=max(classification.confidence, structured_confidence),
             has_section_structure=True,
             has_explicit_weight_signals=False,
             has_derivable_weight_signals=True,
@@ -357,7 +365,7 @@ def _preview_with_openai(
             evidence=[],
         )
 
-    if decision == "rejected" and not schedule_override:
+    if decision == "rejected" and not structured_override:
         return CurriculumPreviewResult(
             decision=decision,
             document_kind=classification.document_kind,
@@ -369,8 +377,8 @@ def _preview_with_openai(
             evidence=evidence,
         )
 
-    if has_schedule_weights:
-        preview_sections = _postprocess_extracted_sections(schedule_sections, max_sections)
+    if has_structured_weights:
+        preview_sections = _postprocess_extracted_sections(structured_sections, max_sections)
         weight_status = _determine_weight_status(preview_sections)
         if decision == "review_required" and not blocking_reasons:
             blocking_reasons = ["자동 추출 결과를 그대로 저장하지 말고 대주제와 비중을 검토해 주세요."]
@@ -450,13 +458,16 @@ def _preview_without_openai(
     warnings: list[str],
     max_sections: int,
 ) -> CurriculumPreviewResult:
-    schedule_sections, schedule_confidence = _extract_schedule_sections(page_records, max_sections)
-    if schedule_sections and schedule_confidence >= 0.82:
-        preview_sections = _postprocess_extracted_sections(schedule_sections, max_sections)
+    structured_sections, structured_confidence, _structured_kind = _extract_structured_preview_sections(
+        page_records,
+        max_sections,
+    )
+    if structured_sections and structured_confidence >= 0.82:
+        preview_sections = _postprocess_extracted_sections(structured_sections, max_sections)
         return CurriculumPreviewResult(
             decision="review_required",
             document_kind="curriculum_like",
-            document_confidence=min(0.74, 0.52 + (schedule_confidence / 4)),
+            document_confidence=min(0.74, 0.52 + (structured_confidence / 4)),
             weight_status=_determine_weight_status(preview_sections),
             raw_curriculum_text=raw_text,
             sections=preview_sections,
@@ -606,6 +617,185 @@ def _extract_schedule_sections(
     return sections, confidence
 
 
+def _extract_structured_preview_sections(
+    page_records: list[dict],
+    max_sections: int,
+) -> tuple[list[CurriculumPreviewSection], float, str]:
+    chapter_sections, chapter_confidence = _extract_chapter_roadmap_sections(page_records, max_sections)
+    if chapter_sections and chapter_confidence >= 0.84:
+        return chapter_sections, chapter_confidence, "chapter_roadmap"
+    schedule_sections, schedule_confidence = _extract_schedule_sections(page_records, max_sections)
+    if schedule_sections and schedule_confidence >= 0.82:
+        return schedule_sections, schedule_confidence, "schedule_slots"
+    return [], 0.0, "none"
+
+
+def _extract_chapter_roadmap_sections(
+    page_records: list[dict],
+    max_sections: int,
+) -> tuple[list[CurriculumPreviewSection], float]:
+    lines = _extract_roadmap_lines(page_records)
+    if not lines:
+        return [], 0.0
+
+    sections: list[CurriculumPreviewSection] = []
+    current_lines: list[str] = []
+    current_page: int | None = None
+
+    def flush_block() -> None:
+        nonlocal current_lines, current_page
+        if not current_lines or current_page is None:
+            current_lines = []
+            current_page = None
+            return
+        section = _chapter_section_from_roadmap_block(current_lines, current_page, len(sections) + 1)
+        if section:
+            sections.append(section)
+        current_lines = []
+        current_page = None
+
+    for page, line in lines:
+        if CHAPTER_LINE_RE.match(line):
+            flush_block()
+            current_lines = [line]
+            current_page = page
+            continue
+        if current_lines:
+            current_lines.append(line)
+
+    flush_block()
+    sections = sections[:max_sections]
+    if not sections:
+        return [], 0.0
+    return sections, _chapter_roadmap_confidence(sections)
+
+
+def _extract_roadmap_lines(page_records: list[dict]) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    in_roadmap = False
+    for record in page_records:
+        page = int(record["page"])
+        raw_layout_text = str(record.get("raw_layout_text", "") or record.get("text", "") or "")
+        for raw_line in raw_layout_text.splitlines():
+            line = normalize_text(raw_line)
+            if not line:
+                continue
+            if not in_roadmap:
+                if any(hint in line for hint in CHAPTER_ROADMAP_START_HINTS):
+                    in_roadmap = True
+                continue
+            if any(hint in line for hint in CHAPTER_ROADMAP_END_HINTS):
+                return lines
+            if line in {"챕터", "주제", "분류", "주차", "강수"}:
+                continue
+            if line.startswith("챕터 ") and " 강수" in line:
+                continue
+            lines.append((page, line))
+    return lines
+
+
+def _chapter_section_from_roadmap_block(
+    block_lines: list[str],
+    page: int,
+    index: int,
+) -> CurriculumPreviewSection | None:
+    if not block_lines:
+        return None
+    block_text = _normalize_chapter_block_text(" ".join(block_lines))
+    chapter_match = CHAPTER_LINE_RE.match(block_text)
+    if not chapter_match:
+        return None
+    chapter_number = int(chapter_match.group(1))
+    lecture_count = _extract_lecture_count_metric(block_text)
+    week_value = _extract_week_metric(block_text)
+
+    heading = CHAPTER_LINE_RE.sub("", block_text, count=1).strip()
+    heading = _strip_metric_tokens(heading)
+    heading = normalize_text(re.sub(r"\b차\b$", "", heading).strip())
+    title_body, description = _split_chapter_heading(heading)
+    title = f"Chapter {chapter_number}: {title_body or heading or f'섹션 {index}'}"
+    if not description:
+        description = heading or title_body or title
+
+    raw_weight_value = lecture_count if lecture_count is not None else week_value
+    weight_source = "lecture_count" if lecture_count is not None else "weeks" if week_value is not None else "none"
+    if lecture_count is not None:
+        description = f"{description} · 총 {int(lecture_count) if lecture_count.is_integer() else lecture_count}강"
+
+    return CurriculumPreviewSection(
+        id=f"section-{index}",
+        title=title,
+        description=description,
+        target_weight=raw_weight_value,
+        weight_source=weight_source,
+        raw_weight_value=raw_weight_value,
+        confidence=0.92 if lecture_count is not None else 0.8,
+        source_pages=[page],
+        source_snippets=[block_text],
+        needs_weight_input=raw_weight_value is None,
+    )
+
+
+def _normalize_chapter_block_text(text: str) -> str:
+    normalized = normalize_text(str(text or ""))
+    normalized = normalized.replace("주 차", "주차")
+    normalized = re.sub(r"(\d+\s*(?:~|-|–|—)\s*\d+\s*주)\s+차\b", r"\1차", normalized)
+    normalized = re.sub(r"\s+\b차\b$", "", normalized)
+    return normalized
+
+
+def _extract_lecture_count_metric(text: str) -> float | None:
+    match = LECTURE_COUNT_RE.search(text)
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def _extract_week_metric(text: str) -> float | None:
+    normalized = _normalize_chapter_block_text(text)
+    range_match = WEEK_RANGE_RE.search(normalized)
+    if range_match:
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        if end >= start:
+            return float(end - start + 1)
+    match = WEEK_RE.search(normalized)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def _split_chapter_heading(text: str) -> tuple[str, str]:
+    cleaned = normalize_text(re.sub(r"\b차\b$", "", str(text or "")).strip())
+    if not cleaned:
+        return "", ""
+    first_korean = next((index for index, char in enumerate(cleaned) if "\uac00" <= char <= "\ud7a3"), -1)
+    if first_korean <= 0:
+        return cleaned, cleaned
+    english = normalize_text(cleaned[:first_korean])
+    korean = normalize_text(cleaned[first_korean:])
+    title = english or cleaned
+    description = korean or cleaned
+    return title, description
+
+
+def _chapter_roadmap_confidence(sections: list[CurriculumPreviewSection]) -> float:
+    if not sections:
+        return 0.0
+    lecture_count_sections = sum(1 for section in sections if section.weight_source == "lecture_count")
+    week_sections = sum(1 for section in sections if section.weight_source == "weeks")
+    score = 0.0
+    if len(sections) >= 5:
+        score += 0.34
+    elif len(sections) >= 3:
+        score += 0.24
+    score += min(0.42, lecture_count_sections / len(sections) * 0.42)
+    score += min(0.08, week_sections / len(sections) * 0.08)
+    if len({section.title for section in sections}) == len(sections):
+        score += 0.12
+    return round(min(0.99, score), 2)
+
+
 def _looks_like_weekday_header(line: str) -> bool:
     compact = normalize_text(line)
     return all(token in compact for token in WEEKDAY_HINT_TOKENS)
@@ -679,6 +869,13 @@ def _has_schedule_curriculum_hint(text: str) -> bool:
     return any(token in normalized for token in SCHEDULE_CURRICULUM_HINT_TOKENS)
 
 
+def _has_structured_curriculum_hint(text: str) -> bool:
+    normalized = normalize_text(text)
+    if any(token in normalized for token in CHAPTER_ROADMAP_START_HINTS):
+        return True
+    return _has_schedule_curriculum_hint(text)
+
+
 def _build_schedule_preview_evidence(
     sections: list[CurriculumPreviewSection],
 ) -> list[CurriculumPreviewEvidence]:
@@ -694,6 +891,27 @@ def _build_schedule_preview_evidence(
             )
         )
     return evidence
+
+
+def _build_structured_preview_evidence(
+    sections: list[CurriculumPreviewSection],
+    structured_kind: str,
+) -> list[CurriculumPreviewEvidence]:
+    if structured_kind == "chapter_roadmap":
+        evidence: list[CurriculumPreviewEvidence] = []
+        for section in sections[:3]:
+            snippet = section.source_snippets[0] if section.source_snippets else section.description
+            if not snippet:
+                continue
+            evidence.append(
+                CurriculumPreviewEvidence(
+                    page=section.source_pages[0] if section.source_pages else None,
+                    snippet=snippet,
+                    reason=f"{section.title}의 총 강수/주차 정보가 커리큘럼 로드맵에서 직접 확인됨.",
+                )
+            )
+        return evidence
+    return _build_schedule_preview_evidence(sections)
 
 
 def _candidate_line_score(raw_line: str, line: str) -> int:
@@ -837,7 +1055,7 @@ def _determine_weight_status(sections: list[CurriculumPreviewSection]) -> str:
     source_kinds = {section.weight_source for section in sections}
     has_none = any(section.weight_source == "none" or section.raw_weight_value is None for section in sections)
     has_explicit = any(section.weight_source == "percent" for section in sections)
-    has_derived = any(section.weight_source in {"hours", "weeks", "days", "schedule_slots"} for section in sections)
+    has_derived = any(section.weight_source in {"hours", "weeks", "days", "lecture_count", "schedule_slots"} for section in sections)
     if has_none and (has_explicit or has_derived):
         return "inconsistent"
     if has_none:
@@ -873,9 +1091,14 @@ def _extract_weight_metric(text: str) -> tuple[float | None, str]:
     match = PERCENT_RE.search(text)
     if match:
         return float(match.group(1)), "percent"
+    lecture_count = _extract_lecture_count_metric(text)
+    if lecture_count is not None:
+        return lecture_count, "lecture_count"
+    week_metric = _extract_week_metric(text)
+    if week_metric is not None:
+        return week_metric, "weeks"
     for pattern, label in (
         (TIME_RE, "hours"),
-        (WEEK_RE, "weeks"),
         (DAY_RE, "days"),
     ):
         metric_match = pattern.search(text)
@@ -890,9 +1113,11 @@ def _line_score(raw_line: str, line: str) -> int:
         score += 4
     if PERCENT_RE.search(line):
         score += 5
+    if LECTURE_COUNT_RE.search(line):
+        score += 4
     if TIME_RE.search(line):
         score += 4
-    if WEEK_RE.search(line) or DAY_RE.search(line):
+    if WEEK_RANGE_RE.search(line) or WEEK_RE.search(line) or DAY_RE.search(line):
         score += 3
     if SECTION_SPLIT_RE.search(line):
         score += 2
@@ -905,7 +1130,9 @@ def _line_score(raw_line: str, line: str) -> int:
 
 def _strip_metric_tokens(text: str) -> str:
     cleaned = PERCENT_RE.sub("", text)
+    cleaned = LECTURE_COUNT_RE.sub("", cleaned)
     cleaned = TIME_RE.sub("", cleaned)
+    cleaned = WEEK_RANGE_RE.sub("", cleaned)
     cleaned = WEEK_RE.sub("", cleaned)
     cleaned = DAY_RE.sub("", cleaned)
     return normalize_text(cleaned)

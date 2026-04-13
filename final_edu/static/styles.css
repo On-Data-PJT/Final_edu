@@ -742,6 +742,33 @@ select:focus {
   gap: 12px;
 }
 
+.preview-table-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.preview-table-head strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--theme_text-primary);
+}
+
+.preview-table-head p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--theme_text-secondary);
+}
+
+.preview-table-add-button {
+  flex-shrink: 0;
+  min-height: 38px;
+  padding-inline: 14px;
+}
+
 .course-preview-table {
   width: 100%;
   border-collapse: collapse;
@@ -759,6 +786,11 @@ select:focus {
   font-size: 13px;
   color: var(--theme_text-secondary);
   font-weight: 500;
+}
+
+.course-preview-table__actions {
+  width: 72px;
+  text-align: center;
 }
 
 .course-preview-table input[type="number"] {
@@ -820,6 +852,26 @@ select:focus {
 
 .course-preview-table input[type="text"] {
   min-width: 0;
+}
+
+.preview-row-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(22, 101, 52, 0.14);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--theme_text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.preview-row-remove-button:hover {
+  border-color: rgba(185, 28, 28, 0.22);
+  background: rgba(254, 242, 242, 0.92);
+  color: #b91c1c;
 }
 
 .results-dashboard {

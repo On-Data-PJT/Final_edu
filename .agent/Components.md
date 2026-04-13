@@ -1,6 +1,6 @@
 # Components
 
-Last Updated: 2026-04-12
+Last Updated: 2026-04-13
 
 ## Purpose
 
@@ -79,19 +79,21 @@ Last Updated: 2026-04-12
   - 빈 값은 확정하지 않음
   - 중복 이름은 막음
   - 확정된 chip 은 키보드 backspace 로 삭제하지 않고 chip 내부 `x` 클릭으로만 삭제한다
-- PDF preview 결과의 대주제/비중 표는 사용자에게 노출하지 않는다.
 - preview 결과는 `accepted | review_required | rejected` 세 상태를 가진다.
-- `accepted`면 compact summary 만 보여주고, preview 편집 표는 계속 숨긴다.
-- `accepted`면 상세 경고/근거 블록 없이 `저장 가능` 성격의 짧은 상태 문구만 보여준다.
+- preview 결과의 대주제/설명/비중 표는 판정 결과와 무관하게 항상 보여준다.
+- preview 표는 `accepted | review_required | rejected` 모두 같은 editable table 을 사용한다.
+- 추출된 섹션이 없으면 빈 1행으로 시작하고, 사용자가 `대주제 추가`로 행을 늘릴 수 있어야 한다.
+- 각 preview row 는 개별 삭제가 가능해야 한다.
+- preview 비중 input 은 자동 산출값과 같은 소수 둘째 자리까지 허용해야 하며, 브라우저 기본 step 검증 때문에 auto-filled 값이 저장을 막으면 안 된다.
+- `accepted`면 자동 추출 결과를 확인하고 필요하면 수정 후 저장하라는 짧은 상태 문구를 보여준다.
 - 주차별 시간표형 커리큘럼에서 과목 반복 slot 수를 신뢰할 수 있게 읽은 경우에는 비중을 자동 채워 `accepted`로 올릴 수 있어야 한다.
-- `review_required`면 대주제/설명/비중 편집 표를 노출하고 사용자가 직접 수정할 수 있어야 한다.
+- `강의 구성 로드맵`에 `총 N강`과 주차 정보가 함께 있으면, 자동 비중은 `총 강수`를 우선 기준으로 안정적으로 산출해야 한다.
 - `review_required`도 상세 판정 근거는 숨기고, `확인 후 저장` 성격의 짧은 상태 문구만 보여준다.
-- `rejected`면 저장을 막고 PDF 교체만 유도해야 한다.
-- `rejected`면 상세 사유 목록 없이 `커리큘럼으로 판정되지 않아 저장할 수 없음` 성격의 짧은 상태 문구만 보여준다.
+- `rejected`여도 자동 판정 실패 안내만 보여주고, 사용자가 대주제/설명/비중을 직접 정리해 저장할 수 있어야 한다.
+- `rejected`에서 추출된 대주제가 없으면 빈 editable row 로 시작하고 직접 입력을 유도해야 한다.
 - save 활성 조건은 `과정명 + 저장 가능한 preview 상태 + 강사 1명 이상`이다.
-- 저장 가능한 preview 상태란 아래 둘 중 하나다.
-  - `accepted`이고 대주제/비중이 자동 검증된 상태
-  - `review_required`이지만 사용자가 대주제와 비중을 모두 채워 유효한 `sections_json`을 만든 상태
+- 저장 가능한 preview 상태란 `preview table rows`가 1개 이상 있고, 모든 row 가 유효한 `title + description + target_weight`를 가지는 상태다.
+- `preview decision`은 저장 차단 기준이 아니라 안내용 상태값이다.
 
 ### Course List Popup
 

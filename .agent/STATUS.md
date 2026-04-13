@@ -1,6 +1,6 @@
 # STATUS
 
-Last Updated: 2026-04-12
+Last Updated: 2026-04-13
 
 ## Current Snapshot
 
@@ -20,6 +20,10 @@ Last Updated: 2026-04-12
 
 - `Page 1`
   - `dev`의 centered composer lane UI를 유지하되, 각 lane 은 좌측 `+` dropdown 으로 `강의자료 / 유튜브 링크 / VOC` 입력면을 전환한다.
+  - 과정 추가 popup 은 커리큘럼 preview 결과를 `accepted | review_required | rejected`와 무관하게 항상 editable table 로 보여주고, 사용자가 대주제 row 를 추가/삭제하며 직접 정리할 수 있다.
+  - 과정 추가 popup 의 preview 비중 input 은 자동 산출값과 같은 소수 둘째 자리까지 허용하며, browser step validation 때문에 auto-filled weight 가 저장을 막지 않게 맞춘다.
+  - 커리큘럼 PDF에 `강의 구성 로드맵`과 `총 N강`이 있으면 preview 비중은 `강수 기준`을 canonical source 로 사용하고, 주차 기반 값은 fallback 으로만 쓴다.
+  - `accepted`와 `review_required`는 안내 문구만 다르고 같은 editable preview table 을 사용하며, `rejected`도 빈 row 또는 추출 초안을 바탕으로 직접 정리해 저장할 수 있다.
   - `과정 목록` popup 의 각 row 는 `선택 hit area + 작은 x 삭제 버튼`으로 분리되어 있고, 삭제는 별도 확인 popup 을 거친다.
   - lane 하단 공통 rail 에 파일, 링크, VOC chip 을 함께 유지하고, 현재 보이는 입력면만 바뀐다.
   - persisted draft restore 는 `files`, `vocFiles`, `youtubeUrls`, `instructorName`와 함께 마지막 lane `mode`를 복원한다.
@@ -56,6 +60,7 @@ Last Updated: 2026-04-12
 ## Backend Contract
 
 - `dev` UI/레이아웃/라우트는 유지하고, `lexical`의 백엔드를 이식한 상태다.
+- 과정 preview/save 계약은 `preview decision`이 아니라 최종 `sections_json` 유효성 기준으로 저장 가능 여부를 판단한다.
 - YouTube 처리 계약:
   - 명시적 `playlist?list=...`만 playlist 로 확장한다.
   - `watch?v=...&list=...`는 단일 영상으로 유지한다.
@@ -140,6 +145,10 @@ Last Updated: 2026-04-12
 - 삭제는 관련 completed/failed job metadata, `jobs/{job_id}` object prefix, matching `analysis-preparations/*.json`까지 함께 정리하도록 보강했다.
 - 진행 중 job 이 있는 과정 삭제는 `409`로 거부하고, stale prepare confirm 은 course existence check 로 차단하도록 정리했다.
 - VOC extractor 는 Excel row 를 CSV와 같은 `header: value | ...` 형식으로 직렬화하고, clear response sheet 만 분석하도록 보강했다.
+- 과정 추가 popup 의 preview table 을 `accepted/review_required/rejected` 모두에서 항상 editable 하게 바꾸고, `대주제 추가`/행 삭제를 지원하도록 보강했다.
+- Page 1 course save gating 에서 `preview.decision === "rejected"` 차단을 제거하고, 유효한 preview rows 가 있으면 사용자가 직접 정리한 커리큘럼도 저장할 수 있게 맞췄다.
+- 과정 추가 popup 의 preview 비중 input step 을 `0.01`로 맞춰 자동 산출된 `13.33`, `20.01` 같은 값이 브라우저 native validation 에 걸리지 않도록 보강했다.
+- 커리큘럼 preview 에 `강의 구성 로드맵` 기반 local parser 를 추가해 `Chapter ... 총 N강` 형식의 PDF는 OpenAI 변동과 무관하게 `lecture_count` 기준의 고정 비중을 사용하도록 정리했다.
 - `render.yaml`을 현재 ScraperAPI/STT/probe/distributed throttle env 계약과 맞췄다.
 - `yt-dlp` metadata 해석은 더 이상 ScraperAPI proxy 를 타지 않고, metadata-only `process=False` 경로와 단일 영상 fallback 을 사용한다.
 
@@ -223,6 +232,7 @@ Last Updated: 2026-04-12
 - `DBG-038`
 - `DBG-039`
 - `DBG-040`
+- `DBG-041`
 
 ## Recent Updates
 

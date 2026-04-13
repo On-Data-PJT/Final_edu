@@ -207,9 +207,10 @@ UI 작업 시 구조는 `.agent/Components.md`, 시각 표현은 `.agent/DESIGN.
 - 입력 포맷: `PDF`, `PPTX`, `TXT/MD`, `CSV`, `YouTube URL`, `YouTube Playlist URL`, `VOC PDF/CSV/TXT/XLSX/XLS`
 - 커리큘럼 기준:
   - `Page 1`에서 과정명 + 커리큘럼 PDF를 등록
-  - `POST /courses/preview`는 PDF를 `accepted | review_required | rejected`로 판정하고, 대주제/비중 초안의 신뢰도와 저장 가능 여부를 함께 반환
+  - `POST /courses/preview`는 PDF를 `accepted | review_required | rejected`로 판정하고, 대주제/비중 초안과 신뢰도 정보를 반환한다
   - 주차별 시간표형 PDF는 `layout` 텍스트를 기준으로 로컬 시간표 파서가 과목 slot 수를 집계해 비중을 자동 산출할 수 있다
-  - 비관련 PDF나 unreadable PDF는 자동 기본 섹션을 만들지 않고 저장 차단 대상으로 본다
+  - 과정 추가 모달은 preview 판정 결과와 무관하게 대주제/설명/비중 표를 항상 editable 하게 보여주고, 사용자가 직접 수정하거나 빈 행을 추가할 수 있어야 한다
+  - 비관련 PDF나 unreadable PDF도 사용자가 대주제/설명/비중을 직접 정리하면 저장할 수 있다
   - 사용자가 수정/저장한 목표 비중이 canonical course contract 가 됨
   - 분석 방식:
   - `Page 1`: 과정 선택 + 강사별 dropdown lane 입력

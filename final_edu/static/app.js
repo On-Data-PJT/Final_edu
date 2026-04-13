@@ -293,6 +293,37 @@
         updateCourseSaveButtonState(refs);
         renderCoursePreviewState(refs.previewState, state.page1.preview, refs.courseNameInput?.value || "");
       });
+      refs.previewTable.addEventListener("click", (event) => {
+        const target = eventTargetElement(event);
+        if (!target || !state.page1.preview) {
+          return;
+        }
+        const addButton = target.closest("[data-preview-add-row]");
+        if (addButton) {
+          event.preventDefault();
+          syncPreviewSectionsFromTable(refs.previewTable);
+          state.page1.preview.sections.push(createEmptyPreviewSection(state.page1.preview.sections.length + 1));
+          renderCoursePreview(refs.previewTable, refs.previewState, state.page1.preview, refs.courseNameInput?.value || "");
+          updateCourseSaveButtonState(refs);
+          focusPreviewRow(refs.previewTable, state.page1.preview.sections.length - 1);
+          return;
+        }
+        const removeButton = target.closest("[data-preview-remove-row]");
+        if (!removeButton) {
+          return;
+        }
+        event.preventDefault();
+        const rowIndex = Number(removeButton.getAttribute("data-preview-remove-row"));
+        if (Number.isNaN(rowIndex)) {
+          return;
+        }
+        syncPreviewSectionsFromTable(refs.previewTable);
+        state.page1.preview.sections = state.page1.preview.sections.filter((_, index) => index !== rowIndex);
+        ensureEditablePreviewSections(state.page1.preview);
+        renderCoursePreview(refs.previewTable, refs.previewState, state.page1.preview, refs.courseNameInput?.value || "");
+        updateCourseSaveButtonState(refs);
+        focusPreviewRow(refs.previewTable, Math.max(0, rowIndex - 1));
+      });
     }
 
     refs.courseForm.addEventListener("submit", async (event) => {
@@ -629,6 +660,7 @@
     if (!previewTable) {
       return;
     }
+    ensureEditablePreviewSections(preview);
     previewTable.innerHTML = "";
     previewTable.dataset.sectionCount = String(preview.sections.length);
     renderCoursePreviewState(previewState, preview, courseName);
@@ -3264,17 +3296,17 @@
     const prefix = courseName ? `${courseName} · ` : "";
     previewState.classList.remove("is-success", "is-warning", "is-danger");
     if (preview.decision === "accepted") {
-      previewState.textContent = `${prefix}커리큘럼으로 인식되어 저장할 수 있습니다.`;
+      previewState.textContent = `${prefix}자동 추출된 대주제를 확인하고 필요하면 수정한 뒤 저장해 주세요.`;
       previewState.classList.add("is-success");
       return;
     }
     if (preview.decision === "review_required") {
-      previewState.textContent = `${prefix}커리큘럼으로 인식했지만 대주제와 비중을 확인한 뒤 저장해 주세요.`;
+      previewState.textContent = `${prefix}대주제와 비중을 확인하거나 수정한 뒤 저장해 주세요.`;
       previewState.classList.add("is-warning");
       return;
     }
-    previewState.textContent = `${prefix}커리큘럼으로 판정되지 않아 저장할 수 없습니다.`;
-    previewState.classList.add("is-danger");
+    previewState.textContent = `${prefix}자동 판정은 실패했지만 대주제를 직접 정리해 저장할 수 있습니다.`;
+    previewState.classList.add("is-warning");
   }
 
   function renderCoursePreviewTable(previewTable, preview) {
@@ -3282,17 +3314,26 @@
       return;
     }
     previewTable.innerHTML = "";
-    const shouldShowTable = preview.decision === "review_required" && preview.sections.length;
-    if (!shouldShowTable) {
-      previewTable.classList.add("is-hidden");
-      return;
-    }
+    const hadExtractedSections = Array.isArray(preview.sections)
+      && preview.sections.some((section) => {
+        const title = String(section?.title || "").trim();
+        const description = String(section?.description || "").trim();
+        return Boolean(title || description);
+      });
     previewTable.classList.remove("is-hidden");
     const wrap = document.createElement("div");
     wrap.className = "preview-table-wrap";
-    if (shouldShowTable) {
-      wrap.appendChild(buildEditablePreviewTable(preview.sections));
-    }
+    const head = document.createElement("div");
+    head.className = "preview-table-head";
+    head.innerHTML = `
+      <div>
+        <strong>추출된 대주제 / 설명 / 비중</strong>
+        <p>${escapeHtml(previewTableCopy(preview, hadExtractedSections))}</p>
+      </div>
+      <button type="button" class="secondary-button preview-table-add-button" data-preview-add-row>대주제 추가</button>
+    `;
+    wrap.appendChild(head);
+    wrap.appendChild(buildEditablePreviewTable(preview.sections));
     previewTable.appendChild(wrap);
   }
 
@@ -3305,6 +3346,7 @@
           <th>대주제</th>
           <th>설명</th>
           <th>비중(%)</th>
+          <th class="course-preview-table__actions">삭제</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -3320,11 +3362,14 @@
           <input
             type="number"
             min="0"
-            step="0.1"
+            step="0.01"
             data-preview-field="target_weight"
             placeholder="직접 입력"
             value="${section.target_weight === null || section.target_weight === undefined ? "" : escapeAttr(section.target_weight)}"
           />
+        </td>
+        <td class="course-preview-table__actions">
+          <button type="button" class="preview-row-remove-button" data-preview-remove-row="${index}" aria-label="대주제 삭제">×</button>
         </td>
       `;
       tbody.appendChild(row);
@@ -3333,11 +3378,16 @@
   }
 
   function syncPreviewSectionsFromTable(previewTable) {
-    if (!state.page1.preview || !previewTable || state.page1.preview.decision !== "review_required") {
+    if (!state.page1.preview || !previewTable) {
       return;
     }
     const rows = qsa("[data-preview-row]", previewTable);
     if (!rows.length) {
+      state.page1.preview.sections = [];
+      const sectionsInput = $("#course-sections-json");
+      if (sectionsInput) {
+        sectionsInput.value = "[]";
+      }
       return;
     }
     state.page1.preview.sections = rows.map((row, index) => {
@@ -3354,7 +3404,7 @@
         target_weight: Number.isFinite(parsedWeight) ? parsedWeight : null,
         needs_weight_input: !(Number.isFinite(parsedWeight) && parsedWeight > 0),
       };
-    }).filter((section) => section.title);
+    });
     state.page1.preview.weight_status = derivePreviewWeightStatus(state.page1.preview.sections);
     const sectionsInput = $("#course-sections-json");
     if (sectionsInput) {
@@ -3370,10 +3420,61 @@
   }
 
   function isSavableCoursePreview(preview) {
-    if (!preview || preview.decision === "rejected") {
+    if (!preview) {
       return false;
     }
     return previewSectionsAreValid(preview.sections);
+  }
+
+  function createEmptyPreviewSection(order = 1) {
+    return {
+      id: uniqueId(`section-${order}`),
+      title: "",
+      description: "",
+      target_weight: null,
+      weight_source: "none",
+      raw_weight_value: null,
+      confidence: 0,
+      source_pages: [],
+      source_snippets: [],
+      needs_weight_input: true,
+    };
+  }
+
+  function ensureEditablePreviewSections(preview) {
+    if (!preview) {
+      return [];
+    }
+    if (!Array.isArray(preview.sections)) {
+      preview.sections = [];
+    }
+    if (!preview.sections.length) {
+      preview.sections = [createEmptyPreviewSection(1)];
+    }
+    return preview.sections;
+  }
+
+  function previewTableCopy(preview, hadExtractedSections) {
+    if (preview?.decision === "accepted") {
+      return "자동 추출 결과입니다. 필요하면 직접 수정한 뒤 저장하세요.";
+    }
+    if (preview?.decision === "review_required") {
+      return "자동 추출 결과를 검토하고 필요하면 직접 보완해 저장하세요.";
+    }
+    if (hadExtractedSections) {
+      return "자동 판정은 실패했지만 추출된 초안을 바탕으로 직접 수정해 저장할 수 있습니다.";
+    }
+    return "자동 추출 초안이 부족해 빈 행으로 시작합니다. 대주제와 비중을 직접 입력해 저장하세요.";
+  }
+
+  function focusPreviewRow(previewTable, rowIndex) {
+    if (!previewTable) {
+      return;
+    }
+    const rows = qsa("[data-preview-row]", previewTable);
+    const row = rows[Math.max(0, Math.min(rowIndex, rows.length - 1))];
+    const titleInput = row ? findFirst(row, ["[data-preview-field='title']"]) : null;
+    titleInput?.focus();
   }
 
   function previewSectionsAreValid(sections) {
