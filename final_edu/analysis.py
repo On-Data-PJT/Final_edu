@@ -1663,6 +1663,7 @@ def _generate_voc_analysis(
     try:
         response = client.chat.completions.create(
             model=settings.openai_insight_model,
+            temperature=0,
             response_format={"type": "json_object"},
             messages=[
                 {

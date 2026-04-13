@@ -60,7 +60,10 @@ Last Updated: 2026-04-13
   - 강사별 `voc_analysis`를 사용해 파일 메타, 문항별 평균 점수, 감성 키워드, 반복 불만 패턴, 개선 포인트를 렌더한다.
 - `Page 4 / Solution`
   - `GET /solution`은 기존 `분석 결과 기반 인사이트`, `최신 업계 동향 분석` 2섹션을 유지한다.
+  - solution gap/benchmark 비교는 강사 평균 actual share 가 아니라 과정의 `target_weight`를 기준으로 계산한다.
+  - `강사별 갭 현황` 카피는 `강사별 표준커리큘럼 준수도` 기준 문구로 정리되어 있다.
   - 하단에 별도 `VOC 기반 인사이트` 패널이 추가되어 공통 `voc_summary`의 전체 문항 평균 점수와 자유의견 요약을 함께 렌더한다.
+  - legacy `/jiye` 실험 페이지와 `/jobs/{job_id}/solutions` 별도 solutions 페이지는 제거되고, 메인 결과 흐름은 `/jobs/{job_id}` → `/review` → `/solution`만 유지한다.
 
 ## Backend Contract
 
@@ -95,6 +98,7 @@ Last Updated: 2026-04-13
   - speech title prior 는 exact/normalized fragment match 와 bounded chapter-index rescue 만 사용하고, transcript score 가 최소 plausibility 를 넘지 못하면 강제 배정하지 않는다.
 - VOC 분석 계약:
   - Page 1 업로드된 `voc_files`는 payload -> worker -> result 로 실제 전달된다.
+  - VOC OpenAI text analysis 호출은 `temperature=0`으로 고정해 같은 입력에서 요약 drift 를 줄인다.
   - VOC spreadsheet 는 `BQ 평점 문항 점수 집계`와 `자유의견 row text 분석`을 함께 지원한다.
   - `xlsx/xls` survey workbook 은 multi-row header 를 collapse 해 `BQ` 평점 문항과 `기타 의견` 열을 동시에 추출한다.
   - `AQ` 계열 문항은 점수 집계에서 제외하고, `기타 의견` 같은 자유의견 열만 텍스트 VOC 분석 source 로 사용한다.
@@ -292,6 +296,11 @@ Last Updated: 2026-04-13
 
 ### 2026-04-13
 
+- `origin/jiye`의 오래된 브랜치를 merge 하지 않고, 현재 `dev` 위에 필요한 세 변경만 선별 이식했다.
+- VOC OpenAI text analysis 호출에 `temperature=0`을 추가해 강사별 자유의견 요약의 비결정성을 줄였다.
+- solution payload 의 gap benchmark 를 강사 평균 actual share 대신 과정 `target_weight` 기준으로 바꿔, `표준커리큘럼 준수도` 해석이 목표 비중과 직접 비교되도록 정리했다.
+- `solution.html`의 커버리지/표준커리큘럼 준수도 카피와 trend fallback 문구를 `jiye` 기준으로 일부 갱신하면서도, 최근 `dev`의 VOC question score 그룹 렌더는 그대로 보존했다.
+- route만 남아 있던 `/jiye`, `/jobs/{job_id}/solutions`와 관련 legacy template/scratch 파일을 정리하고, 메인 서비스 플로우에 영향이 없는지 회귀 테스트로 확인했다.
 - `Kiwi` 모델 경로를 repo 코드에 하드코딩하지 않고, 선택적 `FINAL_EDU_KIWI_MODEL_PATH` 설정으로 override 할 수 있게 정리했다.
 - web/worker startup 에서 `Kiwi` readiness 를 먼저 검증해, 분석 제출 후 무한 대기처럼 보이던 환경 의존 오류를 startup 단계에서 명확한 에러로 드러내도록 바꿨다.
 - 공식 실행 경로는 계속 factory entrypoint(`uv run python -m final_edu --reload`)로 유지하고, module-level `app` 객체 추가는 기본 계약으로 채택하지 않았다.

@@ -80,7 +80,7 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Must Read When: mobile screenshot 경로, capture backend 정책 변경
 - `DBG-010` `active` Lane: `Web / Demo Agent`
   Tags: `templates`, `json`, `screenshots`, `visibility`
-  Related Files: `final_edu/templates/index.html`, `final_edu/templates/job.html`, `final_edu/templates/solutions.html`
+  Related Files: `final_edu/templates/index.html`, `final_edu/templates/job.html`
   Trigger Commands: 브라우저 렌더링, 스크린샷 검수
   Must Read When: 템플릿에 JSON payload 삽입/변경
 - `DBG-011` `archived` Lane: `Web / Demo Agent`
@@ -338,7 +338,7 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
 - Date: `2026-04-08`
 - Agent / Lane: `Web / Demo Agent`
 - Tags: `templates`, `json`, `screenshots`, `visibility`
-- Related Files: `final_edu/templates/index.html`, `final_edu/templates/job.html`, `final_edu/templates/solutions.html`
+- Related Files: `final_edu/templates/index.html`, `final_edu/templates/job.html`
 - Trigger Commands: 브라우저 렌더링, 스크린샷 검수
 - Must Read When: 템플릿에 JSON payload 삽입/변경
 - Symptom:

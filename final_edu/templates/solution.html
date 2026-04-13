@@ -618,7 +618,7 @@
             <div class="panel-header">
                 <div>
                     <h2 class="panel-title">최신 업계 동향 분석</h2>
-                    <p class="panel-subtitle">현재 커리큘럼과 2024-2025 IT 교육 시장 트렌드 비교</p>
+                    <p class="panel-subtitle">현재 커리큘럼과 최신 IT 교육 시장 트렌드 비교</p>
                 </div>
             </div>
             <div class="trend-list" id="trends-list"></div>
@@ -743,34 +743,32 @@
         topGapSections.forEach(({ topic, avg, bench, gap }) => {
             if (gap < 0.5) return;
             const dir = avg < bench ? '낮은' : '높은';
-            const note = avg < bench
-                ? `목표 대비 ${gap}%p 낮은 수준으로, 해당 섹션 비중을 늘려볼 수 있어요.`
-                : `목표 대비 ${gap}%p 높은 수준으로, 다른 섹션과의 균형을 살펴볼 만해요.`;
+            const note = gap >= 10 ? ' 점검이 필요해요.' : '';
             coverageInsights.push({
                 tag: '커버리지 현황',
-                text: `${topic} 섹션의 전체 강사 평균 커버리지는 ${avg}%로, 목표(${bench}%)보다 ${dir} 편이에요. ${note}`,
+                text: `${topic} 섹션의 전체 강사 평균 커버리지는 ${avg}%로, 목표(${bench}%)보다 ${gap}%p ${dir} 편이에요.${note}`,
                 highlightTopic: topic,
                 chartType: 'avg-vs-target',
                 group: 'coverage'
             });
         });
 
-        // ── 강사별 갭 현황 ────────────────────────────────────
+        // ── 강사별 표준커리큘럼 준수도 ────────────────────────
         const gapInsights = [];
         const instByGap = [...instructors].sort((a, b) => b.totalGapScore - a.totalGapScore);
         if (instByGap.length >= 2) {
             const top = instByGap[0], second = instByGap[1];
             gapInsights.push({
-                tag: '갭 순위',
-                text: `목표 커리큘럼과의 갭이 가장 큰 강사는 ${top.name}(누적 갭 ${top.totalGapScore}%p)이고, ${second.name}(${second.totalGapScore}%p)이 그 다음이에요.`,
+                tag: '표준커리큘럼 준수도',
+                text: `${top.name} 강사님, ${second.name} 강사님의 커리큘럼과 표준 커리큘럼의 차이가 각 ${top.totalGapScore}%p, ${second.totalGapScore}%p 정도로 나타나요.`,
                 highlightTopic: top.chartRows && top.chartRows[0] ? top.chartRows[0].section : null,
                 chartType: 'inst-gap-rank',
                 group: 'gap'
             });
         } else if (instByGap.length === 1) {
             gapInsights.push({
-                tag: '갭 현황',
-                text: `${instByGap[0].name}의 커리큘럼 목표 대비 누적 갭은 ${instByGap[0].totalGapScore}%p예요.`,
+                tag: '표준커리큘럼 준수도',
+                text: `${instByGap[0].name} 강사님의 커리큘럼과 표준 커리큘럼의 차이가 ${instByGap[0].totalGapScore}%p 정도로 나타나요.`,
                 highlightTopic: null,
                 chartType: 'inst-gap-rank',
                 group: 'gap'
@@ -780,13 +778,12 @@
         instByGap.slice(0, 2).forEach(inst => {
             const top = inst.chartRows && inst.chartRows[0];
             if (!top || top.gapScore < 3) return;
-            const dir = top.actualShare < top.benchmarkShare ? '적게' : '많이';
             const diff = top.actualShare < top.benchmarkShare
-                ? `목표보다 ${top.gapScore}%p 적게 다루고 있어요.`
-                : `목표보다 ${top.gapScore}%p 많이 다루고 있어요.`;
+                ? `표준(${top.benchmarkShare}%)보다 ${top.gapScore}%p 적게 다루고 있어요.`
+                : `표준(${top.benchmarkShare}%)보다 ${top.gapScore}%p 많이 다루고 있어요.`;
             gapInsights.push({
-                tag: '섹션 갭',
-                text: `${inst.name}은 ${top.section} 섹션(실제 ${top.actualShare}%, 목표 ${top.benchmarkShare}%)을 ${diff}`,
+                tag: '표준커리큘럼 준수도',
+                text: `${inst.name} 강사님은 ${top.section} 섹션을 ${diff}(실제 ${top.actualShare}%)`,
                 highlightTopic: top.section,
                 chartType: 'inst-section',
                 group: 'gap'
@@ -929,7 +926,7 @@
             html += `<div class="insight-section-title">전체 커버리지 현황</div>` + cardsHtml(coverageInsights);
         }
         if (gapInsights.length) {
-            html += `<div class="insight-section-title" style="margin-top:20px">강사별 갭 현황</div>` + cardsHtml(gapInsights);
+            html += `<div class="insight-section-title" style="margin-top:20px">강사별 표준커리큘럼 준수도</div>` + cardsHtml(gapInsights);
         }
         if (etcInsights.length) {
             html += `<div class="insight-section-title" style="margin-top:20px">기타 현황</div>` + cardsHtml(etcInsights);
@@ -1081,8 +1078,8 @@
         const topics = PAYLOAD.topics || [];
         const topTopic = topics[0] || '핵심 섹션';
         return [
-            { title: '실무 프로젝트 기반 학습 확대 추세', detail: '2024-2025년 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.', badge: '갭', comparison: '타 기관 평균 대비 프로젝트 비중이 낮은 편' },
-            { title: 'LLM·생성 AI 활용 실습 급증', detail: 'ChatGPT 등 생성 AI 도구를 실습에 직접 활용하는 커리큘럼이 2024년 대비 2.3배 증가했습니다.', badge: '신규', comparison: '업계 표준 대비 AI 도구 활용 섹션 부재' },
+            { title: '실무 프로젝트 기반 학습 확대 추세', detail: '최근 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.', badge: '갭', comparison: '타 기관 평균 대비 프로젝트 비중이 낮은 편' },
+            { title: 'LLM·생성 AI 활용 실습 급증', detail: 'ChatGPT 등 생성 AI 도구를 실습에 직접 활용하는 커리큘럼이 최근 크게 증가했습니다.', badge: '신규', comparison: '업계 표준 대비 AI 도구 활용 섹션 부재' },
             { title: `${topTopic} 심화 콘텐츠 수요 증가`, detail: `기술 요구사항 분석 결과 ${topTopic} 관련 직무 요구사항이 전년 대비 35% 증가했습니다.`, badge: '일치', comparison: '업계 수요와 방향 일치' }
         ];
     }

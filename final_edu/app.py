@@ -437,45 +437,6 @@ def create_app() -> FastAPI:
             _job_context(request=request, settings=settings, job=job.to_dict(), result=result),
         )
 
-    @app.get("/jobs/{job_id}/solutions", response_class=HTMLResponse, name="job_solutions")
-    async def job_solutions(request: Request, job_id: str) -> HTMLResponse:
-        job = get_job(job_id, settings)
-        if job is None:
-            raise HTTPException(status_code=404, detail="작업을 찾지 못했습니다.")
-
-        result = load_job_result(job, settings) if job.result_key else None
-        if result is None or str(job.status) != "completed":
-            return RedirectResponse(url=request.url_for("job_detail", job_id=job_id), status_code=303)
-
-        return templates.TemplateResponse(
-            request,
-            "solutions.html",
-            _solutions_context(request=request, settings=settings, job=job.to_dict(), result=result),
-        )
-
-    @app.get("/jiye", response_class=HTMLResponse)
-    async def jiye_page(request: Request) -> HTMLResponse:
-        recent_jobs = list_recent_jobs(limit=1, settings=settings)
-        job_record = recent_jobs[0] if recent_jobs else None
-        
-        result = None
-        if job_record and job_record.result_key:
-            result = load_job_result(job_record, settings)
-
-        solution_payload = _build_solution_payload(result)
-        review_payload = _build_review_payload(result)
-
-        return templates.TemplateResponse(
-            request,
-            "jiye.html",
-            {
-                "request": request,
-                "settings": settings,
-                "solution_payload": solution_payload,
-                "review_payload": review_payload,
-            },
-        )
-
     @app.get("/solution", response_class=HTMLResponse, name="solution_page")
     async def solution_page(request: Request, job_id: str | None = None) -> HTMLResponse:
         job = None
@@ -1535,17 +1496,7 @@ def _build_solution_payload(result: dict | None) -> dict:
 
     for section in sections:
         section_id = _read(section, "id")
-        shares = []
-        for instructor in instructors:
-            coverage = next(
-                (c for c in (_read(instructor, "section_coverages") or [])
-                 if _read(c, "section_id") == section_id),
-                None,
-            )
-            if coverage is None:
-                continue
-            shares.append(float(_read(coverage, "token_share") or 0.0) * 100)
-        average_share_by_section[section_id] = sum(shares) / len(shares) if shares else 0.0
+        average_share_by_section[section_id] = round(float(_read(section, "target_weight") or 0.0), 1)
 
     topics = [_read(s, "title") for s in sections]
     target = [round(float(_read(s, "target_weight") or average_share_by_section.get(_read(s, "id"), 0.0)), 1) for s in sections]

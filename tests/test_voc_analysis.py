@@ -7,13 +7,13 @@ import unittest
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
-from final_edu.analysis import analyze_submissions
-from final_edu.app import create_app
+from final_edu.analysis import _generate_voc_analysis, analyze_submissions
+from final_edu.app import _build_solution_payload, create_app
 from final_edu.config import get_settings
 from final_edu.extractors import TabularSheet, extract_file_asset
 from final_edu import utils as edu_utils
@@ -219,6 +219,67 @@ def _build_result_with_survey_xlsx_voc() -> dict:
 
 
 class VocAnalysisTests(unittest.TestCase):
+    def test_legacy_jiye_and_job_solutions_routes_are_not_exposed(self) -> None:
+        with tempfile.TemporaryDirectory() as runtime_dir, patch.dict(
+            os.environ,
+            {"FINAL_EDU_RUNTIME_DIR": runtime_dir},
+            clear=False,
+        ):
+            get_settings.cache_clear()
+            client = TestClient(create_app())
+            jiye_response = client.get("/jiye")
+            solutions_response = client.get("/jobs/job123/solutions")
+            get_settings.cache_clear()
+
+        self.assertEqual(jiye_response.status_code, 404)
+        self.assertEqual(solutions_response.status_code, 404)
+
+    def test_voc_llm_analysis_uses_zero_temperature(self) -> None:
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content='{"sentiment":{"positive":["친절"],"negative":["속도"]},"repeated_complaints":[],"next_suggestions":[]}'))]
+
+        with patch("final_edu.analysis.OpenAI") as openai_class:
+            openai_class.return_value.chat.completions.create.return_value = mock_response
+            settings = replace(get_settings(), openai_api_key="test-key")
+            _generate_voc_analysis(
+                instructor_name="윤막강",
+                segments=[MagicMock(text="설명이 친절했지만 속도가 빨랐어요.")],
+                settings=settings,
+            )
+
+        openai_class.return_value.chat.completions.create.assert_called_once()
+        self.assertEqual(
+            openai_class.return_value.chat.completions.create.call_args.kwargs["temperature"],
+            0,
+        )
+
+    def test_solution_payload_uses_target_weight_as_gap_benchmark(self) -> None:
+        payload = _build_solution_payload(
+            {
+                "sections": [
+                    {"id": "sec-a", "title": "섹션 A", "target_weight": 60.0},
+                    {"id": "sec-b", "title": "섹션 B", "target_weight": 40.0},
+                ],
+                "instructors": [
+                    {
+                        "name": "윤막강",
+                        "asset_count": 1,
+                        "warnings": [],
+                        "unmapped_share": 0.1,
+                        "section_coverages": [
+                            {"section_id": "sec-a", "section_title": "섹션 A", "token_share": 0.2},
+                            {"section_id": "sec-b", "section_title": "섹션 B", "token_share": 0.8},
+                        ],
+                    }
+                ],
+                "voc_summary": {"positive": ["친절"], "negative": []},
+            }
+        )
+
+        self.assertEqual(payload["target"], [60.0, 40.0])
+        self.assertEqual(payload["instructors"][0]["allRows"][0]["benchmarkShare"], 60.0)
+        self.assertEqual(payload["instructors"][0]["allRows"][1]["benchmarkShare"], 40.0)
+
     def test_kiwi_uses_configured_model_path_when_present(self) -> None:
         with patch.dict(
             os.environ,
@@ -425,6 +486,10 @@ class VocAnalysisTests(unittest.TestCase):
         self.assertEqual(solution_response.status_code, 200)
         self.assertIn("BQ1 평균 점수", solution_response.text)
         self.assertIn("강사의 설명이 이해하기 쉬웠다", solution_response.text)
+        self.assertIn("현재 커리큘럼과 최신 IT 교육 시장 트렌드 비교", solution_response.text)
+        self.assertIn("강사별 표준커리큘럼 준수도", solution_response.text)
+        self.assertIn("최근 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.", solution_response.text)
+        self.assertNotIn("2024-2025년 주요 IT 교육기관은 프로젝트 실습을 전체 과정의 40% 이상 배정하는 추세입니다.", solution_response.text)
 
 
 if __name__ == "__main__":
