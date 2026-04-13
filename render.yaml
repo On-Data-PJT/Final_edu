@@ -2,6 +2,7 @@ services:
   - type: web
     name: final-edu-web
     runtime: python
+    region: singapore
     plan: starter
     buildCommand: pip install uv && uv sync
     startCommand: uv run python -m final_edu --host 0.0.0.0 --port $PORT
@@ -71,6 +72,7 @@ services:
   - type: worker
     name: final-edu-worker
     runtime: python
+    region: singapore
     plan: standard
     buildCommand: pip install uv && uv sync
     startCommand: uv run python -m final_edu.worker
@@ -138,4 +140,7 @@ services:
         value: auto
   - type: keyvalue
     name: final-edu-kv
+    region: singapore
     plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction

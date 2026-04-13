@@ -228,6 +228,11 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   Related Files: `final_edu/analysis.py`, `final_edu/utils.py`, `tests/test_page2_dashboard.py`
   Trigger Commands: `git diff dev..origin/yeon_copy`, Page 2 word cloud filtering 강화 포팅, keyword ranking drift 조사
   Must Read When: word cloud keyword tokenizer, TF-IDF scope, stale branch feature cherry-pick/port, keyword ranking determinism 을 바꿀 때
+- `DBG-047` `active` Lane: `Lead / Integration`
+  Tags: `render`, `blueprint`, `keyvalue`, `ip-allow-list`, `deploy`
+  Related Files: `render.yaml`
+  Trigger Commands: Render Blueprint 생성, `render.yaml` validation, Key Value 배포 설정 변경
+  Must Read When: Render Blueprint 스키마, Key Value 배포, secret env 주입 방식을 바꿀 때
 - `DBG-041` `active` Lane: `Web / Demo Agent`
   Tags: `page1`, `course-preview`, `save-gating`, `editable-table`
   Related Files: `final_edu/static/app.js`, `final_edu/templates/index.html`, `.agent/AGENTS.md`, `.agent/Components.md`
@@ -761,6 +766,29 @@ preflight 목적은 전체 archive 를 정독하는 것이 아니라, 현재 작
   - 오래된 feature branch 에서 Page 2 wordcloud 관련 변경을 가져올 때는 branch 전체를 merge 하지 말고 최신 `dev`의 Page 2 payload/UI 계약과 충돌 여부를 먼저 확인할 것
   - wordcloud filtering 을 강화할 때 coverage/VOC/token counting 용 전역 tokenizer 를 함께 바꾸지 말고 keyword 전용 경로로 분리할 것
   - TF-IDF 기반 ranking 을 넣더라도 storage 전체 historical results 를 문서 집합으로 쓰지 말고 현재 analysis run 내부 corpus 기준으로 고정할 것
+
+### DBG-047 `active` Render Blueprint 의 Key Value 정의에 `ipAllowList`가 빠지면 schema validation 단계에서 배포가 막힘
+
+- Date: `2026-04-13`
+- Agent / Lane: `Lead / Integration`
+- Tags: `render`, `blueprint`, `keyvalue`, `ip-allow-list`, `deploy`
+- Related Files: `render.yaml`
+- Trigger Commands: Render Blueprint 생성, `render.yaml` validation, Key Value 배포 설정 변경
+- Must Read When: Render Blueprint 스키마, Key Value 배포, secret env 주입 방식을 바꿀 때
+- Symptom:
+  - `render.yaml`이 로컬 YAML 문법상 문제없어 보여도, Render Blueprint 생성 단계에서 Key Value service schema 오류로 배포가 시작되지 않았음
+  - 사용자는 `fromService.connectionString`나 `sync: false`를 의심하기 쉬웠지만 실제 blocker 는 Key Value 정의 자체였음
+- Root Cause:
+  - Render Blueprint 에서 `type: keyvalue`는 `ipAllowList` 필드를 요구하는데, 기존 `render.yaml`은 `name`과 `plan`만 선언하고 있었음
+  - 로컬 `.env`에 값이 있어도 Render 는 이를 자동으로 읽지 않으므로, secret env 주입 방식과 Blueprint schema 검증을 혼동하기 쉬웠음
+- Resolution:
+  - Key Value service 에 `ipAllowList: []`를 추가해 internal-only 접근으로 고정하고 Blueprint validation 을 통과시켰음
+  - web / worker / keyvalue 모두 `region: singapore`를 명시해 same-region private network 전제를 YAML에서 드러냈음
+  - queue 용도에 맞게 `maxmemoryPolicy: noeviction`를 추가했고, secret env 는 계속 `sync: false`로 두어 Render 대시보드 입력을 유지했음
+- Prevention Rule:
+  - Render Blueprint 에 Key Value 를 추가하거나 수정할 때는 `ipAllowList` 유무를 먼저 확인할 것
+  - web / worker / keyvalue 가 내부 연결을 전제로 하면 region 도 명시적으로 맞출 것
+  - `sync: false`를 local `.env` 자동동기화로 해석하지 말고, Render 대시보드에서 직접 값을 넣는 placeholder 로 이해할 것
 
 ## Archive
 

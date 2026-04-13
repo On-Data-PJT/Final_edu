@@ -296,6 +296,9 @@ Last Updated: 2026-04-13
 
 ### 2026-04-13
 
+- `render.yaml`에 Render Blueprint 검증용 `region`, Key Value `ipAllowList: []`, `maxmemoryPolicy: noeviction`를 추가해 Blueprint schema 오류 없이 web/worker/keyvalue를 같은 리전으로 생성할 수 있게 정리했다.
+- Render 대상 사용자 지연시간을 줄이기 위해 Blueprint의 `web`, `worker`, `keyvalue` 리전을 `singapore`로 통일했다.
+- Render secret env 는 저장소의 `.env`를 자동 sync 하지 않으므로, `OPENAI_API_KEY`, `FINAL_EDU_YOUTUBE_SCRAPERAPI_KEY`, `R2_*` 값은 계속 `sync: false` 상태로 Render 대시보드에서 직접 입력해야 한다.
 - `origin/jiye`의 오래된 브랜치를 merge 하지 않고, 현재 `dev` 위에 필요한 세 변경만 선별 이식했다.
 - VOC OpenAI text analysis 호출에 `temperature=0`을 추가해 강사별 자유의견 요약의 비결정성을 줄였다.
 - solution payload 의 gap benchmark 를 강사 평균 actual share 대신 과정 `target_weight` 기준으로 바꿔, `표준커리큘럼 준수도` 해석이 목표 비중과 직접 비교되도록 정리했다.
